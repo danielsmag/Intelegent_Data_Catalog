@@ -33,3 +33,19 @@ class TableNotFoundError(PolarisError):
         self.namespace: str = namespace
         self.table: str = table
         super().__init__(f"table not found: {catalog}.{namespace}.{table}")
+
+
+class QueryRejectedError(CatalogError):
+    """Raised when SQL is empty, too large, or not a read-only query."""
+
+
+class QueryNotFoundError(CatalogError):
+    """Raised when Spark cannot resolve a table named by a query."""
+
+
+class QueryTimeoutError(CatalogError):
+    """Raised when a Spark query exceeds the configured time limit."""
+
+
+class SparkQueryError(CatalogError):
+    """Raised when the Spark query service fails."""

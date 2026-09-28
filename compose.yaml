@@ -188,11 +188,14 @@ services:
     depends_on:
       polaris:
         condition: service_healthy
+      spark-sql:
+        condition: service_healthy
     ports:
       - "${CATALOG_API_PORT:-8090}:8090"
     environment:
       CATALOG_API__HOST: 0.0.0.0
       CATALOG_API__PORT: "8090"
+      CATALOG_QUERY__SPARK_URL: http://spark-sql:8091
       CATALOG_POLARIS__URI: http://polaris:8181
       CATALOG_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
       CATALOG_POLARIS__CATALOG: ${POLARIS_CATALOG_NAME:-catalog}
@@ -299,7 +302,7 @@ services:
       WEB_PORT: "3000"
 
   spark-lineage:
-    image: apache/spark:3.5.9-scala2.12-java17-python3-ubuntu
+    image: apache/spark:4.1.3-scala2.13-java17-python3-ubuntu
     container_name: intelegent-data-catalog-spark-lineage
     user: "0:0"
     init: true
@@ -315,11 +318,47 @@ services:
       POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
       MARQUEZ_URL: http://marquez:5000
       SEED_FORCE: ${SEED_FORCE:-}
-      ICEBERG_PACKAGES: org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,io.openlineage:openlineage-spark_2.12:1.53.0
+      ICEBERG_PACKAGES: org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0,io.openlineage:openlineage-spark_2.13:1.53.0
     volumes:
       - ./.local/polaris:/bootstrap:ro
       - ./docker/spark:/opt/seed:ro
       - spark_ivy:/tmp/ivy
+
+  spark-sql:
+    image: apache/spark:4.1.3-scala2.13-java17-python3-ubuntu
+    container_name: intelegent-data-catalog-spark-sql
+    user: "0:0"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      minio:
+        condition: service_healthy
+      polaris-setup:
+        condition: service_completed_successfully
+      spark-lineage:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "/opt/seed/query-server.sh"]
+    environment:
+      POLARIS_URI: http://polaris:8181/api/catalog
+      POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
+      QUERY_PORT: "8091"
+      ICEBERG_PACKAGES: org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0
+    volumes:
+      - ./.local/polaris:/bootstrap:ro
+      - ./docker/spark:/opt/seed:ro
+      - spark_ivy:/tmp/ivy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
 
 volumes:
   neo4j_data:

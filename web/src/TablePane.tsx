@@ -1,6 +1,8 @@
-import { useState, type ReactElement } from "react"
-import { formatTimestamp } from "./api"
-import type { ColumnDetail, DetailTab, TableDetail } from "./types"
+import { useEffect, useState, type ReactElement } from "react"
+import { Link } from "react-router-dom"
+import { errorMessage, fetchSample, formatTimestamp, isAbortError, queryPagePath } from "./api"
+import { ResultGrid } from "./ResultGrid"
+import type { ColumnDetail, DetailTab, QueryResult, TableDetail } from "./types"
 
 type TablePaneProps = {
   catalog: string | undefined
@@ -13,6 +15,45 @@ type TablePaneProps = {
 
 export function TablePane(props: TablePaneProps): ReactElement {
   const [tab, setTab] = useState<DetailTab>("overview")
+  const [sample, setSample] = useState<QueryResult | null>(null)
+  const [sampleError, setSampleError] = useState<string | null>(null)
+  const [sampleLoading, setSampleLoading] = useState<boolean>(false)
+  useEffect(() => {
+    if (
+      tab !== "sample" ||
+      props.catalog === undefined ||
+      props.namespace === undefined ||
+      props.table === undefined
+    ) {
+      return
+    }
+    const catalog: string = props.catalog
+    const namespace: string = props.namespace
+    const table: string = props.table
+    const controller: AbortController = new AbortController()
+    setSample(null)
+    setSampleError(null)
+    setSampleLoading(true)
+    void fetchSample(catalog, namespace, table, controller.signal)
+      .then((loaded: QueryResult) => {
+        setSample(loaded)
+      })
+      .catch((err: unknown) => {
+        if (isAbortError(err)) {
+          return
+        }
+        setSample(null)
+        setSampleError(errorMessage(err))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setSampleLoading(false)
+        }
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [tab, props.catalog, props.namespace, props.table])
   if (
     props.catalog === undefined ||
     props.namespace === undefined ||
@@ -36,6 +77,9 @@ export function TablePane(props: TablePaneProps): ReactElement {
         <div className="title-row">
           <h1>{props.table}</h1>
           <span className="badge">TABLE</span>
+          <Link className="button" to={queryPagePath(props.catalog, props.namespace, props.table)}>
+            Query
+          </Link>
         </div>
         <div className="tabs" role="tablist" aria-label="Table sections">
           <TabButton id="overview" current={tab} onSelect={setTab} label="Overview" />
@@ -46,7 +90,9 @@ export function TablePane(props: TablePaneProps): ReactElement {
         {props.error !== null ? <p className="error-text">{props.error}</p> : null}
         {props.detail !== null && tab === "overview" ? <Overview detail={props.detail} /> : null}
         {props.detail !== null && tab === "columns" ? <Columns columns={props.detail.columns} /> : null}
-        {tab === "sample" ? <p className="note">Row preview is not available yet.</p> : null}
+        {tab === "sample" ? (
+          <SamplePane loading={sampleLoading} error={sampleError} result={sample} />
+        ) : null}
       </div>
     </section>
   )
@@ -85,6 +131,23 @@ function Overview(props: { detail: TableDetail }): ReactElement {
       <dd>{formatTimestamp(props.detail.last_updated_ms)}</dd>
     </dl>
   )
+}
+
+function SamplePane(props: {
+  loading: boolean
+  error: string | null
+  result: QueryResult | null
+}): ReactElement {
+  if (props.loading) {
+    return <p className="note">Loading rows…</p>
+  }
+  if (props.error !== null) {
+    return <p className="error-text">{props.error}</p>
+  }
+  if (props.result === null) {
+    return <p className="note">Loading rows…</p>
+  }
+  return <ResultGrid result={props.result} />
 }
 
 function Columns(props: { columns: ColumnDetail[] }): ReactElement {

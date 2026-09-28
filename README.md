@@ -65,6 +65,10 @@ The UI container serves the built explorer and proxies `/api` to the catalog API
 
 The Spark seed must have run so `sales.customers`, `sales.orders`, and `sales.customer_spend` exist. For a host-only dev server instead of the UI container, run `cd web && npm install && npm run dev`. That Vite server proxies `/api` to `http://127.0.0.1:8090`.
 
+## Querying tables
+
+Sample Data and the Query view run Spark SQL. Compose service `spark-sql` keeps a Spark 4.1.3 session connected to Polaris. The catalog API accepts one read-only statement, then sends it to that session. The seed job uses the same Spark image and Iceberg 1.11. The first query after Spark starts takes longer while the session warms up. Later queries reuse that session.
+
 ## Checks
 
 ```bash

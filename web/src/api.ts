@@ -1,4 +1,4 @@
-import type { CatalogTree, TableDetail } from "./types"
+import type { CatalogTree, QueryResult, TableDetail } from "./types"
 
 export async function fetchTree(signal: AbortSignal): Promise<CatalogTree> {
   const response: Response = await fetch("/api/tree", { signal })
@@ -22,6 +22,41 @@ export async function fetchTable(
     throw new Error(detail)
   }
   return (await response.json()) as TableDetail
+}
+
+export async function fetchSample(
+  catalog: string,
+  namespace: string,
+  table: string,
+  signal: AbortSignal,
+): Promise<QueryResult> {
+  const path: string = `/api/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}/sample`
+  const response: Response = await fetch(path, { signal })
+  if (!response.ok) {
+    const detail: string = await readDetail(response)
+    throw new Error(detail)
+  }
+  return (await response.json()) as QueryResult
+}
+
+export async function runQuery(sql: string, signal: AbortSignal): Promise<QueryResult> {
+  const response: Response = await fetch("/api/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql }),
+    signal,
+  })
+  if (!response.ok) {
+    const detail: string = await readDetail(response)
+    throw new Error(detail)
+  }
+  return (await response.json()) as QueryResult
+}
+
+export function queryPagePath(catalog: string, namespace: string, table: string): string {
+  const sql: string = `SELECT * FROM ${catalog}.${namespace}.${table} LIMIT 100`
+  const params: URLSearchParams = new URLSearchParams({ sql })
+  return `/query?${params.toString()}`
 }
 
 export function tablePath(catalog: string, namespace: string, table: string): string {

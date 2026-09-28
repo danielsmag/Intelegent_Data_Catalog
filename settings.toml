@@ -18,6 +18,14 @@ log_file = "logs/catalog.log"
 interval_seconds = 30
 db_dir = "db"
 
+[query]
+spark_url = "http://127.0.0.1:8091"
+sample_limit = 100
+max_sample_limit = 500
+max_query_rows = 500
+max_sql_chars = 8000
+query_timeout_seconds = 60
+
 [polaris]
 uri = "http://localhost:8181"
 realm = "POLARIS"

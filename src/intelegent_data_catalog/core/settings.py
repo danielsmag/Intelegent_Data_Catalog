@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -65,6 +65,25 @@ class ApiSettings(BaseModel):
     port: int = Field(default=8090, ge=1, le=65535)
 
 
+class QuerySettings(BaseModel):
+    """Limits and the Spark SQL endpoint for table samples and queries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    spark_url: str = Field(default="http://127.0.0.1:8091", min_length=1)
+    sample_limit: int = Field(default=100, ge=1)
+    max_sample_limit: int = Field(default=500, ge=1)
+    max_query_rows: int = Field(default=500, ge=1)
+    max_sql_chars: int = Field(default=8000, ge=1)
+    query_timeout_seconds: float = Field(default=60.0, gt=0)
+
+    @model_validator(mode="after")
+    def _sample_limit_fits(self) -> QuerySettings:
+        if self.sample_limit > self.max_sample_limit:
+            raise ValueError("sample_limit cannot exceed max_sample_limit")
+        return self
+
+
 class PolarisSettings(BaseModel):
     """Apache Polaris REST endpoint and local client credentials."""
 
@@ -92,6 +111,7 @@ class AppSettings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     scan: ScanSettings = Field(default_factory=ScanSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
+    query: QuerySettings = Field(default_factory=QuerySettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
 
     @classmethod

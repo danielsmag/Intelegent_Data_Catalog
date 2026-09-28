@@ -88,3 +88,19 @@ export function GraphIcon(): ReactElement {
     </svg>
   )
 }
+
+export function QueryIcon(): ReactElement {
+  return (
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+      <path
+        d="M5 7h10M5 12h14M5 17h8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <path d="m15 15 4 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="13.5" cy="13.5" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  )
+}

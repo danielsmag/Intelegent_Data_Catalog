@@ -1,6 +1,6 @@
 """Catalog objects returned to the explorer."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 class ColumnDetail(BaseModel):
@@ -60,3 +60,22 @@ class TableDetail(BaseModel):
     snapshot_id: str | None
     last_updated_ms: int | None
     columns: list[ColumnDetail]
+
+
+class QueryColumn(BaseModel):
+    """One column in a query result."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    name: str
+    type_name: str = Field(alias="type")
+
+
+class QueryResult(BaseModel):
+    """Rows returned by a sample or a SQL query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    columns: list[QueryColumn]
+    rows: list[list[JsonValue]]
+    truncated: bool

@@ -34,3 +34,16 @@ export type TableDetail = {
 }
 
 export type DetailTab = "overview" | "columns" | "sample"
+
+export type QueryColumn = {
+  name: string
+  type: string
+}
+
+export type QueryCell = string | number | boolean | null | QueryCell[] | { [key: string]: QueryCell }
+
+export type QueryResult = {
+  columns: QueryColumn[]
+  rows: QueryCell[][]
+  truncated: boolean
+}

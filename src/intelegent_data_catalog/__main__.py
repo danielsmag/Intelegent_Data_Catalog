@@ -10,9 +10,8 @@ from intelegent_data_catalog.exceptions import CatalogError
 def main() -> None:
     """Start the scan scheduler using the interval from settings."""
     try:
-        container: Container = Container()
-        settings: AppSettings = container.settings()
-        logger: logging.Logger = container.logger()
+        settings: AppSettings = AppSettings()
+        logger: logging.Logger = logging.getLogger(__name__)
     except CatalogError as err:
         print(f"startup failed: {err}", file=sys.stderr)
         raise SystemExit(1) from err

@@ -1,12 +1,31 @@
 import type { ReactElement } from "react"
-import { CatalogIcon, GraphIcon, LineageIcon } from "./icons"
+import { Link, useLocation } from "react-router-dom"
+import { CatalogIcon, GraphIcon, LineageIcon, QueryIcon } from "./icons"
 
 export function ActivityBar(): ReactElement {
+  const path: string = useLocation().pathname
+  const onCatalog: boolean = path === "/" || path.startsWith("/catalog/")
+  const onQuery: boolean = path === "/query"
   return (
     <nav className="activity" aria-label="Views">
-      <button type="button" className="activity-button" aria-current="page" aria-label="Catalog" title="Catalog">
+      <Link
+        to="/"
+        className="activity-button"
+        aria-current={onCatalog ? "page" : undefined}
+        aria-label="Catalog"
+        title="Catalog"
+      >
         <CatalogIcon />
-      </button>
+      </Link>
+      <Link
+        to="/query"
+        className="activity-button"
+        aria-current={onQuery ? "page" : undefined}
+        aria-label="Query"
+        title="Query"
+      >
+        <QueryIcon />
+      </Link>
       <button
         type="button"
         className="activity-button"

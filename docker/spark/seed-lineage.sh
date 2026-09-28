@@ -23,6 +23,8 @@ set +a
 : "${MARQUEZ_URL:?}"
 : "${ICEBERG_PACKAGES:?}"
 
+catalog_name="${POLARIS_CATALOG_NAME}"
+
 python3 - <<'PY'
 import os
 import time
@@ -58,15 +60,15 @@ spark.ui.enabled=false
 spark.sql.shuffle.partitions=1
 spark.sql.ansi.enabled=true
 spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-spark.sql.defaultCatalog=polaris
-spark.sql.catalog.polaris=org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.polaris.type=rest
-spark.sql.catalog.polaris.uri=${POLARIS_URI}
-spark.sql.catalog.polaris.warehouse=${POLARIS_CATALOG_NAME}
-spark.sql.catalog.polaris.scope=PRINCIPAL_ROLE:ALL
-spark.sql.catalog.polaris.oauth2-server-uri=${POLARIS_TOKEN_URI}
-spark.sql.catalog.polaris.header.X-Iceberg-Access-Delegation=vended-credentials
-spark.sql.catalog.polaris.header.Polaris-Realm=${POLARIS_REALM}
+spark.sql.defaultCatalog=${catalog_name}
+spark.sql.catalog.${catalog_name}=org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.${catalog_name}.type=rest
+spark.sql.catalog.${catalog_name}.uri=${POLARIS_URI}
+spark.sql.catalog.${catalog_name}.warehouse=${POLARIS_CATALOG_NAME}
+spark.sql.catalog.${catalog_name}.scope=PRINCIPAL_ROLE:ALL
+spark.sql.catalog.${catalog_name}.oauth2-server-uri=${POLARIS_TOKEN_URI}
+spark.sql.catalog.${catalog_name}.header.X-Iceberg-Access-Delegation=vended-credentials
+spark.sql.catalog.${catalog_name}.header.Polaris-Realm=${POLARIS_REALM}
 spark.extraListeners=io.openlineage.spark.agent.OpenLineageSparkListener
 spark.openlineage.transport.type=http
 spark.openlineage.transport.url=${MARQUEZ_URL}
@@ -79,7 +81,7 @@ export PYSPARK_PYTHON=python3
 /opt/spark/bin/spark-submit \
   --packages "${ICEBERG_PACKAGES}" \
   --properties-file /tmp/spark-lineage.properties \
-  --conf "spark.sql.catalog.polaris.credential=${POLARIS_CLIENT_ID}:${POLARIS_CLIENT_SECRET}" \
+  --conf "spark.sql.catalog.${catalog_name}.credential=${POLARIS_CLIENT_ID}:${POLARIS_CLIENT_SECRET}" \
   /opt/seed/seed_lineage.py
 
 python3 /opt/seed/check_lineage.py

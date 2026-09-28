@@ -8,8 +8,11 @@ import httpx
 from dependency_injector import containers, providers
 
 from intelegent_data_catalog.catalog.polaris import PolarisClient
+from intelegent_data_catalog.catalog.query_service import QueryService
 from intelegent_data_catalog.catalog.reader import CatalogReader
 from intelegent_data_catalog.catalog.service import CatalogService
+from intelegent_data_catalog.catalog.spark_query import SparkQueryClient
+from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.logger import configure_logging
 from intelegent_data_catalog.core.settings import (
     AppSettings,
@@ -44,6 +47,39 @@ def build_catalog_service(reader: CatalogReader) -> CatalogService:
     return CatalogService(reader)
 
 
+def build_sql_guard(settings: AppSettings) -> SqlGuard:
+    """Build the read-only SQL guard from query limits."""
+    return SqlGuard(
+        default_catalog=settings.polaris.catalog,
+        max_rows=settings.query.max_query_rows,
+        max_sql_chars=settings.query.max_sql_chars,
+    )
+
+
+def build_spark_query_client(
+    settings: AppSettings,
+    http_client: httpx.Client,
+    logger: logging.Logger,
+) -> SparkQueryClient:
+    """Build the Spark SQL client from application settings."""
+    client_logger: logging.Logger = logger.getChild("spark")
+    return SparkQueryClient(
+        http_client=http_client,
+        spark_url=settings.query.spark_url,
+        timeout_seconds=settings.query.query_timeout_seconds,
+        logger=client_logger,
+    )
+
+
+def build_query_service(
+    spark: SparkQueryClient,
+    guard: SqlGuard,
+    settings: AppSettings,
+) -> QueryService:
+    """Build the query service around Spark and the SQL guard."""
+    return QueryService(spark=spark, guard=guard, settings=settings.query)
+
+
 class ApiContainer(containers.DeclarativeContainer):
     """Wires settings, logging, the Polaris client, and the catalog service."""
 
@@ -68,4 +104,20 @@ class ApiContainer(containers.DeclarativeContainer):
     catalog_service: providers.Singleton[CatalogService] = providers.Singleton(
         build_catalog_service,
         polaris_client,
+    )
+    sql_guard: providers.Singleton[SqlGuard] = providers.Singleton(
+        build_sql_guard,
+        settings,
+    )
+    spark_query_client: providers.Singleton[SparkQueryClient] = providers.Singleton(
+        build_spark_query_client,
+        settings,
+        http_client,
+        logger,
+    )
+    query_service: providers.Singleton[QueryService] = providers.Singleton(
+        build_query_service,
+        spark_query_client,
+        sql_guard,
+        settings,
     )
