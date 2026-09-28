@@ -1,5 +1,7 @@
 name: intelegent-data-catalog
 
+# Neo4j plus an Iceberg catalog (Apache Polaris) and OpenLineage (Marquez).
+
 services:
   neo4j:
     image: neo4j:5.26-community
@@ -10,8 +12,8 @@ services:
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
-      NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      HEALTHCHECK_USER: ${NEO4J_USER:-neo4j}
+      HEALTHCHECK_PASSWORD: ${NEO4J_PASSWORD:-password}
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 1G
       NEO4J_server_memory_pagecache_size: 512m
@@ -21,12 +23,307 @@ services:
       test:
         [
           "CMD-SHELL",
-          "cypher-shell -a bolt://localhost:7687 -u \"$$NEO4J_USER\" -p \"$$NEO4J_PASSWORD\" 'RETURN 1'",
+          "cypher-shell -a bolt://localhost:7687 -u \"$$HEALTHCHECK_USER\" -p \"$$HEALTHCHECK_PASSWORD\" 'RETURN 1'",
         ]
       interval: 10s
       timeout: 10s
       retries: 12
       start_period: 40s
 
+  minio:
+    image: elestio/minio:latest@sha256:25348a257f1ece1b192f25f6cd9854618fa86422ac87b494b5d4e629c556d4bd
+    container_name: intelegent-data-catalog-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-polaris_root}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-polaris_pass}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  bucket-setup:
+    image: amazon/aws-cli:2.36.8
+    container_name: intelegent-data-catalog-bucket-setup
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-polaris_root}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-polaris_pass}
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-west-2}
+      AWS_ENDPOINT_URL: http://minio:9000
+      WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+    volumes:
+      - ./docker/minio/create-bucket.sh:/create-bucket.sh:ro
+    entrypoint: ["/bin/sh", "/create-bucket.sh"]
+
+  polaris-db:
+    image: postgres:18.4
+    container_name: intelegent-data-catalog-polaris-db
+    restart: unless-stopped
+    shm_size: 128mb
+    environment:
+      POSTGRES_USER: ${POLARIS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${POLARIS_DB_NAME:-POLARIS}
+      POSTGRES_INITDB_ARGS: "--encoding UTF8 --data-checksums"
+    volumes:
+      - polaris_db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  polaris-bootstrap:
+    image: apache/polaris-admin-tool:1.7.0
+    container_name: intelegent-data-catalog-polaris-bootstrap
+    restart: "no"
+    depends_on:
+      polaris-db:
+        condition: service_healthy
+    environment:
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_DATABASE_TYPE: postgresql
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/${POLARIS_DB_NAME:-POLARIS}
+      QUARKUS_DATASOURCE_USERNAME: ${POLARIS_DB_USER:-postgres}
+      QUARKUS_DATASOURCE_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
+    command:
+      - bootstrap
+      - --realm=${POLARIS_REALM:-POLARIS}
+      - --credential=${POLARIS_REALM:-POLARIS},${POLARIS_ROOT_CLIENT_ID:-root},${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+
+  polaris:
+    image: apache/polaris:1.7.0
+    container_name: intelegent-data-catalog-polaris
+    restart: unless-stopped
+    depends_on:
+      polaris-db:
+        condition: service_healthy
+      polaris-bootstrap:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      bucket-setup:
+        condition: service_completed_successfully
+    ports:
+      - "${POLARIS_HTTP_PORT:-8181}:8181"
+      - "${POLARIS_MGMT_PORT:-8182}:8182"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-polaris_root}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-polaris_pass}
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_DATABASE_TYPE: postgresql
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_MAX_RETRIES: 5
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_INITIAL_DELAY_IN_MS: 100
+      POLARIS_PERSISTENCE_RELATIONAL_JDBC_MAX_DURATION_IN_MS: 5000
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/${POLARIS_DB_NAME:-POLARIS}
+      QUARKUS_DATASOURCE_USERNAME: ${POLARIS_DB_USER:-postgres}
+      QUARKUS_DATASOURCE_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
+      POLARIS_REALM_CONTEXT_REALMS: ${POLARIS_REALM:-POLARIS}
+      polaris.realm-context.realms: ${POLARIS_REALM:-POLARIS}
+      QUARKUS_OTEL_SDK_DISABLED: "true"
+      QUARKUS_HTTP_CORS_ENABLED: "true"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:${POLARIS_UI_PORT:-8080},http://127.0.0.1:${POLARIS_UI_PORT:-8080}
+      QUARKUS_HTTP_CORS_METHODS: GET,POST,PUT,DELETE,PATCH,OPTIONS
+      QUARKUS_HTTP_CORS_HEADERS: Content-Type,Authorization,Polaris-Realm,X-Request-ID
+      QUARKUS_HTTP_CORS_EXPOSED_HEADERS: "*"
+      QUARKUS_HTTP_CORS_ACCESS_CONTROL_ALLOW_CREDENTIALS: "true"
+      QUARKUS_HTTP_CORS_ACCESS_CONTROL_MAX_AGE: PT10M
+      polaris.features."ALLOW_INSECURE_STORAGE_TYPES": "true"
+      polaris.features."SUPPORTED_CATALOG_STORAGE_TYPES": '["FILE","S3","GCS","AZURE"]'
+      polaris.readiness.ignore-severe-issues: "true"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8182/q/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+
+  polaris-setup:
+    image: alpine/curl:8.21.0
+    container_name: intelegent-data-catalog-polaris-setup
+    restart: "no"
+    depends_on:
+      polaris:
+        condition: service_healthy
+    environment:
+      POLARIS_REALM: ${POLARIS_REALM:-POLARIS}
+      POLARIS_ROOT_CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
+      POLARIS_ROOT_CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+      POLARIS_CATALOG_NAME: ${POLARIS_CATALOG_NAME:-catalog}
+      WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT_INTERNAL: http://minio:9000
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-catalog}
+      POLARIS_DB_USER: ${POLARIS_DB_USER:-postgres}
+      POLARIS_DB_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
+      POLARIS_DB_NAME: ${POLARIS_DB_NAME:-POLARIS}
+    volumes:
+      - ./.local/polaris:/bootstrap
+      - ./docker/polaris/setup.sh:/setup.sh:ro
+    entrypoint: ["/bin/sh", "/setup.sh"]
+
+  catalog-api:
+    build:
+      context: .
+      dockerfile: docker/catalog-api/Dockerfile
+    image: intelegent-data-catalog-api:local
+    container_name: intelegent-data-catalog-api
+    restart: unless-stopped
+    depends_on:
+      polaris:
+        condition: service_healthy
+    ports:
+      - "${CATALOG_API_PORT:-8090}:8090"
+    environment:
+      CATALOG_API__HOST: 0.0.0.0
+      CATALOG_API__PORT: "8090"
+      CATALOG_POLARIS__URI: http://polaris:8181
+      CATALOG_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
+      CATALOG_POLARIS__CATALOG: ${POLARIS_CATALOG_NAME:-catalog}
+      CATALOG_POLARIS__CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
+      CATALOG_POLARIS__CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/app/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  catalog-ui:
+    build:
+      context: .
+      dockerfile: docker/catalog-ui/Dockerfile
+    image: intelegent-data-catalog-ui:local
+    container_name: intelegent-data-catalog-ui
+    restart: unless-stopped
+    depends_on:
+      catalog-api:
+        condition: service_healthy
+    ports:
+      - "${CATALOG_UI_PORT:-5173}:80"
+
+  polaris-console:
+    image: intelegent-data-catalog-polaris-console:3edb60fc
+    build:
+      context: https://github.com/apache/polaris-tools.git#3edb60fcb591e5f0f9f2fbf79ff0f457baae500e:console
+      dockerfile: docker/Dockerfile
+    container_name: intelegent-data-catalog-polaris-console
+    restart: unless-stopped
+    depends_on:
+      polaris:
+        condition: service_healthy
+    ports:
+      - "${POLARIS_UI_PORT:-8080}:8080"
+    environment:
+      VITE_POLARIS_API_URL: http://localhost:${POLARIS_HTTP_PORT:-8181}
+      VITE_OAUTH_TOKEN_URL: http://localhost:${POLARIS_HTTP_PORT:-8181}/api/catalog/v1/oauth/tokens
+      VITE_POLARIS_REALM: ${POLARIS_REALM:-POLARIS}
+      VITE_POLARIS_PRINCIPAL_SCOPE: PRINCIPAL_ROLE:ALL
+      VITE_POLARIS_REALM_HEADER_NAME: Polaris-Realm
+
+  marquez-db:
+    image: postgres:16
+    container_name: intelegent-data-catalog-marquez-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      POSTGRES_DB: marquez
+    volumes:
+      - marquez_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marquez -d marquez"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  marquez:
+    image: marquezproject/marquez:0.51.1
+    container_name: intelegent-data-catalog-marquez
+    restart: unless-stopped
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    ports:
+      - "${MARQUEZ_API_PORT:-5050}:5000"
+      - "${MARQUEZ_ADMIN_PORT:-5051}:5001"
+    environment:
+      MARQUEZ_PORT: "5000"
+      MARQUEZ_ADMIN_PORT: "5001"
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: "5432"
+      SEARCH_ENABLED: "false"
+      JAVA_OPTS: "-Xms128m -Xmx512m"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/5000"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.51.1
+    container_name: intelegent-data-catalog-marquez-web
+    restart: unless-stopped
+    depends_on:
+      marquez:
+        condition: service_healthy
+    ports:
+      - "${MARQUEZ_WEB_PORT:-3000}:3000"
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: "5000"
+      WEB_PORT: "3000"
+
+  spark-lineage:
+    image: apache/spark:3.5.9-scala2.12-java17-python3-ubuntu
+    container_name: intelegent-data-catalog-spark-lineage
+    user: "0:0"
+    init: true
+    restart: "no"
+    depends_on:
+      polaris-setup:
+        condition: service_completed_successfully
+      marquez:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/opt/seed/seed-lineage.sh"]
+    environment:
+      POLARIS_URI: http://polaris:8181/api/catalog
+      POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
+      MARQUEZ_URL: http://marquez:5000
+      SEED_FORCE: ${SEED_FORCE:-}
+      ICEBERG_PACKAGES: org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.1,org.apache.iceberg:iceberg-aws-bundle:1.10.1,io.openlineage:openlineage-spark_2.12:1.53.0
+    volumes:
+      - ./.local/polaris:/bootstrap:ro
+      - ./docker/spark:/opt/seed:ro
+      - spark_ivy:/tmp/ivy
+
 volumes:
   neo4j_data:
+  minio_data:
+  polaris_db:
+  marquez_db:
+  spark_ivy:

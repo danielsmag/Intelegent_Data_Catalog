@@ -1,14 +1,26 @@
 """CLI entrypoint."""
 
-from intelegent_data_catalog.core.container import Container
+import logging
+import sys
+
 from intelegent_data_catalog.core.settings import AppSettings
+from intelegent_data_catalog.exceptions import CatalogError
 
 
 def main() -> None:
-    """Load settings and print the application name."""
-    container: Container = Container()
-    settings: AppSettings = container.settings()
-    print(settings.app_name)
+    """Start the scan scheduler using the interval from settings."""
+    try:
+        container: Container = Container()
+        settings: AppSettings = container.settings()
+        logger: logging.Logger = container.logger()
+    except CatalogError as err:
+        print(f"startup failed: {err}", file=sys.stderr)
+        raise SystemExit(1) from err
+    logger.info("starting app=%s", settings.app.name)
+    try:
+        pass
+    except KeyboardInterrupt:
+        logger.info("interrupted")
 
 
 if __name__ == "__main__":

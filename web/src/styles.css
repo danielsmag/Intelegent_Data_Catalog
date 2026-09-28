@@ -1,0 +1,390 @@
+:root {
+  color-scheme: dark;
+  --bg: #1f1f1f;
+  --sidebar: #181818;
+  --border: #2b2b2b;
+  --input: #313131;
+  --text: #cccccc;
+  --text-strong: #e7e7e7;
+  --muted: #9d9d9d;
+  --accent: #0078d4;
+  --accent-hover: #026ec1;
+  --selection: #04395e;
+  --hover: #2a2d2e;
+  --type: #4ec9b0;
+  --badge-text: #9cdcfe;
+  --font: "Segoe WPC", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Code", "Segoe UI Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.activity {
+  width: 48px;
+  flex: none;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.activity-button {
+  width: 48px;
+  height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  position: relative;
+  cursor: pointer;
+}
+
+.activity-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.activity-button[aria-current="page"] {
+  color: var(--text-strong);
+}
+
+.activity-button[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent);
+}
+
+.activity-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.activity-button:focus-visible,
+.chevron:focus-visible,
+.tab:focus-visible,
+.button:focus-visible,
+.tree-row:focus-visible,
+.search:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.sidebar {
+  width: 300px;
+  flex: none;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-title {
+  padding: 10px 16px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.search {
+  margin: 0 12px 8px;
+  background: var(--input);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.search::placeholder {
+  color: var(--muted);
+}
+
+.tree {
+  overflow: auto;
+  padding-bottom: 12px;
+}
+
+.tree-status {
+  margin: 8px 16px;
+  color: var(--muted);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-right: 8px;
+  color: var(--text);
+  text-decoration: none;
+  border: 0;
+  background: transparent;
+  width: 100%;
+}
+
+a.tree-row {
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--hover);
+}
+
+.tree-row[aria-current="page"] {
+  background: var(--selection);
+  color: #ffffff;
+}
+
+.depth-catalog {
+  padding-left: 4px;
+}
+
+.depth-schema {
+  padding-left: 18px;
+}
+
+.depth-table {
+  padding-left: 40px;
+}
+
+.chevron,
+.chevron-spacer {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.main-scroll {
+  overflow: auto;
+  padding: 20px 24px 40px;
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty h1 {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.crumb {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title-row h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--selection);
+  color: var(--badge-text);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 8px 12px;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.tab.selected {
+  color: var(--text-strong);
+  border-bottom-color: var(--accent);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0;
+  max-width: 880px;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mono,
+.type {
+  font-family: var(--mono);
+}
+
+.type {
+  color: var(--type);
+}
+
+.columns {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.columns th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.columns td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.columns tbody tr:hover td {
+  background: var(--hover);
+}
+
+.comment {
+  color: var(--muted);
+}
+
+.note,
+.error-text {
+  margin: 0;
+}
+
+.error-text {
+  color: #f48771;
+}
+
+.button {
+  background: var(--accent);
+  color: #ffffff;
+  border: 0;
+  border-radius: 2px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--accent-hover);
+}
+
+.status {
+  height: 22px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 12px;
+  background: var(--sidebar);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

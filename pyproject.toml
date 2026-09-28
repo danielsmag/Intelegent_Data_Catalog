@@ -6,12 +6,19 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "dependency-injector>=4.49.1",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "kagglehub>=1.0.2",
+    "neo4j>=6.3.1",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
+    "pyiceberg[pyarrow,sql-sqlite]>=0.12.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
 intelegent-data-catalog = "intelegent_data_catalog.__main__:main"
+intelegent-data-catalog-api = "intelegent_data_catalog.api.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -29,14 +36,14 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 filterwarnings = ["error"]
 
 [tool.ruff]
 target-version = "py314"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]

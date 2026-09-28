@@ -1,0 +1,27 @@
+# Application settings. Environment variables with the CATALOG_ prefix override
+# this file. Nested keys use a double underscore: CATALOG_SCAN__INTERVAL_SECONDS.
+
+[app]
+name = "intelegent-data-catalog"
+debug = false
+
+[logging]
+level = "INFO"
+format = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
+debug_format = "%(asctime)s %(levelname)-8s [%(name)s] %(filename)s:%(lineno)d %(message)s"
+date_format = "%Y-%m-%d %H:%M:%S"
+log_to_console = true
+log_to_file = false
+log_file = "logs/catalog.log"
+
+[scan]
+interval_seconds = 30
+db_dir = "db"
+
+[polaris]
+uri = "http://localhost:8181"
+realm = "POLARIS"
+catalog = "catalog"
+client_id = "root"
+client_secret = "s3cr3t"
+timeout_seconds = 30
