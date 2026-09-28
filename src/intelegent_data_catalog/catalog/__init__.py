@@ -1,1 +1,1 @@
-"""Catalog metadata read from Polaris."""
+"""Catalog metadata, services, and repositories."""

@@ -1,7 +1,7 @@
 import type { CatalogTree, QueryResult, TableDetail } from "./types"
 
 export async function fetchTree(signal: AbortSignal): Promise<CatalogTree> {
-  const response: Response = await fetch("/api/tree", { signal })
+  const response: Response = await fetch("/api/v1/tree", { signal })
   if (!response.ok) {
     const detail: string = await readDetail(response)
     throw new Error(detail)
@@ -15,7 +15,7 @@ export async function fetchTable(
   table: string,
   signal: AbortSignal,
 ): Promise<TableDetail> {
-  const path: string = `/api/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
+  const path: string = `/api/v1/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
   const response: Response = await fetch(path, { signal })
   if (!response.ok) {
     const detail: string = await readDetail(response)
@@ -30,7 +30,7 @@ export async function fetchSample(
   table: string,
   signal: AbortSignal,
 ): Promise<QueryResult> {
-  const path: string = `/api/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}/sample`
+  const path: string = `/api/v1/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}/sample`
   const response: Response = await fetch(path, { signal })
   if (!response.ok) {
     const detail: string = await readDetail(response)
@@ -40,7 +40,7 @@ export async function fetchSample(
 }
 
 export async function runQuery(sql: string, signal: AbortSignal): Promise<QueryResult> {
-  const response: Response = await fetch("/api/query", {
+  const response: Response = await fetch("/api/v1/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sql }),

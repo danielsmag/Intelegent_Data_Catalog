@@ -1,7 +1,7 @@
 """SQL guard and query-service tests. Spark is not started."""
 
 from intelegent_data_catalog.catalog.models import QueryColumn, QueryResult
-from intelegent_data_catalog.catalog.query_service import QueryService
+from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.settings import QuerySettings
 from intelegent_data_catalog.exceptions import QueryRejectedError

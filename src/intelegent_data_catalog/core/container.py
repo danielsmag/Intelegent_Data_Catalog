@@ -1,4 +1,4 @@
-"""API composition root."""
+"""Application composition container."""
 
 import logging
 from collections.abc import Iterator
@@ -7,11 +7,11 @@ from pathlib import Path
 import httpx
 from dependency_injector import containers, providers
 
-from intelegent_data_catalog.catalog.polaris import PolarisClient
-from intelegent_data_catalog.catalog.query_service import QueryService
-from intelegent_data_catalog.catalog.reader import CatalogReader
-from intelegent_data_catalog.catalog.service import CatalogService
-from intelegent_data_catalog.catalog.spark_query import SparkQueryClient
+from intelegent_data_catalog.catalog.repositories.catalog import CatalogRepository
+from intelegent_data_catalog.catalog.repositories.polaris import PolarisClient
+from intelegent_data_catalog.catalog.repositories.spark_query import SparkQueryClient
+from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
+from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.logger import configure_logging
 from intelegent_data_catalog.core.settings import (
@@ -42,9 +42,9 @@ def build_polaris_client(
     )
 
 
-def build_catalog_service(reader: CatalogReader) -> CatalogService:
-    """Build the catalog service around a metadata reader."""
-    return CatalogService(reader)
+def build_catalog_service(repository: CatalogRepository) -> CatalogService:
+    """Build the catalog service around a metadata repository."""
+    return CatalogService(repository)
 
 
 def build_sql_guard(settings: AppSettings) -> SqlGuard:
@@ -80,8 +80,8 @@ def build_query_service(
     return QueryService(spark=spark, guard=guard, settings=settings.query)
 
 
-class ApiContainer(containers.DeclarativeContainer):
-    """Wires settings, logging, the Polaris client, and the catalog service."""
+class AppContainer(containers.DeclarativeContainer):
+    """Wires settings, logging, Polaris, Spark, and the catalog services."""
 
     settings: providers.Singleton[AppSettings] = providers.Singleton(load_settings)
     project_root: providers.Singleton[Path] = providers.Singleton(resolve_project_root)

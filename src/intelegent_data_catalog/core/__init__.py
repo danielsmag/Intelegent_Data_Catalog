@@ -1,1 +1,1 @@
-"""Application wiring: settings and the composition root."""
+"""Application wiring: settings, logging, and the composition container."""

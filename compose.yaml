@@ -207,7 +207,7 @@ services:
           "CMD",
           "/app/.venv/bin/python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/health')",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/v1/health')",
         ]
       interval: 5s
       timeout: 5s

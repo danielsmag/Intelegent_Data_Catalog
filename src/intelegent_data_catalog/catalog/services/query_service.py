@@ -1,7 +1,7 @@
 """Runs sample scans and read-only SQL through Spark."""
 
 from intelegent_data_catalog.catalog.models import QueryResult
-from intelegent_data_catalog.catalog.spark_query import SparkSqlClient
+from intelegent_data_catalog.catalog.repositories.spark_query import SparkSqlClient
 from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.settings import QuerySettings
 from intelegent_data_catalog.exceptions import QueryRejectedError

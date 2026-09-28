@@ -7,8 +7,8 @@ from urllib.parse import parse_qs
 import httpx
 
 from intelegent_data_catalog.catalog.models import CatalogTree, TableDetail
-from intelegent_data_catalog.catalog.polaris import PolarisClient, encode_namespace
-from intelegent_data_catalog.catalog.service import CatalogService
+from intelegent_data_catalog.catalog.repositories.polaris import PolarisClient, encode_namespace
+from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
 from intelegent_data_catalog.core.settings import AppSettings, PolarisSettings, load_settings
 from intelegent_data_catalog.exceptions import PolarisError, TableNotFoundError
 

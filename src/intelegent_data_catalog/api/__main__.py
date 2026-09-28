@@ -5,15 +5,15 @@ import sys
 import uvicorn
 from fastapi import FastAPI
 
-from intelegent_data_catalog.api.app import create_app
-from intelegent_data_catalog.api.container import ApiContainer
+from intelegent_data_catalog.bootstrap import create_app
+from intelegent_data_catalog.core.container import AppContainer
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import CatalogError
 
 
 def main() -> None:
     """Serve the catalog API."""
-    container: ApiContainer = ApiContainer()
+    container: AppContainer = AppContainer()
     try:
         settings: AppSettings = container.settings()
         app: FastAPI = create_app(container)

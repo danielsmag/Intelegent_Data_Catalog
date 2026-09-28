@@ -61,7 +61,7 @@ SEED_FORCE=true docker compose up -d --force-recreate spark-lineage
 
 ## Catalog UI
 
-The UI container serves the built explorer and proxies `/api` to the catalog API. That API calls Polaris at `http://polaris:8181`. `CATALOG_UI_PORT` and `CATALOG_API_PORT` change the published ports. Inside the API container, `CATALOG_API__HOST` is `0.0.0.0` and `CATALOG_POLARIS__*` points at the Compose network.
+The UI container serves the built explorer and proxies `/api` to the catalog API. Catalog routes live under `/api/v1`. That API calls Polaris at `http://polaris:8181`. `CATALOG_UI_PORT` and `CATALOG_API_PORT` change the published ports. Inside the API container, `CATALOG_API__HOST` is `0.0.0.0` and `CATALOG_POLARIS__*` points at the Compose network.
 
 The Spark seed must have run so `sales.customers`, `sales.orders`, and `sales.customer_spend` exist. For a host-only dev server instead of the UI container, run `cd web && npm install && npm run dev`. That Vite server proxies `/api` to `http://127.0.0.1:8090`.
 

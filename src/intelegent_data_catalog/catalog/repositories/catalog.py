@@ -5,7 +5,7 @@ from typing import Protocol
 from intelegent_data_catalog.catalog.models import TableDetail
 
 
-class CatalogReader(Protocol):
+class CatalogRepository(Protocol):
     """Reads catalogs, schemas, and tables."""
 
     def list_catalog_names(self) -> list[str]:

@@ -7,26 +7,26 @@ import httpx
 from dependency_injector import providers
 from fastapi import FastAPI
 
-from intelegent_data_catalog.api.app import create_app
-from intelegent_data_catalog.api.container import ApiContainer
+from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.catalog.models import QueryColumn, QueryResult
-from intelegent_data_catalog.catalog.polaris import PolarisClient
+from intelegent_data_catalog.catalog.repositories.polaris import PolarisClient
+from intelegent_data_catalog.core.container import AppContainer
 from intelegent_data_catalog.core.settings import PolarisSettings
 from intelegent_data_catalog.exceptions import QueryNotFoundError
 from tests.test_polaris_client import _route
 
 
 def test_health_does_not_call_polaris() -> None:
-    """GET /api/health stays up without a Polaris call."""
+    """GET /api/v1/health stays up without a Polaris call."""
     app: FastAPI = create_app()
-    response: httpx.Response = asyncio.run(_request(app, "GET", "/api/health"))
+    response: httpx.Response = asyncio.run(_request(app, "GET", "/api/v1/health"))
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
 def test_tree_route_returns_sales_tables() -> None:
-    """GET /api/tree returns the mocked sales namespace."""
-    response: httpx.Response = _get("/api/tree")
+    """GET /api/v1/tree returns the mocked sales namespace."""
+    response: httpx.Response = _get("/api/v1/tree")
     assert response.status_code == 200
     body: dict[str, object] = response.json()
     catalogs: object = body["catalogs"]
@@ -46,8 +46,8 @@ def test_tree_route_returns_sales_tables() -> None:
 
 
 def test_table_route_returns_customer_columns() -> None:
-    """GET /api/tables returns customer columns from Iceberg metadata."""
-    response: httpx.Response = _get("/api/tables/catalog/sales/customers")
+    """GET /api/v1/tables returns customer columns from Iceberg metadata."""
+    response: httpx.Response = _get("/api/v1/tables/catalog/sales/customers")
     assert response.status_code == 200
     body: dict[str, object] = response.json()
     assert body["snapshot_id"] == "8123456789012345678"
@@ -63,7 +63,7 @@ def test_table_route_returns_customer_columns() -> None:
 
 def test_missing_table_route_returns_404() -> None:
     """A missing table is a 404, not a Polaris outage."""
-    response: httpx.Response = _get("/api/tables/catalog/sales/missing")
+    response: httpx.Response = _get("/api/v1/tables/catalog/sales/missing")
     assert response.status_code == 404
     body: dict[str, object] = response.json()
     assert body["detail"] == "table not found: catalog.sales.missing"
@@ -72,7 +72,10 @@ def test_missing_table_route_returns_404() -> None:
 def test_sample_route_asks_spark_for_a_limited_select() -> None:
     """GET sample runs a guarded select through the Spark client."""
     spark: _RecordingSpark = _RecordingSpark([[1]])
-    response: httpx.Response = _query_get("/api/tables/catalog/sales/customers/sample", spark)
+    response: httpx.Response = _query_get(
+        "/api/v1/tables/catalog/sales/customers/sample",
+        spark,
+    )
     assert response.status_code == 200
     body: dict[str, object] = response.json()
     assert body["truncated"] is False
@@ -82,7 +85,7 @@ def test_sample_route_asks_spark_for_a_limited_select() -> None:
 
 
 def test_query_route_rejects_a_drop_before_spark() -> None:
-    """POST /api/query does not send a drop to Spark."""
+    """POST /api/v1/query does not send a drop to Spark."""
     spark: _RecordingSpark = _RecordingSpark([])
     response: httpx.Response = _query_post(spark, {"sql": "DROP TABLE sales.customers"})
     assert response.status_code == 400
@@ -90,7 +93,7 @@ def test_query_route_rejects_a_drop_before_spark() -> None:
 
 
 def test_query_route_returns_spark_rows() -> None:
-    """POST /api/query returns the Spark frame for a select."""
+    """POST /api/v1/query returns the Spark frame for a select."""
     spark: _RecordingSpark = _RecordingSpark([["Ada"]])
     response: httpx.Response = _query_post(
         spark,
@@ -138,7 +141,7 @@ def _get(path: str) -> httpx.Response:
         http_client=http,
         logger=logging.getLogger("test.api"),
     )
-    container: ApiContainer = ApiContainer()
+    container: AppContainer = AppContainer()
     container.polaris_client.override(providers.Object(reader))
     app: FastAPI = create_app(container)
     try:
@@ -148,17 +151,17 @@ def _get(path: str) -> httpx.Response:
 
 
 def _query_get(path: str, spark: _RecordingSpark) -> httpx.Response:
-    container: ApiContainer = ApiContainer()
+    container: AppContainer = AppContainer()
     container.spark_query_client.override(providers.Object(spark))
     app: FastAPI = create_app(container)
     return asyncio.run(_request(app, "GET", path))
 
 
 def _query_post(spark: _RecordingSpark, body: dict[str, str]) -> httpx.Response:
-    container: ApiContainer = ApiContainer()
+    container: AppContainer = AppContainer()
     container.spark_query_client.override(providers.Object(spark))
     app: FastAPI = create_app(container)
-    return asyncio.run(_request(app, "POST", "/api/query", body))
+    return asyncio.run(_request(app, "POST", "/api/v1/query", body))
 
 
 async def _request(
