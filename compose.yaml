@@ -178,6 +178,76 @@ services:
       - ./docker/polaris/setup.sh:/setup.sh:ro
     entrypoint: ["/bin/sh", "/setup.sh"]
 
+  catalog-db:
+    image: postgres:16
+    container_name: intelegent-data-catalog-catalog-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CATALOG_DB_USER:-catalog}
+      POSTGRES_PASSWORD: ${CATALOG_DB_PASSWORD:-catalog}
+      POSTGRES_DB: ${CATALOG_DB_NAME:-catalog}
+    ports:
+      - "${CATALOG_DB_PORT:-5433}:5432"
+    volumes:
+      - catalog_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  source-db:
+    image: postgres:16
+    container_name: intelegent-data-catalog-source-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SOURCE_DB_USER:-sales}
+      POSTGRES_PASSWORD: ${SOURCE_DB_PASSWORD:-sales}
+      POSTGRES_DB: ${SOURCE_DB_NAME:-sales}
+    ports:
+      - "${SOURCE_DB_PORT:-5434}:5432"
+    volumes:
+      - ./docker/source-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - source_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  trino:
+    image: trinodb/trino:476
+    container_name: intelegent-data-catalog-trino
+    restart: unless-stopped
+    depends_on:
+      polaris-setup:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      source-db:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/opt/trino/start.sh"]
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-polaris_root}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-polaris_pass}
+      SOURCE_DB_USER: ${SOURCE_DB_USER:-sales}
+      SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:-sales}
+      SOURCE_DB_NAME: ${SOURCE_DB_NAME:-sales}
+    volumes:
+      - ./.local/polaris:/bootstrap:ro
+      - ./docker/trino/start.sh:/opt/trino/start.sh:ro
+    ports:
+      - "${TRINO_PORT:-8088}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/lib/trino/bin/health-check"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
   catalog-api:
     build:
       context: .
@@ -186,9 +256,15 @@ services:
     container_name: intelegent-data-catalog-api
     restart: unless-stopped
     depends_on:
+      catalog-db:
+        condition: service_healthy
       polaris:
         condition: service_healthy
       spark-sql:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      marquez:
         condition: service_healthy
     ports:
       - "${CATALOG_API_PORT:-8090}:8090"
@@ -201,6 +277,17 @@ services:
       CATALOG_POLARIS__CATALOG: ${POLARIS_CATALOG_NAME:-catalog}
       CATALOG_POLARIS__CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
       CATALOG_POLARIS__CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+      CATALOG_DATABASE__URL: postgresql+psycopg://${CATALOG_DB_USER:-catalog}:${CATALOG_DB_PASSWORD:-catalog}@catalog-db:5432/${CATALOG_DB_NAME:-catalog}
+      CATALOG_DATABASE__AUTO_MIGRATE: "true"
+      CATALOG_TRINO__ENABLED: "true"
+      CATALOG_TRINO__HOST: trino
+      CATALOG_TRINO__PORT: "8080"
+      CATALOG_NEO4J__ENABLED: "true"
+      CATALOG_NEO4J__URI: bolt://neo4j:7687
+      CATALOG_NEO4J__USER: ${NEO4J_USER:-neo4j}
+      CATALOG_NEO4J__PASSWORD: ${NEO4J_PASSWORD:-password}
+      CATALOG_MARQUEZ__ENABLED: "true"
+      CATALOG_MARQUEZ__URL: http://marquez:5000
     healthcheck:
       test:
         [
@@ -343,6 +430,8 @@ services:
       POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
       QUERY_PORT: "8091"
       ICEBERG_PACKAGES: org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0
+    ports:
+      - "${SPARK_SQL_PORT:-8091}:8091"
     volumes:
       - ./.local/polaris:/bootstrap:ro
       - ./docker/spark:/opt/seed:ro
@@ -365,4 +454,6 @@ volumes:
   minio_data:
   polaris_db:
   marquez_db:
+  catalog_db:
+  source_db:
   spark_ivy:

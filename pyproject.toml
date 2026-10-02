@@ -5,15 +5,19 @@ description = "Intelligent data catalog"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "alembic>=1.20.0",
     "dependency-injector>=4.49.1",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "kagglehub>=1.0.2",
     "neo4j>=6.3.1",
+    "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "pyiceberg[pyarrow,sql-sqlite]>=0.12.0",
+    "sqlalchemy>=2.0.54",
     "sqlglot>=30.20.0",
+    "trino>=0.340.0",
     "uvicorn>=0.54.0",
 ]
 

@@ -1,13 +1,21 @@
 """FastAPI dependencies that resolve services from the application container."""
 
+from collections.abc import Iterator
 from typing import Annotated, cast
 
 from dependency_injector.containers import DynamicContainer
 from fastapi import Depends, Request
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.api.container import AppContainer
+from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
 from intelegent_data_catalog.catalog.services.query_service import QueryService
-from intelegent_data_catalog.core.container import AppContainer
+from intelegent_data_catalog.core.settings import AppSettings
+from intelegent_data_catalog.exceptions import PersistenceUnavailableError
+from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.registry.service import RegistryService
 
 
 def get_container(request: Request) -> AppContainer:
@@ -34,5 +42,49 @@ def get_query_service(
     return service
 
 
+def get_registry_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[RegistryService]:
+    """Open a catalog session for one request."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: RegistryService = RegistryService(session)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 CatalogServiceDep = Annotated[CatalogService, Depends(get_catalog_service)]
 QueryServiceDep = Annotated[QueryService, Depends(get_query_service)]
+RegistryServiceDep = Annotated[RegistryService, Depends(get_registry_service)]
+
+
+def get_platform(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[RequestPlatform]:
+    """Open one catalog session and the discovery, graph, and query services."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    settings: AppSettings = container.settings()
+    query: QueryService = container.query_service()
+    platform: RequestPlatform = RequestPlatform(session, settings, query)
+    try:
+        yield platform
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+PlatformDep = Annotated[RequestPlatform, Depends(get_platform)]

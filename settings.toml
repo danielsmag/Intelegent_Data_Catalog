@@ -26,6 +26,10 @@ max_query_rows = 500
 max_sql_chars = 8000
 query_timeout_seconds = 60
 
+[database]
+url = "postgresql+psycopg://catalog:catalog@127.0.0.1:5433/catalog"
+auto_migrate = false
+
 [polaris]
 uri = "http://localhost:8181"
 realm = "POLARIS"

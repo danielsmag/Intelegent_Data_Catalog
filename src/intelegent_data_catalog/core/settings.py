@@ -84,6 +84,52 @@ class QuerySettings(BaseModel):
         return self
 
 
+class DatabaseSettings(BaseModel):
+    """Application catalog database. This is not the Polaris or Marquez database."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(
+        default="postgresql+psycopg://catalog:catalog@127.0.0.1:5433/catalog",
+        min_length=1,
+    )
+    auto_migrate: bool = False
+
+
+class MarquezSettings(BaseModel):
+    """Marquez API used for lineage projection. Disabled until configured."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    url: str = Field(default="http://127.0.0.1:5050", min_length=1)
+    timeout_seconds: float = Field(default=10.0, gt=0)
+
+
+class Neo4jSettings(BaseModel):
+    """Neo4j projection. Disabled until configured. PostgreSQL stays authoritative."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    uri: str = Field(default="bolt://127.0.0.1:7687", min_length=1)
+    user: str = Field(default="neo4j", min_length=1)
+    password: str = Field(default="password", min_length=1)
+    database: str = Field(default="neo4j", min_length=1)
+
+
+class TrinoSettings(BaseModel):
+    """Trino coordinator used for metadata discovery, not query execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    host: str = Field(default="127.0.0.1", min_length=1)
+    port: int = Field(default=8088, ge=1, le=65535)
+    user: str = Field(default="catalog", min_length=1)
+    timeout_seconds: float = Field(default=30.0, gt=0)
+
+
 class PolarisSettings(BaseModel):
     """Apache Polaris REST endpoint and local client credentials."""
 
@@ -112,6 +158,10 @@ class AppSettings(BaseSettings):
     scan: ScanSettings = Field(default_factory=ScanSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    trino: TrinoSettings = Field(default_factory=TrinoSettings)
+    neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
+    marquez: MarquezSettings = Field(default_factory=MarquezSettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
 
     @classmethod

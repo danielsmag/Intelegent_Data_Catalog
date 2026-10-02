@@ -1,49 +1,69 @@
 import type { ReactElement } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { CatalogIcon, GraphIcon, LineageIcon, QueryIcon } from "./icons"
+import { CatalogIcon, GraphIcon, QueryIcon, SpaceIcon, TableIcon } from "./icons"
+import { setSpacesSidebarOpen } from "./spacesSidebar"
+
+type Item = {
+  to: string
+  label: string
+  icon: ReactElement
+  current: boolean
+}
 
 export function ActivityBar(): ReactElement {
   const path: string = useLocation().pathname
-  const onCatalog: boolean = path === "/" || path.startsWith("/catalog/")
-  const onQuery: boolean = path === "/query"
+  const items: Item[] = [
+    {
+      to: "/",
+      label: "Spaces",
+      icon: <SpaceIcon />,
+      current: path === "/" || path.startsWith("/spaces") || path.startsWith("/scopes") || path.startsWith("/registry/"),
+    },
+    {
+      to: "/search",
+      label: "Search",
+      icon: <QueryIcon />,
+      current: path.startsWith("/search"),
+    },
+    {
+      to: "/sources",
+      label: "Sources",
+      icon: <GraphIcon />,
+      current: path.startsWith("/sources"),
+    },
+    {
+      to: "/query",
+      label: "Query",
+      icon: <TableIcon />,
+      current: path === "/query",
+    },
+    {
+      to: "/iceberg",
+      label: "Iceberg",
+      icon: <CatalogIcon />,
+      current: path.startsWith("/iceberg") || path.startsWith("/catalog/"),
+    },
+  ]
   return (
     <nav className="activity" aria-label="Views">
-      <Link
-        to="/"
-        className="activity-button"
-        aria-current={onCatalog ? "page" : undefined}
-        aria-label="Catalog"
-        title="Catalog"
-      >
-        <CatalogIcon />
-      </Link>
-      <Link
-        to="/query"
-        className="activity-button"
-        aria-current={onQuery ? "page" : undefined}
-        aria-label="Query"
-        title="Query"
-      >
-        <QueryIcon />
-      </Link>
-      <button
-        type="button"
-        className="activity-button"
-        disabled
-        aria-label="Lineage"
-        title="Available in a later version"
-      >
-        <LineageIcon />
-      </button>
-      <button
-        type="button"
-        className="activity-button"
-        disabled
-        aria-label="Graph"
-        title="Available in a later version"
-      >
-        <GraphIcon />
-      </button>
+      {items.map((item: Item) => (
+        <Link
+          key={item.to}
+          to={item.to}
+          className="activity-button"
+          aria-current={item.current ? "page" : undefined}
+          aria-label={item.label}
+          title={item.label}
+          onClick={() => {
+            if (item.to === "/") {
+              setSpacesSidebarOpen(true)
+            }
+          }}
+        >
+          {item.icon}
+          <span>{item.label}</span>
+        </Link>
+      ))}
     </nav>
   )
 }

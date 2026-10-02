@@ -10,6 +10,16 @@ function Icon({ children }: IconProps): ReactElement {
   )
 }
 
+export function SpaceIcon(): ReactElement {
+  return (
+    <Icon>
+      <path d="M8 1.8 13.4 4.8 8 7.8 2.6 4.8z" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path d="M2.6 4.8v6.2L8 14.2l5.4-3.2V4.8" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path d="M8 7.8v6.4" fill="none" stroke="currentColor" strokeWidth="1" />
+    </Icon>
+  )
+}
+
 export function CatalogIcon(): ReactElement {
   return (
     <Icon>
@@ -48,6 +58,22 @@ export function TableIcon(): ReactElement {
     <Icon>
       <rect x="2" y="2.5" width="12" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1" />
       <path d="M2 6h12M6 6v7.5" fill="none" stroke="currentColor" strokeWidth="1" />
+    </Icon>
+  )
+}
+
+export function PanelChevron(props: { direction: "left" | "right" }): ReactElement {
+  const points: string = props.direction === "left" ? "11 3 6 8 11 13" : "5 3 10 8 5 13"
+  return (
+    <Icon>
+      <polyline
+        points={points}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Icon>
   )
 }

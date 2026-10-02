@@ -28,7 +28,8 @@ cat >/tmp/spark-query.properties <<EOF
 spark.master=local[1]
 spark.app.name=catalog-query
 spark.driver.memory=1g
-spark.driver.host=localhost
+spark.driver.host=127.0.0.1
+spark.driver.bindAddress=127.0.0.1
 spark.ui.enabled=false
 spark.sql.shuffle.partitions=1
 spark.sql.ansi.enabled=true

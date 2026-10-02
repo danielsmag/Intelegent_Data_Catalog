@@ -1,4 +1,4 @@
-"""Application composition container."""
+"""Catalog API composition container."""
 
 import logging
 from collections.abc import Iterator
@@ -19,6 +19,7 @@ from intelegent_data_catalog.core.settings import (
     load_settings,
     resolve_project_root,
 )
+from intelegent_data_catalog.persistence.database import CatalogDatabase
 
 
 def open_http_client(settings: AppSettings) -> Iterator[httpx.Client]:
@@ -80,6 +81,11 @@ def build_query_service(
     return QueryService(spark=spark, guard=guard, settings=settings.query)
 
 
+def build_database(settings: AppSettings) -> CatalogDatabase:
+    """Build the application catalog database from settings."""
+    return CatalogDatabase(settings.database.url)
+
+
 class AppContainer(containers.DeclarativeContainer):
     """Wires settings, logging, Polaris, Spark, and the catalog services."""
 
@@ -119,5 +125,9 @@ class AppContainer(containers.DeclarativeContainer):
         build_query_service,
         spark_query_client,
         sql_guard,
+        settings,
+    )
+    database: providers.Singleton[CatalogDatabase] = providers.Singleton(
+        build_database,
         settings,
     )

@@ -65,7 +65,7 @@ export function CatalogTreePane(props: CatalogTreeProps): ReactElement {
         {props.loading ? <p className="tree-status">Loading catalog…</p> : null}
         {props.error !== null ? (
           <div className="tree-status">
-            <p>{props.error}</p>
+            <p>{polarisMessage(props.error)}</p>
             <button type="button" className="button" onClick={props.onRetry}>
               Retry
             </button>
@@ -150,6 +150,14 @@ export function CatalogTreePane(props: CatalogTreeProps): ReactElement {
       </div>
     </aside>
   )
+}
+
+function polarisMessage(error: string): string {
+  const lowered: string = error.toLowerCase()
+  if (lowered.includes("polaris") || lowered.includes("connection refused") || lowered.includes("failed")) {
+    return "Iceberg catalog is not running. Spaces still works. Start Polaris with docker compose to browse warehouse tables here."
+  }
+  return error
 }
 
 function filterTree(tree: CatalogTree, query: string): CatalogTree {

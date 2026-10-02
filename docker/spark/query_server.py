@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
 from pyspark.errors import AnalysisException, ParseException
-from pyspark.sql import Row, SparkSession
+from pyspark.sql import DataFrame, Row, SparkSession
 from pyspark.sql.types import StructField
 
 _MAX_BODY_BYTES: int = 1_000_000
@@ -24,6 +24,13 @@ class SparkQueryServer(ThreadingHTTPServer):
         super().__init__(server_address, QueryHandler)
         self.spark: SparkSession = spark
         self.sql_lock: threading.Lock = threading.Lock()
+
+    def rebuild_spark(self) -> None:
+        """Start a new session so Iceberg requests a new Polaris token."""
+        self.spark.stop()
+        SparkSession.clearActiveSession()
+        SparkSession.clearDefaultSession()
+        self.spark = SparkSession.builder.getOrCreate()
 
 
 class QueryHandler(BaseHTTPRequestHandler):
@@ -47,9 +54,14 @@ class QueryHandler(BaseHTTPRequestHandler):
         server: SparkQueryServer = cast(SparkQueryServer, self.server)
         try:
             with server.sql_lock:
-                frame = server.spark.sql(raw_sql)
-                materialized: list[Row] = frame.collect()
-                fields: list[StructField] = list(frame.schema.fields)
+                try:
+                    materialized, fields = _collect(server.spark, raw_sql)
+                except Exception as err:
+                    if not _is_not_authorized(err):
+                        raise
+                    print("polaris rejected the token; restarting the spark session")
+                    server.rebuild_spark()
+                    materialized, fields = _collect(server.spark, raw_sql)
         except (AnalysisException, ParseException) as err:
             status: int = 404 if _is_missing_table(str(err)) else 400
             self._reply(status, {"detail": _short(str(err))})
@@ -113,7 +125,21 @@ def main() -> None:
     try:
         server.serve_forever()
     finally:
-        spark.stop()
+        server.spark.stop()
+
+
+def _collect(
+    spark: SparkSession,
+    sql: str,
+) -> tuple[list[Row], list[StructField]]:
+    frame: DataFrame = spark.sql(sql)
+    materialized: list[Row] = frame.collect()
+    fields: list[StructField] = list(frame.schema.fields)
+    return materialized, fields
+
+
+def _is_not_authorized(err: Exception) -> bool:
+    return "NotAuthorizedException" in str(err)
 
 
 def _is_missing_table(message: str) -> bool:

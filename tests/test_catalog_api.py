@@ -7,10 +7,10 @@ import httpx
 from dependency_injector import providers
 from fastapi import FastAPI
 
+from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.catalog.models import QueryColumn, QueryResult
 from intelegent_data_catalog.catalog.repositories.polaris import PolarisClient
-from intelegent_data_catalog.core.container import AppContainer
 from intelegent_data_catalog.core.settings import PolarisSettings
 from intelegent_data_catalog.exceptions import QueryNotFoundError
 from tests.test_polaris_client import _route

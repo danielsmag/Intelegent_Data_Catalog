@@ -6,7 +6,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from fastapi import FastAPI
 
 from intelegent_data_catalog.api.app import configure_app
-from intelegent_data_catalog.core.container import AppContainer
+from intelegent_data_catalog.api.container import AppContainer
 
 
 def create_app(container: AppContainer | None = None) -> FastAPI:

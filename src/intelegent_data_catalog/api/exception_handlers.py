@@ -3,27 +3,40 @@
 from collections.abc import Callable
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from intelegent_data_catalog.api.v1.schemas import ErrorResponse
 from intelegent_data_catalog.exceptions import (
     CatalogError,
+    ConflictError,
+    EntityNotFoundError,
+    GraphUnavailableError,
+    PersistenceUnavailableError,
     PolarisError,
     QueryNotFoundError,
     QueryRejectedError,
     QueryTimeoutError,
     SparkQueryError,
     TableNotFoundError,
+    TrinoUnavailableError,
+    ValidationAppError,
 )
 
 _STATUS_BY_ERROR: dict[type[CatalogError], int] = {
     TableNotFoundError: 404,
     QueryNotFoundError: 404,
+    EntityNotFoundError: 404,
     QueryRejectedError: 400,
+    ValidationAppError: 422,
+    ConflictError: 409,
     QueryTimeoutError: 504,
     SparkQueryError: 502,
     PolarisError: 502,
+    TrinoUnavailableError: 502,
+    GraphUnavailableError: 503,
+    PersistenceUnavailableError: 503,
 }
 
 
@@ -33,6 +46,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     status_code: int
     for error_type, status_code in _STATUS_BY_ERROR.items():
         app.add_exception_handler(error_type, _handler(status_code))
+    app.add_exception_handler(RequestValidationError, _validation_error)
 
 
 def _handler(status_code: int) -> Callable[[Request, Exception], JSONResponse]:
@@ -41,3 +55,29 @@ def _handler(status_code: int) -> Callable[[Request, Exception], JSONResponse]:
         return JSONResponse(status_code=status_code, content=body.model_dump())
 
     return handle
+
+
+def _validation_error(_request: Request, err: Exception) -> JSONResponse:
+    """Return validation messages without echoing submitted secret values."""
+    if not isinstance(err, RequestValidationError):
+        body: ErrorResponse = ErrorResponse(detail="invalid request")
+        return JSONResponse(status_code=422, content=body.model_dump())
+    details: list[dict[str, object]] = []
+    item: dict[str, object]
+    for item in err.errors():
+        location: object = item.get("loc", ())
+        parts: list[str] = []
+        if isinstance(location, tuple | list):
+            part: object
+            for part in location:
+                parts.append(str(part))
+        message: object = item.get("msg", "invalid request")
+        kind: object = item.get("type", "value_error")
+        details.append(
+            {
+                "type": kind if isinstance(kind, str) else "value_error",
+                "loc": parts,
+                "msg": message if isinstance(message, str) else "invalid request",
+            }
+        )
+    return JSONResponse(status_code=422, content={"detail": details})

@@ -1,0 +1,167 @@
+"""Discovery, graph, search, tags, and Spark-from-catalog routes."""
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Query
+from pydantic import BaseModel, ConfigDict
+
+from intelegent_data_catalog.api.dependencies import PlatformDep
+from intelegent_data_catalog.catalog.models import QueryResult
+from intelegent_data_catalog.exceptions import ConflictError
+from intelegent_data_catalog.graph.document import GraphView
+from intelegent_data_catalog.query.spark_bridge import (
+    NOT_CONFIGURED,
+    SparkQueryPreview,
+    spark_preview,
+)
+from intelegent_data_catalog.registry.annotations import (
+    MarquezMappingRead,
+    MarquezMappingWrite,
+    SearchResponse,
+    TagRead,
+    TagWrite,
+)
+from intelegent_data_catalog.registry.schemas import SyncRunRead
+
+router: APIRouter = APIRouter()
+
+
+class SparkQueryResponse(BaseModel):
+    """Spark editor availability for one catalog table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    available: bool
+    message: str | None
+    sql: str | None
+    engine_ref_key: str | None
+
+
+class GraphRebuildResponse(BaseModel):
+    """Counts from a projection rebuild."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: int
+    edges: int
+
+
+@router.post("/source-bindings/{source_binding_id}/sync", response_model=SyncRunRead)
+def sync_source_binding(source_binding_id: UUID, platform: PlatformDep) -> SyncRunRead:
+    """Discover metadata through Trino and upsert the catalog."""
+    return platform.sync.run(source_binding_id)
+
+
+@router.get("/search", response_model=SearchResponse)
+def search_catalog(
+    platform: PlatformDep,
+    q: Annotated[str, Query(min_length=1, max_length=200)],
+) -> SearchResponse:
+    """Search PostgreSQL catalog text."""
+    return platform.annotations.search(q)
+
+
+@router.get("/tags", response_model=list[TagRead])
+def list_tags(platform: PlatformDep) -> list[TagRead]:
+    """List tags."""
+    return platform.annotations.list_tags()
+
+
+@router.post("/tags", response_model=TagRead, status_code=201)
+def create_tag(body: TagWrite, platform: PlatformDep) -> TagRead:
+    """Create a tag."""
+    return platform.annotations.create_tag(body)
+
+
+@router.get("/tables/{table_id}/tags", response_model=list[TagRead])
+def list_table_tags(table_id: UUID, platform: PlatformDep) -> list[TagRead]:
+    """List tags on a table."""
+    return platform.annotations.list_table_tags(table_id)
+
+
+@router.post("/tables/{table_id}/tags/{tag_id}", response_model=TagRead, status_code=201)
+def attach_tag(table_id: UUID, tag_id: UUID, platform: PlatformDep) -> TagRead:
+    """Attach a user tag to a table."""
+    return platform.annotations.attach_tag(table_id, tag_id)
+
+
+@router.post("/marquez-mappings", response_model=MarquezMappingRead, status_code=201)
+def create_marquez_mapping(body: MarquezMappingWrite, platform: PlatformDep) -> MarquezMappingRead:
+    """Map a catalog table to a Marquez dataset."""
+    return platform.annotations.create_mapping(body)
+
+
+@router.get("/tables/{table_id}/spark-query", response_model=SparkQueryResponse)
+def read_spark_query(table_id: UUID, platform: PlatformDep) -> SparkQueryResponse:
+    """Return the Spark SELECT for a table, or an explicit unavailable state."""
+    preview: SparkQueryPreview = spark_preview(
+        platform.registry.list_asset_bindings(table_id),
+        platform.sample_limit,
+    )
+    return SparkQueryResponse(
+        available=preview.available,
+        message=preview.message,
+        sql=preview.sql,
+        engine_ref_key=preview.engine_ref_key,
+    )
+
+
+@router.post("/tables/{table_id}/spark-query", response_model=QueryResult)
+def run_spark_query(table_id: UUID, platform: PlatformDep) -> QueryResult:
+    """Run the bounded Spark SELECT. A missing binding does not fall back to Trino."""
+    preview: SparkQueryPreview = spark_preview(
+        platform.registry.list_asset_bindings(table_id),
+        platform.sample_limit,
+    )
+    if not preview.available or preview.sql is None:
+        raise ConflictError(NOT_CONFIGURED)
+    return platform.query.query(preview.sql)
+
+
+@router.get("/tables/{table_id}/relationships/graph", response_model=GraphView)
+def read_relationship_graph(
+    table_id: UUID,
+    platform: PlatformDep,
+    depth: Annotated[int, Query(ge=1, le=3)] = 1,
+) -> GraphView:
+    """Return catalog relationships around a table."""
+    return platform.graph.relationships(table_id, depth)
+
+
+@router.get("/tables/{table_id}/lineage", response_model=GraphView)
+def read_lineage(
+    table_id: UUID,
+    platform: PlatformDep,
+    depth: Annotated[int, Query(ge=1, le=3)] = 1,
+    direction: Annotated[str, Query()] = "both",
+) -> GraphView:
+    """Return operational lineage around a table."""
+    return platform.graph.lineage(table_id, depth, direction)
+
+
+@router.get("/tables/{table_id}/context-graph", response_model=GraphView)
+def read_context_graph(
+    table_id: UUID,
+    platform: PlatformDep,
+    depth: Annotated[int, Query(ge=1, le=3)] = 1,
+) -> GraphView:
+    """Return hierarchy, relationships, and lineage around a table."""
+    return platform.graph.context(table_id, depth)
+
+
+@router.get("/tables/{table_id}/graph", response_model=GraphView)
+def read_graph(
+    table_id: UUID,
+    platform: PlatformDep,
+    depth: Annotated[int, Query(ge=1, le=3)] = 1,
+) -> GraphView:
+    """Return a bounded catalog graph around a table."""
+    return platform.graph.context(table_id, depth)
+
+
+@router.post("/graph/rebuild", response_model=GraphRebuildResponse)
+def rebuild_graph(platform: PlatformDep) -> GraphRebuildResponse:
+    """Rebuild the Neo4j projection from PostgreSQL and Marquez."""
+    counts: dict[str, int] = platform.graph.rebuild()
+    return GraphRebuildResponse(nodes=counts["nodes"], edges=counts["edges"])

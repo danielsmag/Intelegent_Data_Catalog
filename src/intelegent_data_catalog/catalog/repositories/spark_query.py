@@ -22,6 +22,7 @@ class SparkSqlClient(Protocol):
         """Return columns and rows for a statement the guard already accepted."""
         ...
 
+
 class _SparkPayload(BaseModel):
     """JSON body from POST /sql."""
 

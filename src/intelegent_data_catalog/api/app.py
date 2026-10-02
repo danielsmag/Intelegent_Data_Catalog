@@ -24,7 +24,7 @@ def configure_app(app: FastAPI) -> None:
         CORSMiddleware,
         allow_origins=DEV_ORIGINS,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["*"],
     )
     register_exception_handlers(app)
