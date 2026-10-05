@@ -1,10 +1,18 @@
-import { useEffect, useState, type FormEvent, type ReactElement } from "react"
+import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react"
 import { Link, useParams } from "react-router-dom"
 import { ActivityBar } from "./ActivityBar"
+import { AttachCatalogForm } from "./AttachCatalogForm"
+import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
+import { CreateRecordForm } from "./CreateRecordForm"
+import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { HierarchyTree } from "./HierarchyTree"
+import { PanelChevron, PlusIcon } from "./icons"
 import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { errorMessage, isAbortError } from "./api"
 import {
+  buildKnowledgeContext,
+  createScope,
+  createSpace,
   fetchBindings,
   fetchCatalogColumns,
   fetchCatalogTable,
@@ -26,6 +34,7 @@ import {
   type CatalogTableRecord,
   type DataSourceRecord,
   type GraphViewRecord,
+  type KnowledgeContext,
   type ScopeRecord,
   type SearchHitRecord,
   type SpaceRecord,
@@ -56,31 +65,180 @@ function Shell(props: { status: string; tree?: boolean; children: ReactElement }
         </main>
       </div>
       <footer className="status">
-        <span>Catalog</span>
+        <span>Spaces</span>
         <span>{props.status}</span>
       </footer>
     </div>
   )
 }
 
+type EntityCardItem = {
+  id: string
+  name: string
+  description: string | null
+  meta: string
+  metaKind: "slug" | "status"
+  to: string
+}
+
+const MARK_TONES: readonly string[] = ["tone-a", "tone-b", "tone-c", "tone-d", "tone-e"]
+
+function countLabel(count: number, singular: string, plural: string): string {
+  return count === 1 ? `1 ${singular}` : `${count} ${plural}`
+}
+
+function initials(name: string): string {
+  const parts: string[] = name
+    .trim()
+    .split(/[\s_-]+/)
+    .filter((part: string) => part.length > 0)
+  const firstWord: string | undefined = parts[0]
+  if (firstWord === undefined) {
+    return "?"
+  }
+  const secondWord: string | undefined = parts[1]
+  if (secondWord === undefined) {
+    return firstWord.slice(0, 2).toUpperCase()
+  }
+  const first: string = firstWord[0] ?? ""
+  const second: string = secondWord[0] ?? ""
+  return `${first}${second}`.toUpperCase()
+}
+
+function toneClass(name: string): string {
+  let hash: number = 0
+  for (const char of name) {
+    hash = (hash + char.charCodeAt(0)) % MARK_TONES.length
+  }
+  const tone: string | undefined = MARK_TONES[hash]
+  return tone ?? "tone-a"
+}
+
+function EntityGrid(props: { items: EntityCardItem[] }): ReactElement {
+  return (
+    <ul className="entity-grid">
+      {props.items.map((item: EntityCardItem) => (
+        <li key={item.id}>
+          <Link className="entity-card" to={item.to}>
+            <span className="entity-card-top">
+              <span className={`entity-mark ${toneClass(item.name)}`} aria-hidden="true">
+                {initials(item.name)}
+              </span>
+              <span className="entity-go" aria-hidden="true">
+                <PanelChevron direction="right" />
+              </span>
+            </span>
+            <span className="entity-copy">
+              <span className="entity-name">{item.name}</span>
+              <span className="entity-desc">{item.description ?? "No description yet."}</span>
+            </span>
+            <span className="entity-foot">
+              <span className={item.metaKind === "status" ? "badge" : "entity-meta"}>{item.meta}</span>
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function EntitySkeletonGrid(): ReactElement {
+  return (
+    <div className="entity-skeleton-grid" aria-hidden="true">
+      <div className="entity-skeleton" />
+      <div className="entity-skeleton" />
+      <div className="entity-skeleton" />
+    </div>
+  )
+}
+
 export function SpacesPage(): ReactElement {
+  const revision: number = useCatalogRevision()
   const [spaces, setSpaces] = useState<SpaceRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  useLoad(setSpaces, setError, fetchSpaces)
+  const [creating, setCreating] = useState<boolean>(false)
+  useEffect(() => {
+    const controller: AbortController = new AbortController()
+    void fetchSpaces(controller.signal)
+      .then((loaded: SpaceRecord[]) => {
+        setSpaces(loaded)
+        setError(null)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setError(errorMessage(err))
+        }
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [revision])
+  const loading: boolean = spaces === null && error === null
+  const cards: EntityCardItem[] = (spaces ?? []).map((space: SpaceRecord): EntityCardItem => ({
+    id: space.id,
+    name: space.name,
+    description: space.description,
+    meta: space.slug,
+    metaKind: "slug",
+    to: `/spaces/${space.id}`,
+  }))
   return (
     <Shell status="Spaces" tree>
-      <section>
-        <h1>Spaces</h1>
-        {error !== null ? <p className="error-text">{error}</p> : null}
-        {spaces !== null && spaces.length === 0 ? <p className="note">No spaces yet.</p> : null}
-        <ul className="registry-list">
-          {(spaces ?? []).map((space: SpaceRecord) => (
-            <li key={space.id}>
-              <Link to={`/spaces/${space.id}`}>{space.name}</Link>
-              {space.description !== null ? <span className="comment">{space.description}</span> : null}
-            </li>
-          ))}
-        </ul>
+      <section className="catalog-page">
+        <header className="catalog-hero">
+          <div className="catalog-hero-top">
+            <div className="catalog-hero-copy">
+              <p className="catalog-kicker">Organization</p>
+              <h1>Spaces</h1>
+            </div>
+            <div className="catalog-hero-actions">
+            {spaces !== null ? (
+              <span className="catalog-count">{countLabel(spaces.length, "space", "spaces")}</span>
+            ) : null}
+            <button
+              type="button"
+              className="button with-icon"
+              aria-expanded={creating}
+              onClick={() => {
+                setCreating((open: boolean) => !open)
+              }}
+            >
+              {creating ? null : <PlusIcon />}
+              {creating ? "Close" : "Add space"}
+            </button>
+            </div>
+          </div>
+          <p className="catalog-lead">Business domains that group scopes, tables, and shared context.</p>
+        </header>
+        {creating ? (
+          <div className="catalog-panel">
+            <CreateRecordForm
+              idPrefix="page-space"
+              nameLabel="Space name"
+              submitLabel="Add space"
+              onCancel={() => {
+                setCreating(false)
+              }}
+              onCreate={async (input) => {
+                await createSpace(input)
+                setCreating(false)
+                bumpCatalogRevision()
+              }}
+            />
+          </div>
+        ) : null}
+        {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
+        {loading ? <EntitySkeletonGrid /> : null}
+        {spaces !== null && spaces.length === 0 ? (
+          <div className="catalog-empty">
+            <span className="entity-mark tone-a" aria-hidden="true">
+              Sp
+            </span>
+            <h2>No spaces yet</h2>
+            <p>Add a space to organize catalogs by team, domain, or product.</p>
+          </div>
+        ) : null}
+        {cards.length > 0 ? <EntityGrid items={cards} /> : null}
       </section>
     </Shell>
   )
@@ -88,15 +246,21 @@ export function SpacesPage(): ReactElement {
 
 export function SpacePage(): ReactElement {
   const spaceId: string = useParams().spaceId ?? ""
+  const revision: number = useCatalogRevision()
   const [space, setSpace] = useState<SpaceRecord | null>(null)
   const [scopes, setScopes] = useState<ScopeRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState<boolean>(false)
+  useEffect(() => {
+    setCreating(false)
+  }, [spaceId])
   useEffect(() => {
     const controller: AbortController = new AbortController()
     void Promise.all([fetchSpace(spaceId, controller.signal), fetchScopes(spaceId, controller.signal)])
       .then(([loadedSpace, loadedScopes]: [SpaceRecord, ScopeRecord[]]) => {
         setSpace(loadedSpace)
         setScopes(loadedScopes)
+        setError(null)
       })
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
@@ -106,25 +270,80 @@ export function SpacePage(): ReactElement {
     return () => {
       controller.abort()
     }
-  }, [spaceId])
+  }, [spaceId, revision])
+  const loading: boolean = space === null && error === null
+  const cards: EntityCardItem[] = (scopes ?? []).map((scope: ScopeRecord): EntityCardItem => ({
+    id: scope.id,
+    name: scope.name,
+    description: scope.description,
+    meta: scope.slug,
+    metaKind: "slug",
+    to: `/scopes/${scope.id}`,
+  }))
+  const lead: string =
+    space?.description !== null && space?.description !== undefined && space.description !== ""
+      ? space.description
+      : "Scopes collected inside this space."
   return (
     <Shell status={space?.name ?? "Space"} tree>
-      <section>
-        <p className="crumb">
-          <Link to="/spaces">Spaces</Link>
-        </p>
-        <h1>{space?.name ?? "Space"}</h1>
-        {space?.description !== null && space?.description !== undefined ? <p>{space.description}</p> : null}
-        <h2>Scopes</h2>
-        {error !== null ? <p className="error-text">{error}</p> : null}
-        {scopes !== null && scopes.length === 0 ? <p className="note">No scopes yet.</p> : null}
-        <ul className="registry-list">
-          {(scopes ?? []).map((scope: ScopeRecord) => (
-            <li key={scope.id}>
-              <Link to={`/scopes/${scope.id}`}>{scope.name}</Link>
-            </li>
-          ))}
-        </ul>
+      <section className="catalog-page">
+        <header className="catalog-hero">
+          <div className="catalog-hero-top">
+            <div className="catalog-hero-copy">
+              <p className="crumb">
+                <Link to="/spaces">Spaces</Link>
+              </p>
+              <h1>{space?.name ?? "Space"}</h1>
+            </div>
+            <div className="catalog-hero-actions">
+            {scopes !== null ? (
+              <span className="catalog-count">{countLabel(scopes.length, "scope", "scopes")}</span>
+            ) : null}
+            <button
+              type="button"
+              className="button with-icon"
+              aria-expanded={creating}
+              disabled={space === null}
+              onClick={() => {
+                setCreating((open: boolean) => !open)
+              }}
+            >
+              {creating ? null : <PlusIcon />}
+              {creating ? "Close" : "Add scope"}
+            </button>
+            </div>
+          </div>
+          <p className="catalog-lead">{lead}</p>
+        </header>
+        {creating ? (
+          <div className="catalog-panel">
+            <CreateRecordForm
+              idPrefix="page-scope"
+              nameLabel="Scope name"
+              submitLabel="Add scope"
+              onCancel={() => {
+                setCreating(false)
+              }}
+              onCreate={async (input) => {
+                await createScope(spaceId, input)
+                setCreating(false)
+                bumpCatalogRevision()
+              }}
+            />
+          </div>
+        ) : null}
+        {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
+        {loading ? <EntitySkeletonGrid /> : null}
+        {scopes !== null && scopes.length === 0 ? (
+          <div className="catalog-empty">
+            <span className="entity-mark tone-b" aria-hidden="true">
+              Sc
+            </span>
+            <h2>No scopes yet</h2>
+            <p>Add a scope to attach catalogs and tables to this space.</p>
+          </div>
+        ) : null}
+        {cards.length > 0 ? <EntityGrid items={cards} /> : null}
       </section>
     </Shell>
   )
@@ -132,18 +351,34 @@ export function SpacePage(): ReactElement {
 
 export function ScopePage(): ReactElement {
   const scopeId: string = useParams().scopeId ?? ""
+  const revision: number = useCatalogRevision()
   const [scope, setScope] = useState<ScopeRecord | null>(null)
+  const [spaceName, setSpaceName] = useState<string | null>(null)
   const [tables, setTables] = useState<CatalogTableRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [attaching, setAttaching] = useState<boolean>(false)
+  useEffect(() => {
+    setAttaching(false)
+    setSpaceName(null)
+  }, [scopeId])
   useEffect(() => {
     const controller: AbortController = new AbortController()
     void Promise.all([
       fetchScope(scopeId, controller.signal),
       fetchScopeTables(scopeId, controller.signal),
     ])
-      .then(([loadedScope, loadedTables]: [ScopeRecord, CatalogTableRecord[]]) => {
+      .then(async ([loadedScope, loadedTables]: [ScopeRecord, CatalogTableRecord[]]) => {
         setScope(loadedScope)
         setTables(loadedTables)
+        setError(null)
+        try {
+          const parent: SpaceRecord = await fetchSpace(loadedScope.space_id, controller.signal)
+          setSpaceName(parent.name)
+        } catch (parentError: unknown) {
+          if (!isAbortError(parentError)) {
+            setSpaceName(null)
+          }
+        }
       })
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
@@ -153,31 +388,85 @@ export function ScopePage(): ReactElement {
     return () => {
       controller.abort()
     }
-  }, [scopeId])
+  }, [scopeId, revision])
+  const loading: boolean = scope === null && error === null
+  const cards: EntityCardItem[] = (tables ?? []).map((table: CatalogTableRecord): EntityCardItem => {
+    const qualified: string = `${table.physical_catalog}.${table.physical_namespace}.${table.physical_table}`
+    return {
+      id: table.id,
+      name: table.display_name ?? table.name,
+      description: table.description ?? qualified,
+      meta: table.status,
+      metaKind: "status",
+      to: `/registry/tables/${table.id}`,
+    }
+  })
+  const lead: string =
+    scope?.description !== null && scope?.description !== undefined && scope.description !== ""
+      ? scope.description
+      : "Tables attached to this scope."
   return (
     <Shell status={scope?.name ?? "Scope"} tree>
-      <section>
-        <p className="crumb">
-          <Link to="/spaces">Spaces</Link>
-          {scope !== null ? (
-            <>
-              {" / "}
-              <Link to={`/spaces/${scope.space_id}`}>Space</Link>
-            </>
-          ) : null}
-        </p>
-        <h1>{scope?.name ?? "Scope"}</h1>
-        <h2>Tables</h2>
-        {error !== null ? <p className="error-text">{error}</p> : null}
-        {tables !== null && tables.length === 0 ? <p className="note">No tables yet.</p> : null}
-        <ul className="registry-list">
-          {(tables ?? []).map((table: CatalogTableRecord) => (
-            <li key={table.id}>
-              <Link to={`/registry/tables/${table.id}`}>{table.name}</Link>
-              <span className="badge">{table.status}</span>
-            </li>
-          ))}
-        </ul>
+      <section className="catalog-page">
+        <header className="catalog-hero">
+          <div className="catalog-hero-top">
+            <div className="catalog-hero-copy">
+              <p className="crumb">
+                <Link to="/spaces">Spaces</Link>
+                {scope !== null ? (
+                  <>
+                    {" / "}
+                    <Link to={`/spaces/${scope.space_id}`}>{spaceName ?? "Space"}</Link>
+                  </>
+                ) : null}
+              </p>
+              <h1>{scope?.name ?? "Scope"}</h1>
+            </div>
+            <div className="catalog-hero-actions">
+            {tables !== null ? (
+              <span className="catalog-count">{countLabel(tables.length, "table", "tables")}</span>
+            ) : null}
+            <button
+              type="button"
+              className="button with-icon"
+              aria-expanded={attaching}
+              disabled={scope === null}
+              onClick={() => {
+                setAttaching((open: boolean) => !open)
+              }}
+            >
+              {attaching ? null : <PlusIcon />}
+              {attaching ? "Close" : "Attach from catalog"}
+            </button>
+            </div>
+          </div>
+          <p className="catalog-lead">{lead}</p>
+        </header>
+        {attaching ? (
+          <div className="catalog-panel">
+            <AttachCatalogForm
+              scopeId={scopeId}
+              onCancel={() => {
+                setAttaching(false)
+              }}
+              onAttached={() => {
+                bumpCatalogRevision()
+              }}
+            />
+          </div>
+        ) : null}
+        {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
+        {loading ? <EntitySkeletonGrid /> : null}
+        {tables !== null && tables.length === 0 ? (
+          <div className="catalog-empty">
+            <span className="entity-mark tone-c" aria-hidden="true">
+              Tb
+            </span>
+            <h2>No tables yet</h2>
+            <p>Attach a catalog namespace to bring tables into this scope.</p>
+          </div>
+        ) : null}
+        {cards.length > 0 ? <EntityGrid items={cards} /> : null}
       </section>
     </Shell>
   )
@@ -196,9 +485,14 @@ export function RegistryTablePage(): ReactElement {
   const [relationGraph, setRelationGraph] = useState<GraphViewRecord | null>(null)
   const [contextGraph, setContextGraph] = useState<GraphViewRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [knowledge, setKnowledge] = useState<KnowledgeContext | null>(null)
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
+  const [building, setBuilding] = useState<boolean>(false)
+  const buildAbort = useRef<AbortController | null>(null)
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setError(null)
+    setBuilding(false)
     void Promise.all([
       fetchCatalogTable(tableId, controller.signal),
       fetchCatalogColumns(tableId, controller.signal),
@@ -247,10 +541,35 @@ export function RegistryTablePage(): ReactElement {
           setContextGraph({ nodes: [], edges: [], truncated: false })
         }
       })
+    setKnowledge(null)
+    setKnowledgeError(null)
     return () => {
       controller.abort()
+      buildAbort.current?.abort()
     }
   }, [tableId])
+  function runBuildContext(): void {
+    buildAbort.current?.abort()
+    const controller: AbortController = new AbortController()
+    buildAbort.current = controller
+    setBuilding(true)
+    setKnowledgeError(null)
+    void buildKnowledgeContext(tableId, controller.signal)
+      .then((loaded: KnowledgeContext) => {
+        setKnowledge(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledge(null)
+          setKnowledgeError(errorMessage(err))
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setBuilding(false)
+        }
+      })
+  }
   const qualified: string = table?.source_key ?? "Table"
   return (
     <Shell status={qualified} tree>
@@ -267,8 +586,18 @@ export function RegistryTablePage(): ReactElement {
         <div className="title-row">
           <h1>{table?.display_name ?? table?.name ?? "Table"}</h1>
           {table !== null ? <span className="badge">{table.status}</span> : null}
+          <button
+            className="button secondary title-action"
+            type="button"
+            disabled={table === null || building}
+            onClick={runBuildContext}
+          >
+            {building ? "Building context…" : "Build context"}
+          </button>
         </div>
         {error !== null ? <p className="error-text">{error}</p> : null}
+        {knowledgeError !== null ? <p className="error-text">{knowledgeError}</p> : null}
+        {knowledge !== null ? <KnowledgeContextPanel context={knowledge} /> : null}
         <div className="tabs" role="tablist">
           {(["overview", "columns", "relationships", "lineage", "graph", "source"] as const).map(
             (name: TabName) => (
@@ -340,7 +669,7 @@ export function SearchPage(): ReactElement {
             onChange={(event) => {
               setQuery(event.target.value)
             }}
-            aria-label="Search catalog"
+            aria-label="Search spaces"
           />
           <button className="button" type="submit" disabled={query.trim() === ""}>
             Search

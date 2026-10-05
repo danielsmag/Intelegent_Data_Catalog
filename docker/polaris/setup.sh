@@ -142,7 +142,7 @@ drop_broken_seed_table() {
   fi
   echo "seed table sales.${table_name} missing warehouse files; dropping catalog entity"
   PGPASSWORD="${POLARIS_DB_PASSWORD}" psql \
-    --host polaris-db \
+    --host postgres \
     --username "${POLARIS_DB_USER}" \
     --dbname "${POLARIS_DB_NAME}" \
     --set ON_ERROR_STOP=1 \

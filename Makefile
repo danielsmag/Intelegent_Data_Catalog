@@ -1,4 +1,4 @@
-.PHONY: help build up down logs test lint typecheck
+.PHONY: help build up down rebuild logs test lint typecheck
 
 COMPOSE ?= docker compose
 
@@ -6,6 +6,7 @@ help:
 	@printf '%s\n' \
 		'build       docker compose build' \
 		'up          docker compose up -d --build' \
+		'rebuild     docker compose up -d --build --force-recreate' \
 		'down        docker compose down' \
 		'logs        follow spark-lineage logs' \
 		'test        uv run pytest' \
@@ -17,6 +18,9 @@ build:
 
 up:
 	$(COMPOSE) up -d --build
+
+rebuild:
+	$(COMPOSE) up -d --build --force-recreate
 
 down:
 	$(COMPOSE) down

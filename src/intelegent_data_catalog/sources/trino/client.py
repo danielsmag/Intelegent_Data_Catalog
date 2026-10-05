@@ -16,6 +16,35 @@ class TrinoQuery(Protocol):
 
     def query(self, sql: str) -> list[dict[str, object]]:
         """Return rows. Column names are lowercased."""
+        ...
+
+
+def _materialize_rows(
+    description: Sequence[object] | None,
+    raw_rows: Sequence[object],
+) -> list[dict[str, object]]:
+    """Map driver rows to dicts. The Trino driver returns lists, not tuples."""
+    names: list[str] = []
+    if description is not None:
+        column: object
+        for column in description:
+            name: object = getattr(column, "name", None)
+            if not isinstance(name, str):
+                name = column[0] if isinstance(column, tuple) and len(column) > 0 else "column"
+            names.append(str(name).lower())
+    rows: list[dict[str, object]] = []
+    raw: object
+    for raw in raw_rows:
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+            continue
+        record: dict[str, object] = {}
+        index: int
+        value: object
+        for index, value in enumerate(raw):
+            key: str = names[index] if index < len(names) else f"column_{index}"
+            record[key] = value
+        rows.append(record)
+    return rows
 
 
 def sanitize_engine_message(message: str) -> str:
@@ -65,24 +94,4 @@ class TrinoClient:
                 cursor.close()
         finally:
             connection.close()
-        names: list[str] = []
-        if description is not None:
-            column: object
-            for column in description:
-                name: object = getattr(column, "name", None)
-                if not isinstance(name, str):
-                    name = column[0] if isinstance(column, tuple) and len(column) > 0 else "column"
-                names.append(str(name).lower())
-        rows: list[dict[str, object]] = []
-        raw: object
-        for raw in raw_rows:
-            if not isinstance(raw, tuple):
-                continue
-            record: dict[str, object] = {}
-            index: int
-            value: object
-            for index, value in enumerate(raw):
-                key: str = names[index] if index < len(names) else f"column_{index}"
-                record[key] = value
-            rows.append(record)
-        return rows
+        return _materialize_rows(description, raw_rows)

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response
 
-from intelegent_data_catalog.api.dependencies import RegistryServiceDep
+from intelegent_data_catalog.api.dependencies import RegistryServiceDep, ScopeAttachmentDep
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingCreate,
     AssetBindingRead,
@@ -25,6 +25,8 @@ from intelegent_data_catalog.registry.schemas import (
     RelationshipCreate,
     RelationshipRead,
     RelationshipUpdate,
+    ScopeAttachmentCreate,
+    ScopeAttachmentResult,
     ScopeCreate,
     ScopeRead,
     ScopeUpdate,
@@ -156,6 +158,16 @@ def remove_data_source(data_source_id: UUID, service: RegistryServiceDep) -> Res
 def list_scope_tables(scope_id: UUID, service: RegistryServiceDep) -> list[CatalogTableRead]:
     """List catalog tables in a scope."""
     return service.list_tables(scope_id)
+
+
+@router.post("/scopes/{scope_id}/attachments", response_model=ScopeAttachmentResult)
+def attach_scope_assets(
+    scope_id: UUID,
+    body: ScopeAttachmentCreate,
+    service: ScopeAttachmentDep,
+) -> ScopeAttachmentResult:
+    """Copy tables, or a whole schema, from Polaris or Trino into this scope."""
+    return service.attach(scope_id, body)
 
 
 @router.post("/scopes/{scope_id}/tables", response_model=CatalogTableRead, status_code=201)

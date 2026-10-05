@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactElement } from "react"
 import { Link } from "react-router-dom"
-import { errorMessage, fetchSample, formatTimestamp, isAbortError, queryPagePath } from "./api"
+import { errorMessage, fetchExplorerSample, formatTimestamp, isAbortError, queryPagePath } from "./api"
 import { ResultGrid } from "./ResultGrid"
 import type { ColumnDetail, DetailTab, QueryResult, TableDetail } from "./types"
 
 type TablePaneProps = {
+  source: string | undefined
+  sourceName: string
   catalog: string | undefined
   namespace: string | undefined
   table: string | undefined
@@ -21,12 +23,14 @@ export function TablePane(props: TablePaneProps): ReactElement {
   useEffect(() => {
     if (
       tab !== "sample" ||
+      props.source === undefined ||
       props.catalog === undefined ||
       props.namespace === undefined ||
       props.table === undefined
     ) {
       return
     }
+    const source: string = props.source
     const catalog: string = props.catalog
     const namespace: string = props.namespace
     const table: string = props.table
@@ -34,7 +38,7 @@ export function TablePane(props: TablePaneProps): ReactElement {
     setSample(null)
     setSampleError(null)
     setSampleLoading(true)
-    void fetchSample(catalog, namespace, table, controller.signal)
+    void fetchExplorerSample(source, catalog, namespace, table, controller.signal)
       .then((loaded: QueryResult) => {
         setSample(loaded)
       })
@@ -53,8 +57,9 @@ export function TablePane(props: TablePaneProps): ReactElement {
     return () => {
       controller.abort()
     }
-  }, [tab, props.catalog, props.namespace, props.table])
+  }, [tab, props.source, props.catalog, props.namespace, props.table])
   if (
+    props.source === undefined ||
     props.catalog === undefined ||
     props.namespace === undefined ||
     props.table === undefined
@@ -63,7 +68,7 @@ export function TablePane(props: TablePaneProps): ReactElement {
       <section className="main">
         <div className="empty">
           <h1>Catalog</h1>
-          <p>Select a table.</p>
+          <p>Select a table. Each source lists the catalogs, schemas, and tables it contains.</p>
         </div>
       </section>
     )
@@ -73,7 +78,11 @@ export function TablePane(props: TablePaneProps): ReactElement {
   return (
     <section className="main">
       <div className="main-scroll">
-        <p className="crumb">{qualified}</p>
+        <p className="crumb">
+          {props.sourceName}
+          {" / "}
+          {qualified}
+        </p>
         <div className="title-row">
           <h1>{props.table}</h1>
           <span className="badge">TABLE</span>
@@ -88,7 +97,7 @@ export function TablePane(props: TablePaneProps): ReactElement {
         </div>
         {props.loading ? <p className="note">Loading table…</p> : null}
         {props.error !== null ? <p className="error-text">{props.error}</p> : null}
-        {props.detail !== null && tab === "overview" ? <Overview detail={props.detail} /> : null}
+        {props.detail !== null && tab === "overview" ? <Overview detail={props.detail} sourceName={props.sourceName} /> : null}
         {props.detail !== null && tab === "columns" ? <Columns columns={props.detail.columns} /> : null}
         {tab === "sample" ? (
           <SamplePane loading={sampleLoading} error={sampleError} result={sample} />
@@ -120,9 +129,11 @@ function TabButton(props: {
   )
 }
 
-function Overview(props: { detail: TableDetail }): ReactElement {
+function Overview(props: { detail: TableDetail; sourceName: string }): ReactElement {
   return (
     <dl className="facts">
+      <dt>Source</dt>
+      <dd>{props.sourceName}</dd>
       <dt>Location</dt>
       <dd>{props.detail.location ?? "Unknown"}</dd>
       <dt>Snapshot</dt>

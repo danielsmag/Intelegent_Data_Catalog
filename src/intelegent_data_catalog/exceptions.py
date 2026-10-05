@@ -89,6 +89,13 @@ class ValidationAppError(CatalogError):
         super().__init__(message)
 
 
+class ProfileUnavailableError(CatalogError):
+    """Raised when a data profile is requested and no profiler is configured."""
+
+    def __init__(self, message: str = "data profiler is not configured") -> None:
+        super().__init__(message)
+
+
 class PersistenceUnavailableError(CatalogError):
     """Raised when the catalog database cannot be used. The message stays generic."""
 

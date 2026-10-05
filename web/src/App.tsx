@@ -1,7 +1,7 @@
 import type { ReactElement } from "react"
-import { BrowserRouter, Route, Routes } from "react-router-dom"
-import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 import { Explorer } from "./Explorer"
+import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
 import { QueryPage } from "./QueryPage"
 
 export function App(): ReactElement {
@@ -9,8 +9,8 @@ export function App(): ReactElement {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<SpacesPage />} />
-        <Route path="/iceberg" element={<Explorer />} />
-        <Route path="/catalog/:catalog/:namespace/:table" element={<Explorer />} />
+        <Route path="/catalog" element={<Explorer />} />
+        <Route path="/catalog/:source/:catalog/:namespace/:table" element={<Explorer />} />
         <Route path="/query" element={<QueryPage />} />
         <Route path="/spaces" element={<SpacesPage />} />
         <Route path="/spaces/:spaceId" element={<SpacePage />} />
@@ -18,6 +18,7 @@ export function App(): ReactElement {
         <Route path="/registry/tables/:tableId" element={<RegistryTablePage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/sources" element={<DataSourcesPage />} />
+        <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />
       </Routes>
     </BrowserRouter>
   )

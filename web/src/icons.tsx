@@ -10,12 +10,26 @@ function Icon({ children }: IconProps): ReactElement {
   )
 }
 
-export function SpaceIcon(): ReactElement {
+export function BrandMark(): ReactElement {
   return (
     <Icon>
-      <path d="M8 1.8 13.4 4.8 8 7.8 2.6 4.8z" fill="none" stroke="currentColor" strokeWidth="1" />
-      <path d="M2.6 4.8v6.2L8 14.2l5.4-3.2V4.8" fill="none" stroke="currentColor" strokeWidth="1" />
-      <path d="M8 7.8v6.4" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path
+        d="M8 1.4 13.4 4.5v7L8 14.6 2.6 11.5v-7z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M8 5.1 11.1 6.9v3.5L8 12.2 4.9 10.4V6.9z" fill="currentColor" />
+    </Icon>
+  )
+}
+
+export function SearchIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="7.1" cy="7.1" r="3.3" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="m9.6 9.6 3.1 3.1" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </Icon>
   )
 }
@@ -36,6 +50,53 @@ export function CatalogIcon(): ReactElement {
         stroke="currentColor"
         strokeWidth="1"
       />
+    </Icon>
+  )
+}
+
+export function SourceIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M8 1.8v2.2M8 12v2.2M1.8 8h2.2M12 8h2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </Icon>
+  )
+}
+
+export function RefreshIcon(): ReactElement {
+  return (
+    <Icon>
+      <path
+        d="M13.2 8A5.2 5.2 0 1 1 11.6 4.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M11.4 2.2v2.6h2.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Icon>
+  )
+}
+
+export function SpaceIcon(): ReactElement {
+  return (
+    <Icon>
+      <path d="M8 1.8 13.4 4.8 8 7.8 2.6 4.8z" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path d="M2.6 4.8v6.2L8 14.2l5.4-3.2V4.8" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path d="M8 7.8v6.4" fill="none" stroke="currentColor" strokeWidth="1" />
     </Icon>
   )
 }
@@ -73,6 +134,20 @@ export function PanelChevron(props: { direction: "left" | "right" }): ReactEleme
         strokeWidth="1.2"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </Icon>
+  )
+}
+
+export function PlusIcon(): ReactElement {
+  return (
+    <Icon>
+      <path
+        d="M8 3.2v9.6M3.2 8h9.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
       />
     </Icon>
   )

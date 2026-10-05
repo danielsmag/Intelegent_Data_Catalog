@@ -293,6 +293,20 @@ class RegistryService:
         """Return one catalog table."""
         return table_read(self._table(table_id))
 
+    def find_table_by_source_key(
+        self,
+        data_source_id: UUID,
+        source_key: str,
+    ) -> CatalogTableRead | None:
+        """Return the table for a source key, or none when it is not registered."""
+        row: CatalogTableRow | None = self._repo.find_table_by_source_key(
+            data_source_id,
+            source_key,
+        )
+        if row is None:
+            return None
+        return table_read(row)
+
     def update_table(self, table_id: UUID, patch: CatalogTableUpdate) -> CatalogTableRead:
         """Patch user fields and the manual scope assignment."""
         row: CatalogTableRow = self._table(table_id)

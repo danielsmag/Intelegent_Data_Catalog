@@ -1,6 +1,8 @@
 """HTTP and service models for the application catalog."""
 
 from datetime import datetime
+from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
@@ -774,6 +776,63 @@ class SyncRunUpdate(BaseModel):
             return None
         assert_no_secrets(value, "checkpoint")
         return value
+
+
+class AttachmentOutcome(StrEnum):
+    """What happened when a source table was attached to a scope."""
+
+    CREATED = "created"
+    ALREADY_IN_SCOPE = "already_in_scope"
+    ALREADY_ELSEWHERE = "already_elsewhere"
+
+
+class ScopeAttachmentCreate(BaseModel):
+    """Attach tables from a catalog source. Omit tables to attach the whole schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: Literal["polaris", "trino"]
+    catalog: str = Field(min_length=1, max_length=512)
+    namespace: str = Field(min_length=1, max_length=512)
+    tables: list[str] | None = None
+
+    @field_validator("catalog", "namespace")
+    @classmethod
+    def _exact(cls, value: str) -> str:
+        return exact_identifier(value)
+
+    @field_validator("tables")
+    @classmethod
+    def _tables(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if len(value) == 0:
+            raise ValueError("tables must name at least one table, or be omitted")
+        cleaned: list[str] = []
+        name: str
+        for name in value:
+            cleaned.append(exact_identifier(name))
+        return cleaned
+
+
+class AttachmentItem(BaseModel):
+    """One table considered during an attach."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    source_key: str
+    outcome: AttachmentOutcome
+    table_id: UUID | None
+    scope_id: UUID | None
+
+
+class ScopeAttachmentResult(BaseModel):
+    """Tables created or already registered."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AttachmentItem]
 
 
 class SyncRunRead(BaseModel):

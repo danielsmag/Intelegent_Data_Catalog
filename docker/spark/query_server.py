@@ -28,8 +28,6 @@ class SparkQueryServer(ThreadingHTTPServer):
     def rebuild_spark(self) -> None:
         """Start a new session so Iceberg requests a new Polaris token."""
         self.spark.stop()
-        SparkSession.clearActiveSession()
-        SparkSession.clearDefaultSession()
         self.spark = SparkSession.builder.getOrCreate()
 
 

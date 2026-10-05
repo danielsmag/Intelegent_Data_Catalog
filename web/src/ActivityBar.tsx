@@ -1,6 +1,6 @@
 import type { ReactElement } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { CatalogIcon, GraphIcon, QueryIcon, SpaceIcon, TableIcon } from "./icons"
+import { BrandMark, CatalogIcon, GraphIcon, QueryIcon, SpaceIcon, TableIcon } from "./icons"
 import { setSpacesSidebarOpen } from "./spacesSidebar"
 
 type Item = {
@@ -20,6 +20,12 @@ export function ActivityBar(): ReactElement {
       current: path === "/" || path.startsWith("/spaces") || path.startsWith("/scopes") || path.startsWith("/registry/"),
     },
     {
+      to: "/catalog",
+      label: "Catalog",
+      icon: <CatalogIcon />,
+      current: path.startsWith("/catalog"),
+    },
+    {
       to: "/search",
       label: "Search",
       icon: <QueryIcon />,
@@ -37,15 +43,12 @@ export function ActivityBar(): ReactElement {
       icon: <TableIcon />,
       current: path === "/query",
     },
-    {
-      to: "/iceberg",
-      label: "Iceberg",
-      icon: <CatalogIcon />,
-      current: path.startsWith("/iceberg") || path.startsWith("/catalog/"),
-    },
   ]
   return (
     <nav className="activity" aria-label="Views">
+      <div className="activity-brand" aria-hidden="true">
+        <BrandMark />
+      </div>
       {items.map((item: Item) => (
         <Link
           key={item.to}

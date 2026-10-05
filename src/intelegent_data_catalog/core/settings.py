@@ -85,12 +85,12 @@ class QuerySettings(BaseModel):
 
 
 class DatabaseSettings(BaseModel):
-    """Application catalog database. This is not the Polaris or Marquez database."""
+    """Application catalog database on the shared PostgreSQL server."""
 
     model_config = ConfigDict(extra="forbid")
 
     url: str = Field(
-        default="postgresql+psycopg://catalog:catalog@127.0.0.1:5433/catalog",
+        default="postgresql+psycopg://catalog:catalog@127.0.0.1:5432/catalog",
         min_length=1,
     )
     auto_migrate: bool = False

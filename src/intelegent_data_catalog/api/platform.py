@@ -1,5 +1,7 @@
 """Request-scoped catalog platform. Discovery and query execution stay separate."""
 
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.catalog.services.query_service import QueryService
@@ -7,7 +9,15 @@ from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import TrinoUnavailableError
 from intelegent_data_catalog.graph.neo4j_store import Neo4jProjection
 from intelegent_data_catalog.graph.service import GraphService
-from intelegent_data_catalog.lineage.marquez import MarquezClient
+from intelegent_data_catalog.knowledge.agents.table_agent import TableAgent
+from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
+from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
+    TableAgentFactory,
+    build_table_agent_factory,
+)
+from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
+from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
+from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
@@ -21,6 +31,7 @@ class RequestPlatform:
     """Services for one catalog request."""
 
     def __init__(self, session: Session, settings: AppSettings, query: QueryService) -> None:
+        self._session: Session = session
         self.registry: RegistryService = RegistryService(session)
         self.annotations: CatalogAnnotations = CatalogAnnotations(session)
         neo4j: Neo4jProjection | None = None
@@ -34,6 +45,7 @@ class RequestPlatform:
         lineage: MarquezClient | None = None
         if settings.marquez.enabled:
             lineage = MarquezClient(settings.marquez.url, settings.marquez.timeout_seconds)
+        self._lineage: LineageReader | None = lineage
         self.graph: GraphService = GraphService(session, lineage, neo4j)
         source: TrinoCatalogSource | _UnconfiguredTrino
         if settings.trino.enabled:
@@ -55,6 +67,22 @@ class RequestPlatform:
         )
         self.query: QueryService = query
         self.sample_limit: int = settings.query.sample_limit
+
+    def build_knowledge_context(
+        self,
+        table_id: UUID,
+        options: TableContextOptions,
+    ) -> TableAnalysisContext:
+        """Build one table context. This does not write Neo4j or call a model."""
+        reader: LineageReader = self._lineage if self._lineage is not None else EmptyLineageReader()
+        factory: TableAgentFactory = build_table_agent_factory(
+            self._session,
+            self.graph,
+            reader,
+            UnconfiguredDataProfiler(),
+        )
+        agent: TableAgent = factory.create(table_id)
+        return agent.build_context(options)
 
 
 class _UnconfiguredTrino:

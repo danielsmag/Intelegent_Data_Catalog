@@ -1,17 +1,18 @@
 import { useEffect, useState, type ReactElement } from "react"
 import { useParams } from "react-router-dom"
 import { ActivityBar } from "./ActivityBar"
-import { errorMessage, fetchTable, fetchTree, isAbortError } from "./api"
+import { errorMessage, fetchExplorerTable, fetchExplorerTree, isAbortError } from "./api"
 import { CatalogTreePane } from "./CatalogTree"
 import { TablePane } from "./TablePane"
-import type { CatalogTree, TableDetail } from "./types"
+import type { ExplorerTree, TableDetail } from "./types"
 
 export function Explorer(): ReactElement {
   const params: Readonly<Record<string, string | undefined>> = useParams()
+  const source: string | undefined = params.source
   const catalog: string | undefined = params.catalog
   const namespace: string | undefined = params.namespace
   const table: string | undefined = params.table
-  const [tree, setTree] = useState<CatalogTree | null>(null)
+  const [tree, setTree] = useState<ExplorerTree | null>(null)
   const [treeError, setTreeError] = useState<string | null>(null)
   const [treeLoading, setTreeLoading] = useState<boolean>(true)
   const [query, setQuery] = useState<string>("")
@@ -24,8 +25,8 @@ export function Explorer(): ReactElement {
     const controller: AbortController = new AbortController()
     setTreeLoading(true)
     setTreeError(null)
-    void fetchTree(controller.signal)
-      .then((loaded: CatalogTree) => {
+    void fetchExplorerTree(controller.signal)
+      .then((loaded: ExplorerTree) => {
         setTree(loaded)
       })
       .catch((err: unknown) => {
@@ -46,7 +47,7 @@ export function Explorer(): ReactElement {
   }, [reload])
 
   useEffect(() => {
-    if (catalog === undefined || namespace === undefined || table === undefined) {
+    if (source === undefined || catalog === undefined || namespace === undefined || table === undefined) {
       setDetail(null)
       setDetailError(null)
       setDetailLoading(false)
@@ -56,7 +57,7 @@ export function Explorer(): ReactElement {
     setDetail(null)
     setDetailError(null)
     setDetailLoading(true)
-    void fetchTable(catalog, namespace, table, controller.signal)
+    void fetchExplorerTable(source, catalog, namespace, table, controller.signal)
       .then((loaded: TableDetail) => {
         setDetail(loaded)
       })
@@ -75,12 +76,14 @@ export function Explorer(): ReactElement {
     return () => {
       controller.abort()
     }
-  }, [catalog, namespace, table])
+  }, [source, catalog, namespace, table])
 
   const qualified: string | null =
-    catalog !== undefined && namespace !== undefined && table !== undefined
-      ? `${catalog}.${namespace}.${table}`
+    source !== undefined && catalog !== undefined && namespace !== undefined && table !== undefined
+      ? `${source} / ${catalog}.${namespace}.${table}`
       : null
+  const sourceName: string =
+    tree?.sources.find((item) => item.id === source)?.name ?? source ?? "Catalog"
 
   return (
     <div className="shell">
@@ -95,12 +98,15 @@ export function Explorer(): ReactElement {
           onRetry={() => {
             setReload((current: number) => current + 1)
           }}
+          selectedSource={source}
           selectedCatalog={catalog}
           selectedNamespace={namespace}
           selectedTable={table}
         />
         <TablePane
           key={qualified ?? "none"}
+          source={source}
+          sourceName={sourceName}
           catalog={catalog}
           namespace={namespace}
           table={table}
@@ -110,7 +116,7 @@ export function Explorer(): ReactElement {
         />
       </div>
       <footer className="status">
-        <span>Polaris</span>
+        <span>Catalog</span>
         <span>{qualified ?? "No table selected"}</span>
       </footer>
     </div>

@@ -1,42 +1,59 @@
-import type { CatalogTree, QueryResult, TableDetail } from "./types"
+import type { ExplorerTree, QueryResult, TableDetail } from "./types"
 
-export async function fetchTree(signal: AbortSignal): Promise<CatalogTree> {
-  const response: Response = await fetch("/api/v1/tree", { signal })
-  if (!response.ok) {
-    const detail: string = await readDetail(response)
-    throw new Error(detail)
-  }
-  return (await response.json()) as CatalogTree
+export async function fetchExplorerTree(signal: AbortSignal): Promise<ExplorerTree> {
+  return readJson<ExplorerTree>("/api/v1/explorer/tree", signal)
 }
 
-export async function fetchTable(
+export async function fetchExplorerTable(
+  source: string,
   catalog: string,
   namespace: string,
   table: string,
   signal: AbortSignal,
 ): Promise<TableDetail> {
-  const path: string = `/api/v1/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
-  const response: Response = await fetch(path, { signal })
-  if (!response.ok) {
-    const detail: string = await readDetail(response)
-    throw new Error(detail)
-  }
-  return (await response.json()) as TableDetail
+  return readJson<TableDetail>(explorerTablePath(source, catalog, namespace, table), signal)
 }
 
-export async function fetchSample(
+export async function fetchExplorerSample(
+  source: string,
   catalog: string,
   namespace: string,
   table: string,
   signal: AbortSignal,
 ): Promise<QueryResult> {
-  const path: string = `/api/v1/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}/sample`
+  return readJson<QueryResult>(`${explorerTablePath(source, catalog, namespace, table)}/sample`, signal)
+}
+
+export function catalogTablePath(source: string, catalog: string, namespace: string, table: string): string {
+  return `/catalog/${encodeURIComponent(source)}/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
+}
+
+export function queryPagePath(catalog: string, namespace: string, table: string): string {
+  const sql: string = `SELECT * FROM ${catalog}.${namespace}.${table} LIMIT 100`
+  const params: URLSearchParams = new URLSearchParams({ sql })
+  return `/query?${params.toString()}`
+}
+
+export function formatTimestamp(lastUpdatedMs: number | null): string {
+  if (lastUpdatedMs === null) {
+    return "Unknown"
+  }
+  return new Date(lastUpdatedMs).toLocaleString()
+}
+
+async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
   const response: Response = await fetch(path, { signal })
   if (!response.ok) {
-    const detail: string = await readDetail(response)
-    throw new Error(detail)
+    throw new Error(await readDetail(response))
   }
-  return (await response.json()) as QueryResult
+  return (await response.json()) as T
+}
+
+function explorerTablePath(source: string, catalog: string, namespace: string, table: string): string {
+  return (
+    `/api/v1/explorer/sources/${encodeURIComponent(source)}` +
+    `/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
+  )
 }
 
 export async function runQuery(sql: string, signal: AbortSignal): Promise<QueryResult> {
@@ -51,23 +68,6 @@ export async function runQuery(sql: string, signal: AbortSignal): Promise<QueryR
     throw new Error(detail)
   }
   return (await response.json()) as QueryResult
-}
-
-export function queryPagePath(catalog: string, namespace: string, table: string): string {
-  const sql: string = `SELECT * FROM ${catalog}.${namespace}.${table} LIMIT 100`
-  const params: URLSearchParams = new URLSearchParams({ sql })
-  return `/query?${params.toString()}`
-}
-
-export function tablePath(catalog: string, namespace: string, table: string): string {
-  return `/catalog/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
-}
-
-export function formatTimestamp(lastUpdatedMs: number | null): string {
-  if (lastUpdatedMs === null) {
-    return "Unknown"
-  }
-  return new Date(lastUpdatedMs).toLocaleString()
 }
 
 export function isAbortError(err: unknown): boolean {

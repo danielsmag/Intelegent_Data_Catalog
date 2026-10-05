@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
+from intelegent_data_catalog.catalog.services.explorer_service import ExplorerService
 from intelegent_data_catalog.catalog.services.query_service import QueryService
+from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import PersistenceUnavailableError
 from intelegent_data_catalog.persistence.database import CatalogDatabase
@@ -42,6 +44,14 @@ def get_query_service(
     return service
 
 
+def get_explorer_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> ExplorerService:
+    """Return the multi-source catalog browser."""
+    service: ExplorerService = container.explorer_service()
+    return service
+
+
 def get_registry_service(
     container: Annotated[AppContainer, Depends(get_container)],
 ) -> Iterator[RegistryService]:
@@ -63,7 +73,31 @@ def get_registry_service(
 
 CatalogServiceDep = Annotated[CatalogService, Depends(get_catalog_service)]
 QueryServiceDep = Annotated[QueryService, Depends(get_query_service)]
+ExplorerServiceDep = Annotated[ExplorerService, Depends(get_explorer_service)]
 RegistryServiceDep = Annotated[RegistryService, Depends(get_registry_service)]
+
+
+def get_scope_attachment(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[ScopeAttachmentService]:
+    """Open one catalog session and attach source tables into a scope."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    explorer: ExplorerService = container.explorer_service()
+    service: ScopeAttachmentService = ScopeAttachmentService(RegistryService(session), explorer)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+ScopeAttachmentDep = Annotated[ScopeAttachmentService, Depends(get_scope_attachment)]
 
 
 def get_platform(

@@ -19,8 +19,16 @@ export type CatalogNode = {
   namespaces: NamespaceNode[]
 }
 
-export type CatalogTree = {
+export type ExplorerSource = {
+  id: string
+  name: string
+  available: boolean
+  error: string | null
   catalogs: CatalogNode[]
+}
+
+export type ExplorerTree = {
+  sources: ExplorerSource[]
 }
 
 export type TableDetail = {

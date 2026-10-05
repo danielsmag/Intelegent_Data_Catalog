@@ -31,7 +31,6 @@ iceberg.rest-catalog.security=OAUTH2
 iceberg.rest-catalog.oauth2.credential=${POLARIS_CLIENT_ID}:${POLARIS_CLIENT_SECRET}
 iceberg.rest-catalog.oauth2.scope=PRINCIPAL_ROLE:ALL
 iceberg.rest-catalog.oauth2.server-uri=${POLARIS_TOKEN_URI}
-iceberg.rest-catalog.http-headers=Polaris-Realm: ${POLARIS_REALM}
 iceberg.rest-catalog.vended-credentials-enabled=true
 fs.native-s3.enabled=true
 s3.endpoint=http://minio:9000
@@ -43,7 +42,7 @@ EOF
 
 cat >/etc/trino/catalog/appdb.properties <<EOF
 connector.name=postgresql
-connection-url=jdbc:postgresql://source-db:5432/${SOURCE_DB_NAME:-sales}
+connection-url=jdbc:postgresql://postgres:5432/${SOURCE_DB_NAME:-sales}
 connection-user=${SOURCE_DB_USER:-sales}
 connection-password=${SOURCE_DB_PASSWORD:-sales}
 EOF

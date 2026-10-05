@@ -9,8 +9,11 @@ from dependency_injector import containers, providers
 
 from intelegent_data_catalog.catalog.repositories.catalog import CatalogRepository
 from intelegent_data_catalog.catalog.repositories.polaris import PolarisClient
+from intelegent_data_catalog.catalog.repositories.polaris_browser import PolarisCatalogBrowser
 from intelegent_data_catalog.catalog.repositories.spark_query import SparkQueryClient
+from intelegent_data_catalog.catalog.repositories.trino_browser import TrinoCatalogBrowser
 from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
+from intelegent_data_catalog.catalog.services.explorer_service import ExplorerService
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.logger import configure_logging
@@ -20,6 +23,7 @@ from intelegent_data_catalog.core.settings import (
     resolve_project_root,
 )
 from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.sources.trino.client import TrinoClient
 
 
 def open_http_client(settings: AppSettings) -> Iterator[httpx.Client]:
@@ -81,6 +85,32 @@ def build_query_service(
     return QueryService(spark=spark, guard=guard, settings=settings.query)
 
 
+def build_explorer_service(
+    polaris: PolarisClient,
+    query: QueryService,
+    settings: AppSettings,
+    logger: logging.Logger,
+) -> ExplorerService:
+    """Build the catalog browser for Polaris and, when configured, Trino."""
+    trino: TrinoCatalogBrowser | None = None
+    if settings.trino.enabled:
+        client: TrinoClient = TrinoClient(
+            host=settings.trino.host,
+            port=settings.trino.port,
+            user=settings.trino.user,
+            timeout_seconds=settings.trino.timeout_seconds,
+        )
+        trino = TrinoCatalogBrowser(client)
+    explorer_logger: logging.Logger = logger.getChild("explorer")
+    return ExplorerService(
+        polaris=PolarisCatalogBrowser(polaris, query),
+        trino=trino,
+        sample_limit=settings.query.sample_limit,
+        max_sample_limit=settings.query.max_sample_limit,
+        logger=explorer_logger,
+    )
+
+
 def build_database(settings: AppSettings) -> CatalogDatabase:
     """Build the application catalog database from settings."""
     return CatalogDatabase(settings.database.url)
@@ -126,6 +156,13 @@ class AppContainer(containers.DeclarativeContainer):
         spark_query_client,
         sql_guard,
         settings,
+    )
+    explorer_service: providers.Singleton[ExplorerService] = providers.Singleton(
+        build_explorer_service,
+        polaris_client,
+        query_service,
+        settings,
+        logger,
     )
     database: providers.Singleton[CatalogDatabase] = providers.Singleton(
         build_database,

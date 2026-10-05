@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactElement } from "react"
-import { Link, useLocation, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams, type NavigateFunction } from "react-router-dom"
 import { errorMessage, isAbortError } from "./api"
-import { Chevron, PanelChevron, SchemaIcon, SpaceIcon, TableIcon } from "./icons"
+import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
+import { CreateRecordForm } from "./CreateRecordForm"
+import { Chevron, PanelChevron, PlusIcon, SchemaIcon, SearchIcon, SpaceIcon, TableIcon } from "./icons"
 import {
+  createScope,
+  createSpace,
   fetchHierarchy,
   type HierarchyScope,
   type HierarchySpace,
@@ -21,6 +25,10 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [loading, setLoading] = useState<boolean>(true)
   const [query, setQuery] = useState<string>("")
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [addingSpace, setAddingSpace] = useState<boolean>(false)
+  const [addingScopeId, setAddingScopeId] = useState<string | null>(null)
+  const revision: number = useCatalogRevision()
+  const navigate: NavigateFunction = useNavigate()
   const params: Readonly<Record<string, string | undefined>> = useParams()
   const path: string = useLocation().pathname
   const selectedSpace: string | undefined = path.startsWith("/spaces/") ? params.spaceId : undefined
@@ -34,7 +42,6 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
 
   useEffect(() => {
     const controller: AbortController = new AbortController()
-    setLoading(true)
     setError(null)
     void fetchHierarchy(controller.signal)
       .then((loaded: HierarchySpace[]) => {
@@ -44,7 +51,6 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
         if (isAbortError(err)) {
           return
         }
-        setSpaces(null)
         setError(errorMessage(err))
       })
       .finally(() => {
@@ -55,7 +61,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
     return () => {
       controller.abort()
     }
-  }, [])
+  }, [revision])
 
   function toggle(key: string): void {
     if (searching) {
@@ -83,17 +89,40 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   return (
     <aside className={sidebarClass} aria-label="Spaces">
       <div className="sidebar-head">
-        {props.collapsed ? null : <div className="sidebar-title">{props.title}</div>}
-        <button
-          type="button"
-          className="sidebar-toggle"
-          aria-expanded={!props.collapsed}
-          aria-label={props.collapsed ? "Expand spaces sidebar" : "Minimize spaces sidebar"}
-          title={props.collapsed ? "Expand sidebar" : "Minimize sidebar"}
-          onClick={props.onToggleCollapsed}
-        >
-          <PanelChevron direction={props.collapsed ? "right" : "left"} />
-        </button>
+        {props.collapsed ? (
+          <span className="sidebar-rail-label">{props.title}</span>
+        ) : (
+          <div className="sidebar-title">
+            <span>{props.title}</span>
+          </div>
+        )}
+        <div className="sidebar-actions">
+          {props.collapsed ? null : (
+            <button
+              type="button"
+              className="sidebar-toggle"
+              aria-expanded={addingSpace}
+              aria-label={addingSpace ? "Close add space" : "Add space"}
+              title={addingSpace ? "Close add space" : "Add space"}
+              onClick={() => {
+                setAddingScopeId(null)
+                setAddingSpace((open: boolean) => !open)
+              }}
+            >
+              <PlusIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-expanded={!props.collapsed}
+            aria-label={props.collapsed ? "Expand spaces sidebar" : "Minimize spaces sidebar"}
+            title={props.collapsed ? "Expand sidebar" : "Minimize sidebar"}
+            onClick={props.onToggleCollapsed}
+          >
+            <PanelChevron direction={props.collapsed ? "right" : "left"} />
+          </button>
+        </div>
       </div>
       {props.collapsed ? null : (
         <>
@@ -108,16 +137,36 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
           <TableIcon /> Table
         </span>
       </div>
-      <input
-        className="search"
-        type="search"
-        placeholder="Filter hierarchy"
-        value={query}
-        aria-label="Filter spaces, scopes, and tables"
-        onChange={(event: ChangeEvent<HTMLInputElement>) => {
-          setQuery(event.target.value)
-        }}
-      />
+      <label className="search-field">
+        <SearchIcon />
+        <input
+          className="search"
+          type="search"
+          placeholder="Filter hierarchy"
+          value={query}
+          aria-label="Filter spaces, scopes, and tables"
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            setQuery(event.target.value)
+          }}
+        />
+      </label>
+      {addingSpace ? (
+        <CreateRecordForm
+          idPrefix="tree-space"
+          nameLabel="Space name"
+          submitLabel="Add space"
+          compact
+          onCancel={() => {
+            setAddingSpace(false)
+          }}
+          onCreate={async (input) => {
+            const created = await createSpace(input)
+            setAddingSpace(false)
+            bumpCatalogRevision()
+            navigate(`/spaces/${created.id}`)
+          }}
+        />
+      ) : null}
       <div className="tree" role="tree">
         {loading ? <p className="tree-status">Loading spaces…</p> : null}
         {error !== null ? <p className="tree-status error-text">{error}</p> : null}
@@ -145,7 +194,42 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                   <SpaceIcon />
                   <span className="tree-label">{space.name}</span>
                 </Link>
+                <button
+                  type="button"
+                  className="tree-add"
+                  aria-expanded={addingScopeId === space.id}
+                  aria-label={addingScopeId === space.id ? `Close add scope in ${space.name}` : `Add scope in ${space.name}`}
+                  title="Add scope"
+                  onClick={() => {
+                    setAddingSpace(false)
+                    setAddingScopeId((current: string | null) => (current === space.id ? null : space.id))
+                  }}
+                >
+                  <PlusIcon />
+                </button>
               </div>
+              {addingScopeId === space.id ? (
+                <CreateRecordForm
+                  idPrefix={`tree-scope-${space.id}`}
+                  nameLabel="Scope name"
+                  submitLabel="Add scope"
+                  compact
+                  onCancel={() => {
+                    setAddingScopeId(null)
+                  }}
+                  onCreate={async (input) => {
+                    const created = await createScope(space.id, input)
+                    setAddingScopeId(null)
+                    setCollapsed((current: ReadonlySet<string>) => {
+                      const next: Set<string> = new Set(current)
+                      next.delete(spaceKey)
+                      return next
+                    })
+                    bumpCatalogRevision()
+                    navigate(`/scopes/${created.id}`)
+                  }}
+                />
+              ) : null}
               {spaceClosed
                 ? null
                 : space.scopes.map((scope: HierarchyScope) => {

@@ -122,8 +122,38 @@ export type TagRecord = {
   origin: string | null
 }
 
+export type NamedCreate = {
+  name: string
+  description: string | null
+}
+
+export type AttachmentOutcome = "created" | "already_in_scope" | "already_elsewhere"
+
+export type AttachmentItem = {
+  name: string
+  source_key: string
+  outcome: AttachmentOutcome
+  table_id: string | null
+  scope_id: string | null
+}
+
+export type ScopeAttachment = {
+  source_id: string
+  catalog: string
+  namespace: string
+  tables: string[] | null
+}
+
 export async function fetchSpaces(signal: AbortSignal): Promise<SpaceRecord[]> {
   return readJson<SpaceRecord[]>("/api/v1/spaces", signal)
+}
+
+export async function createSpace(body: NamedCreate): Promise<SpaceRecord> {
+  return writeJson<SpaceRecord>("/api/v1/spaces", body)
+}
+
+export async function createScope(spaceId: string, body: NamedCreate): Promise<ScopeRecord> {
+  return writeJson<ScopeRecord>(`/api/v1/spaces/${spaceId}/scopes`, body)
 }
 
 export async function fetchScopes(spaceId: string, signal: AbortSignal): Promise<ScopeRecord[]> {
@@ -136,6 +166,22 @@ export async function fetchSpace(spaceId: string, signal: AbortSignal): Promise<
 
 export async function fetchScope(scopeId: string, signal: AbortSignal): Promise<ScopeRecord> {
   return readJson<ScopeRecord>(`/api/v1/scopes/${scopeId}`, signal)
+}
+
+export async function attachScopeCatalog(
+  scopeId: string,
+  body: ScopeAttachment,
+): Promise<AttachmentItem[]> {
+  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/attachments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  const payload: { items: AttachmentItem[] } = (await response.json()) as { items: AttachmentItem[] }
+  return payload.items
 }
 
 export async function fetchScopeTables(
@@ -200,6 +246,83 @@ export async function fetchBindings(
 
 export async function fetchTableTags(tableId: string, signal: AbortSignal): Promise<TagRecord[]> {
   return readJson<TagRecord[]>(`/api/v1/tables/${tableId}/tags`, signal)
+}
+
+export type KnowledgeColumn = {
+  id: string
+  name: string
+  data_type: string | null
+  discovered_data_type: string | null
+  is_primary_key: boolean | null
+  is_unique: boolean | null
+  is_foreign_key: boolean
+}
+
+export type KnowledgeRelationship = {
+  id: string
+  relationship_type: string
+  status: string
+  source_table_id: string
+  target_table_id: string
+  column_mappings: { source_column_id: string; target_column_id: string }[]
+}
+
+export type KnowledgeNeighbor = {
+  table_id: string
+  name: string
+  direction: string
+}
+
+export type KnowledgeDataset = {
+  namespace: string
+  name: string
+  resolved: boolean
+}
+
+export type KnowledgeJob = {
+  namespace: string
+  name: string
+}
+
+export type KnowledgeContext = {
+  table: {
+    name: string
+    description: string | null
+    source_description: string | null
+    space: { name: string }
+    scope: { name: string }
+    tags: { name: string }[]
+  }
+  columns: KnowledgeColumn[]
+  data_profile: { access_mode: string; row_count: number | null } | null
+  existing_relationships: KnowledgeRelationship[]
+  graph_neighbors: KnowledgeNeighbor[]
+  lineage: {
+    upstream_datasets: KnowledgeDataset[]
+    downstream_datasets: KnowledgeDataset[]
+    producer_jobs: KnowledgeJob[]
+    consumer_jobs: KnowledgeJob[]
+  } | null
+}
+
+export async function buildKnowledgeContext(
+  tableId: string,
+  signal: AbortSignal,
+): Promise<KnowledgeContext> {
+  const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      include_data_profile: false,
+      include_graph: true,
+      include_lineage: true,
+    }),
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as KnowledgeContext
 }
 
 export async function fetchDataSources(signal: AbortSignal): Promise<DataSourceRecord[]> {
@@ -268,17 +391,52 @@ async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
   return (await response.json()) as T
 }
 
+async function writeJson<T>(path: string, body: NamedCreate): Promise<T> {
+  const payload: { name: string; description?: string } = { name: body.name }
+  if (body.description !== null) {
+    payload.description = body.description
+  }
+  const response: Response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as T
+}
+
 async function readDetail(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json()
     if (typeof body === "object" && body !== null && "detail" in body) {
-      const detail: unknown = body.detail
-      if (typeof detail === "string" && detail !== "") {
-        return detail
-      }
+      return detailMessage(body.detail) ?? `Request failed (${response.status})`
     }
   } catch {
     return `Request failed (${response.status})`
   }
   return `Request failed (${response.status})`
+}
+
+function detailMessage(detail: unknown): string | null {
+  if (typeof detail === "string" && detail !== "") {
+    return detail
+  }
+  if (!Array.isArray(detail)) {
+    return null
+  }
+  const messages: string[] = []
+  for (const item of detail) {
+    if (typeof item === "object" && item !== null && "msg" in item) {
+      const msg: unknown = item.msg
+      if (typeof msg === "string" && msg !== "") {
+        messages.push(msg)
+      }
+    }
+  }
+  if (messages.length === 0) {
+    return null
+  }
+  return messages.join("; ")
 }

@@ -68,20 +68,34 @@ services:
       - ./docker/minio/create-bucket.sh:/create-bucket.sh:ro
     entrypoint: ["/bin/sh", "/create-bucket.sh"]
 
-  polaris-db:
-    image: postgres:18.4
-    container_name: intelegent-data-catalog-polaris-db
+  postgres:
+    image: postgres:18.6
+    container_name: intelegent-data-catalog-postgres
     restart: unless-stopped
-    shm_size: 128mb
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POLARIS_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${POLARIS_DB_NAME:-POLARIS}
+      POSTGRES_DB: postgres
       POSTGRES_INITDB_ARGS: "--encoding UTF8 --data-checksums"
+      POLARIS_DB_NAME: ${POLARIS_DB_NAME:-POLARIS}
+      CATALOG_DB_USER: ${CATALOG_DB_USER:-catalog}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-catalog}
+      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
+      SOURCE_DB_USER: ${SOURCE_DB_USER:-sales}
+      SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:-sales}
+      SOURCE_DB_NAME: ${SOURCE_DB_NAME:-sales}
+      MARQUEZ_DB_USER: marquez
+      MARQUEZ_DB_PASSWORD: marquez
+      MARQUEZ_DB_NAME: marquez
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - polaris_db:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/01-databases.sh:ro
+      - ./docker/source-db/init.sql:/opt/source-init/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -92,12 +106,12 @@ services:
     container_name: intelegent-data-catalog-polaris-bootstrap
     restart: "no"
     depends_on:
-      polaris-db:
+      postgres:
         condition: service_healthy
     environment:
       POLARIS_PERSISTENCE_TYPE: relational-jdbc
       POLARIS_PERSISTENCE_RELATIONAL_JDBC_DATABASE_TYPE: postgresql
-      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/${POLARIS_DB_NAME:-POLARIS}
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POLARIS_DB_NAME:-POLARIS}
       QUARKUS_DATASOURCE_USERNAME: ${POLARIS_DB_USER:-postgres}
       QUARKUS_DATASOURCE_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
     command:
@@ -110,7 +124,7 @@ services:
     container_name: intelegent-data-catalog-polaris
     restart: unless-stopped
     depends_on:
-      polaris-db:
+      postgres:
         condition: service_healthy
       polaris-bootstrap:
         condition: service_completed_successfully
@@ -130,7 +144,7 @@ services:
       POLARIS_PERSISTENCE_RELATIONAL_JDBC_MAX_RETRIES: 5
       POLARIS_PERSISTENCE_RELATIONAL_JDBC_INITIAL_DELAY_IN_MS: 100
       POLARIS_PERSISTENCE_RELATIONAL_JDBC_MAX_DURATION_IN_MS: 5000
-      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://polaris-db:5432/${POLARIS_DB_NAME:-POLARIS}
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POLARIS_DB_NAME:-POLARIS}
       QUARKUS_DATASOURCE_USERNAME: ${POLARIS_DB_USER:-postgres}
       QUARKUS_DATASOURCE_PASSWORD: ${POLARIS_DB_PASSWORD:-postgres}
       POLARIS_REALM_CONTEXT_REALMS: ${POLARIS_REALM:-POLARIS}
@@ -178,45 +192,6 @@ services:
       - ./docker/polaris/setup.sh:/setup.sh:ro
     entrypoint: ["/bin/sh", "/setup.sh"]
 
-  catalog-db:
-    image: postgres:16
-    container_name: intelegent-data-catalog-catalog-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${CATALOG_DB_USER:-catalog}
-      POSTGRES_PASSWORD: ${CATALOG_DB_PASSWORD:-catalog}
-      POSTGRES_DB: ${CATALOG_DB_NAME:-catalog}
-    ports:
-      - "${CATALOG_DB_PORT:-5433}:5432"
-    volumes:
-      - catalog_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-
-  source-db:
-    image: postgres:16
-    container_name: intelegent-data-catalog-source-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${SOURCE_DB_USER:-sales}
-      POSTGRES_PASSWORD: ${SOURCE_DB_PASSWORD:-sales}
-      POSTGRES_DB: ${SOURCE_DB_NAME:-sales}
-    ports:
-      - "${SOURCE_DB_PORT:-5434}:5432"
-    volumes:
-      - ./docker/source-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - source_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-
   trino:
     image: trinodb/trino:476
     container_name: intelegent-data-catalog-trino
@@ -226,10 +201,12 @@ services:
         condition: service_completed_successfully
       minio:
         condition: service_healthy
-      source-db:
+      postgres:
         condition: service_healthy
     entrypoint: ["/bin/bash", "/opt/trino/start.sh"]
     environment:
+      POLARIS_URI: http://polaris:8181/api/catalog
+      POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
       AWS_REGION: ${AWS_REGION:-us-west-2}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-polaris_root}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-polaris_pass}
@@ -256,7 +233,7 @@ services:
     container_name: intelegent-data-catalog-api
     restart: unless-stopped
     depends_on:
-      catalog-db:
+      postgres:
         condition: service_healthy
       polaris:
         condition: service_healthy
@@ -277,7 +254,7 @@ services:
       CATALOG_POLARIS__CATALOG: ${POLARIS_CATALOG_NAME:-catalog}
       CATALOG_POLARIS__CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
       CATALOG_POLARIS__CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
-      CATALOG_DATABASE__URL: postgresql+psycopg://${CATALOG_DB_USER:-catalog}:${CATALOG_DB_PASSWORD:-catalog}@catalog-db:5432/${CATALOG_DB_NAME:-catalog}
+      CATALOG_DATABASE__URL: postgresql+psycopg://${CATALOG_DB_USER:-catalog}:${CATALOG_DB_PASSWORD:-catalog}@postgres:5432/${CATALOG_DB_NAME:-catalog}
       CATALOG_DATABASE__AUTO_MIGRATE: "true"
       CATALOG_TRINO__ENABLED: "true"
       CATALOG_TRINO__HOST: trino
@@ -333,29 +310,12 @@ services:
       VITE_POLARIS_PRINCIPAL_SCOPE: PRINCIPAL_ROLE:ALL
       VITE_POLARIS_REALM_HEADER_NAME: Polaris-Realm
 
-  marquez-db:
-    image: postgres:16
-    container_name: intelegent-data-catalog-marquez-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: marquez
-      POSTGRES_PASSWORD: marquez
-      POSTGRES_DB: marquez
-    volumes:
-      - marquez_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U marquez -d marquez"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-
   marquez:
     image: marquezproject/marquez:0.51.1
     container_name: intelegent-data-catalog-marquez
     restart: unless-stopped
     depends_on:
-      marquez-db:
+      postgres:
         condition: service_healthy
     ports:
       - "${MARQUEZ_API_PORT:-5050}:5000"
@@ -363,7 +323,7 @@ services:
     environment:
       MARQUEZ_PORT: "5000"
       MARQUEZ_ADMIN_PORT: "5001"
-      POSTGRES_HOST: marquez-db
+      POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       SEARCH_ENABLED: "false"
       JAVA_OPTS: "-Xms128m -Xmx512m"
@@ -452,8 +412,5 @@ services:
 volumes:
   neo4j_data:
   minio_data:
-  polaris_db:
-  marquez_db:
-  catalog_db:
-  source_db:
+  postgres_data:
   spark_ivy:

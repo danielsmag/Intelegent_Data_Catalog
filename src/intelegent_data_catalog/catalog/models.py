@@ -48,6 +48,52 @@ class CatalogTree(BaseModel):
     catalogs: list[CatalogNode]
 
 
+POLARIS_SOURCE_ID: str = "polaris"
+TRINO_SOURCE_ID: str = "trino"
+
+
+class ExplorerSourceNode(BaseModel):
+    """One engine, such as Polaris or Trino, and the catalogs it contains."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    available: bool
+    error: str | None = None
+    catalogs: list[CatalogNode]
+
+
+class ExplorerTree(BaseModel):
+    """Catalog sidebar grouped by source."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sources: list[ExplorerSourceNode]
+
+
+class ObservedColumn(BaseModel):
+    """Column metadata read while attaching a table into a scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type_name: str
+    nullable: bool | None
+    comment: str | None
+    ordinal_position: int
+
+
+class ObservedTable(BaseModel):
+    """Table metadata read from a source before it is stored in a scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    kind: str
+    columns: list[ObservedColumn]
+
+
 class TableDetail(BaseModel):
     """Table metadata shown in the main pane."""
 

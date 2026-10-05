@@ -10,6 +10,7 @@ from intelegent_data_catalog.api.dependencies import PlatformDep
 from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.graph.document import GraphView
+from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
 from intelegent_data_catalog.query.spark_bridge import (
     NOT_CONFIGURED,
     SparkQueryPreview,
@@ -36,6 +37,16 @@ class SparkQueryResponse(BaseModel):
     message: str | None
     sql: str | None
     engine_ref_key: str | None
+
+
+class KnowledgeContextRequest(BaseModel):
+    """Which slices ``build_context`` should load. Data profiling stays off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_data_profile: bool = False
+    include_graph: bool = True
+    include_lineage: bool = True
 
 
 class GraphRebuildResponse(BaseModel):
@@ -138,6 +149,22 @@ def read_lineage(
 ) -> GraphView:
     """Return operational lineage around a table."""
     return platform.graph.lineage(table_id, depth, direction)
+
+
+@router.post("/tables/{table_id}/knowledge-context", response_model=TableAnalysisContext)
+def build_knowledge_context(
+    table_id: UUID,
+    platform: PlatformDep,
+    body: KnowledgeContextRequest | None = None,
+) -> TableAnalysisContext:
+    """Run TableAgent.build_context for one catalog table. No model call."""
+    selected: KnowledgeContextRequest = body if body is not None else KnowledgeContextRequest()
+    options: TableContextOptions = TableContextOptions(
+        include_data_profile=selected.include_data_profile,
+        include_graph=selected.include_graph,
+        include_lineage=selected.include_lineage,
+    )
+    return platform.build_knowledge_context(table_id, options)
 
 
 @router.get("/tables/{table_id}/context-graph", response_model=GraphView)
