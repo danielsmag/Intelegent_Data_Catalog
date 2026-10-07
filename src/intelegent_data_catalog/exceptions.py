@@ -96,6 +96,20 @@ class ProfileUnavailableError(CatalogError):
         super().__init__(message)
 
 
+class LlmError(CatalogError):
+    """Raised when a language model call fails. The message stays generic."""
+
+    def __init__(self, message: str = "language model is unavailable") -> None:
+        super().__init__(message)
+
+
+class LlmUnavailableError(LlmError):
+    """Raised when a call needs a language model and none is configured."""
+
+    def __init__(self, message: str = "language model is not configured") -> None:
+        super().__init__(message)
+
+
 class PersistenceUnavailableError(CatalogError):
     """Raised when the catalog database cannot be used. The message stays generic."""
 

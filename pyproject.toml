@@ -13,6 +13,7 @@ dependencies = [
     "neo4j>=6.3.1",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
+    "pydantic-ai-slim[anthropic,openai]>=2.54.0",
     "pydantic-settings>=2.15.0",
     "pyiceberg[pyarrow,sql-sqlite]>=0.12.0",
     "sqlalchemy>=2.0.54",

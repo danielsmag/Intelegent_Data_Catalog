@@ -18,6 +18,8 @@ from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
+from intelegent_data_catalog.llm.catalog import TableQuestionAgent
+from intelegent_data_catalog.llm.factory import build_table_question_agent
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
@@ -67,19 +69,21 @@ class RequestPlatform:
         )
         self.query: QueryService = query
         self.sample_limit: int = settings.query.sample_limit
+        self._question_agent: TableQuestionAgent = build_table_question_agent(settings.llm)
 
     def build_knowledge_context(
         self,
         table_id: UUID,
         options: TableContextOptions,
     ) -> TableAnalysisContext:
-        """Build one table context. This does not write Neo4j or call a model."""
+        """Build one table context. This does not write Neo4j or call the model."""
         reader: LineageReader = self._lineage if self._lineage is not None else EmptyLineageReader()
         factory: TableAgentFactory = build_table_agent_factory(
             self._session,
             self.graph,
             reader,
             UnconfiguredDataProfiler(),
+            question_agent=self._question_agent,
         )
         agent: TableAgent = factory.create(table_id)
         return agent.build_context(options)

@@ -1,8 +1,8 @@
 """Knowledge Builder foundation.
 
-A table agent is created for one catalog id, loads context, and can be discarded.
-Persistent knowledge stays in PostgreSQL. This package does not call a model
-and does not write to Neo4j.
+A table agent is created for one catalog id, loads context, and can ask the
+configured language model. Persistent knowledge stays in PostgreSQL. This
+package does not write to Neo4j.
 """
 
 from intelegent_data_catalog.knowledge.agents.table_agent import TableAgent

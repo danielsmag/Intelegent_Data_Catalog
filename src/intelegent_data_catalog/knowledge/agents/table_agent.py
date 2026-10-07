@@ -1,8 +1,8 @@
-"""Logical manager for one catalog table. Holds no profile cache and no model session."""
+"""Logical manager for one catalog table. Holds no profile cache and no chat history."""
 
 from uuid import UUID
 
-from intelegent_data_catalog.exceptions import ValidationAppError
+from intelegent_data_catalog.exceptions import LlmUnavailableError, ValidationAppError
 from intelegent_data_catalog.knowledge.access import (
     accept_column_profile,
     accept_comparison,
@@ -29,13 +29,14 @@ from intelegent_data_catalog.knowledge.models import (
     TableDataProfile,
 )
 from intelegent_data_catalog.knowledge.profiling.profiler import DataProfiler
+from intelegent_data_catalog.llm.catalog import TableQuestionAgent
 
 
 class TableAgent:
     """Load metadata, statistics, neighbors, and lineage for one table id.
 
     Create it through ``TableAgentFactory`` and drop it when the call finishes.
-    PostgreSQL keeps the catalog. This object does not.
+    PostgreSQL keeps the catalog. ``ask`` sends a question to the Pydantic AI agent.
     """
 
     def __init__(
@@ -47,6 +48,7 @@ class TableAgent:
         lineage: LineageContextProvider,
         contexts: TableContextBuilder,
         defaults: KnowledgeDefaults | None = None,
+        question_agent: TableQuestionAgent | None = None,
     ) -> None:
         self._table_id: UUID = table_id
         self._catalog: CatalogContextProvider = catalog
@@ -55,6 +57,7 @@ class TableAgent:
         self._lineage: LineageContextProvider = lineage
         self._contexts: TableContextBuilder = contexts
         self._defaults: KnowledgeDefaults = defaults or KnowledgeDefaults()
+        self._question_agent: TableQuestionAgent | None = question_agent
 
     @property
     def table_id(self) -> UUID:
@@ -113,6 +116,23 @@ class TableAgent:
     def build_context(self, options: TableContextOptions | None = None) -> TableAnalysisContext:
         """Combine metadata, an optional profile, neighbors, and lineage."""
         return self._contexts.build(self._table_id, options)
+
+    def ask(self, question: str) -> str:
+        """Answer a question about this table. The model may call catalog tools."""
+        cleaned: str = question.strip()
+        if cleaned == "":
+            raise ValidationAppError("question is empty", field="question")
+        if self._question_agent is None:
+            raise LlmUnavailableError("language model is not configured")
+        return self._question_agent.ask(cleaned, self, self._instructions())
+
+    def _instructions(self) -> str:
+        return (
+            "You answer questions about one catalog table. "
+            f"The table id is {self._table_id}. "
+            "Call tools for metadata, profiles, neighbors, and lineage. "
+            "Do not invent statistics, keys, or relationships."
+        )
 
     def _context(self) -> TableCatalogContext:
         loaded: TableCatalogContext = self._catalog.get_table_context(self._table_id)

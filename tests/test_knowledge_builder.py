@@ -1,12 +1,27 @@
 """Table agent foundation: metadata, profiles, graph neighbors, and lineage."""
 
+from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
+from intelegent_data_catalog.exceptions import (
+    EntityNotFoundError,
+    LlmError,
+    LlmUnavailableError,
+    ValidationAppError,
+)
 from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView
 from intelegent_data_catalog.graph.projection import LineageLink
 from intelegent_data_catalog.graph.service import GraphService
@@ -40,6 +55,7 @@ from intelegent_data_catalog.knowledge.models import (
     TableRelation,
     TagSummary,
 )
+from intelegent_data_catalog.llm.catalog import TableQuestionAgent
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
     DataSourceType,
@@ -73,6 +89,95 @@ def test_default_access_mode_is_profile_only() -> None:
     defaults: KnowledgeDefaults = KnowledgeDefaults()
     assert defaults.data_access_mode == DataAccessMode.PROFILE_ONLY
     assert defaults.max_sample_values == 5
+
+
+def test_ask_without_model_raises() -> None:
+    """ask fails until the factory is given a language model."""
+    table_id: UUID = uuid4()
+    agent: TableAgent = _factory(_context(table_id)).create(table_id)
+    with pytest.raises(LlmUnavailableError, match="not configured"):
+        agent.ask("what is this table?")
+
+
+def test_ask_rejects_blank_question() -> None:
+    """An empty question never reaches the model."""
+    table_id: UUID = uuid4()
+    agent: TableAgent = _factory(_context(table_id)).create(table_id)
+    with pytest.raises(ValidationAppError, match="question"):
+        agent.ask("   ")
+
+
+def test_ask_reads_metadata_through_tools() -> None:
+    """The model can load this table, and the tool result includes the catalog name."""
+    table_id: UUID = uuid4()
+    seen: list[str] = []
+    names: set[str] = set()
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        names.update(tool.name for tool in info.function_tools)
+        feedback: str = _feedback(messages)
+        if feedback == "":
+            return ModelResponse(parts=[ToolCallPart(tool_name="get_metadata", args={})])
+        seen.append(feedback)
+        return ModelResponse(parts=[TextPart(content="The table is orders.")])
+
+    agent: TableAgent = _factory(
+        _context(table_id),
+        question_agent=_question_agent(respond),
+    ).create(table_id)
+    answer: str = agent.ask("what is this table?")
+    assert answer == "The table is orders."
+    assert seen
+    assert "orders" in seen[0]
+    assert names == {
+        "get_metadata",
+        "get_data_profile",
+        "get_column_profile",
+        "compare_columns",
+        "get_neighbors",
+        "get_lineage",
+    }
+
+
+def test_ask_returns_invalid_column_to_the_model() -> None:
+    """A column id that is not a uuid is returned to the model."""
+    table_id: UUID = uuid4()
+    seen: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        feedback: str = _feedback(messages)
+        if feedback == "":
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="get_column_profile", args={"column_id": "nope"})]
+            )
+        seen.append(feedback)
+        return ModelResponse(parts=[TextPart(content="The column id was invalid.")])
+
+    agent: TableAgent = _factory(
+        _context(table_id),
+        question_agent=_question_agent(respond),
+    ).create(table_id)
+    answer: str = agent.ask("profile the column")
+    assert answer == "The column id was invalid."
+    assert seen
+    assert "uuid" in seen[0].lower()
+
+
+def test_ask_stops_at_the_request_limit() -> None:
+    """A model that keeps calling tools is cut off."""
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        return ModelResponse(parts=[ToolCallPart(tool_name="get_metadata", args={})])
+
+    table_id: UUID = uuid4()
+    agent: TableAgent = _factory(
+        _context(table_id),
+        question_agent=_question_agent(respond, max_requests=1),
+    ).create(table_id)
+    with pytest.raises(LlmError, match="tool step limit"):
+        agent.ask("loop")
 
 
 def test_factory_creates_a_fresh_agent() -> None:
@@ -694,6 +799,7 @@ def _factory(
     graph: _Neighbors | None = None,
     lineage: _Lineage | None = None,
     defaults: KnowledgeDefaults | None = None,
+    question_agent: TableQuestionAgent | None = None,
 ) -> TableAgentFactory:
     selected_profiler: _Profiler = profiler or _Profiler(
         _table_profile(context.table.id, context.columns[0].id)
@@ -704,7 +810,31 @@ def _factory(
         graph=graph or _Neighbors([]),
         lineage=lineage or _Lineage(context.table.id),
         defaults=defaults,
+        question_agent=question_agent,
     )
+
+
+def _question_agent(
+    respond: Callable[[list[ModelMessage], AgentInfo], ModelResponse],
+    *,
+    max_requests: int = 4,
+) -> TableQuestionAgent:
+    return TableQuestionAgent(
+        FunctionModel(respond),
+        max_requests=max_requests,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+
+
+def _feedback(messages: list[ModelMessage]) -> str:
+    chunks: list[str] = []
+    for message in messages:
+        for part in message.parts:
+            if isinstance(part, ToolReturnPart | RetryPromptPart):
+                chunks.append(str(part.content))
+    return "\n".join(chunks)
 
 
 def _context(

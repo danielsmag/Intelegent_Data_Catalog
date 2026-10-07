@@ -37,3 +37,18 @@ catalog = "catalog"
 client_id = "root"
 client_secret = "s3cr3t"
 timeout_seconds = 30
+
+# Table-agent language model. provider is claude, openai, or ollama.
+# Empty model uses claude-sonnet-4-5, gpt-4.1, or llama3.2.
+# Empty base_url uses that provider's host. No /v1 suffix.
+# Point model at a name from `ollama list` for a local model.
+# Claude and OpenAI read the key from CATALOG_LLM__API_KEY.
+[llm]
+provider = "ollama"
+model = ""
+api_key = ""
+base_url = ""
+timeout_seconds = 60
+max_tokens = 2048
+temperature = 0.0
+max_tool_steps = 6

@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -130,6 +130,53 @@ class TrinoSettings(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0)
 
 
+LlmProvider = Literal["claude", "openai", "ollama"]
+
+_DEFAULT_LLM_MODELS: dict[LlmProvider, str] = {
+    "claude": "claude-sonnet-4-5",
+    "openai": "gpt-4.1",
+    "ollama": "llama3.2",
+}
+
+_DEFAULT_LLM_BASE_URLS: dict[LlmProvider, str] = {
+    "claude": "https://api.anthropic.com",
+    "openai": "https://api.openai.com",
+    "ollama": "http://127.0.0.1:11434",
+}
+
+
+class LlmSettings(BaseModel):
+    """Which Pydantic AI model a table agent calls.
+
+    ``provider`` is ``claude``, ``openai``, or ``ollama``. An empty ``model`` or
+    ``base_url`` uses that provider's default. Claude and OpenAI need
+    ``CATALOG_LLM__API_KEY``. Ollama talks to a local server and does not.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: LlmProvider = "ollama"
+    model: str = ""
+    api_key: SecretStr = Field(default=SecretStr(""))
+    base_url: str = ""
+    timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    max_tokens: int = Field(default=2048, ge=1, le=32000)
+    temperature: float = Field(default=0.0, ge=0, le=2)
+    max_tool_steps: int = Field(default=6, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _fill_provider_defaults(self) -> LlmSettings:
+        model_name: str = self.model.strip()
+        if model_name == "":
+            model_name = _DEFAULT_LLM_MODELS[self.provider]
+        base_url: str = self.base_url.strip().rstrip("/")
+        if base_url == "":
+            base_url = _DEFAULT_LLM_BASE_URLS[self.provider]
+        self.model = model_name
+        self.base_url = base_url
+        return self
+
+
 class PolarisSettings(BaseModel):
     """Apache Polaris REST endpoint and local client credentials."""
 
@@ -163,6 +210,7 @@ class AppSettings(BaseSettings):
     neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
     marquez: MarquezSettings = Field(default_factory=MarquezSettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
+    llm: LlmSettings = Field(default_factory=LlmSettings)
 
     @classmethod
     def settings_customise_sources(
