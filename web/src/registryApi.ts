@@ -305,6 +305,20 @@ export type KnowledgeContext = {
   } | null
 }
 
+export async function fetchKnowledgeContext(
+  tableId: string,
+  signal: AbortSignal,
+): Promise<KnowledgeContext | null> {
+  const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context`, { signal })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as KnowledgeContext
+}
+
 export async function buildKnowledgeContext(
   tableId: string,
   signal: AbortSignal,

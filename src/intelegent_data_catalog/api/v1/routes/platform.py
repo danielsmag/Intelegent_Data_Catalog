@@ -151,6 +151,12 @@ def read_lineage(
     return platform.graph.lineage(table_id, depth, direction)
 
 
+@router.get("/tables/{table_id}/knowledge-context", response_model=TableAnalysisContext)
+def read_knowledge_context(table_id: UUID, platform: PlatformDep) -> TableAnalysisContext:
+    """Return the context last built for this table."""
+    return platform.read_knowledge_context(table_id)
+
+
 @router.post("/tables/{table_id}/knowledge-context", response_model=TableAnalysisContext)
 def build_knowledge_context(
     table_id: UUID,

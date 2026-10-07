@@ -11,6 +11,7 @@ import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { errorMessage, isAbortError } from "./api"
 import {
   buildKnowledgeContext,
+  fetchKnowledgeContext,
   createScope,
   createSpace,
   fetchBindings,
@@ -489,6 +490,7 @@ export function RegistryTablePage(): ReactElement {
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
   const buildAbort = useRef<AbortController | null>(null)
+  const loadAbort = useRef<AbortController | null>(null)
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setError(null)
@@ -543,12 +545,26 @@ export function RegistryTablePage(): ReactElement {
       })
     setKnowledge(null)
     setKnowledgeError(null)
+    const knowledgeController: AbortController = new AbortController()
+    loadAbort.current = knowledgeController
+    void fetchKnowledgeContext(tableId, knowledgeController.signal)
+      .then((loaded: KnowledgeContext | null) => {
+        setKnowledge(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledge(null)
+          setKnowledgeError(errorMessage(err))
+        }
+      })
     return () => {
       controller.abort()
+      knowledgeController.abort()
       buildAbort.current?.abort()
     }
   }, [tableId])
   function runBuildContext(): void {
+    loadAbort.current?.abort()
     buildAbort.current?.abort()
     const controller: AbortController = new AbortController()
     buildAbort.current = controller
@@ -592,7 +608,11 @@ export function RegistryTablePage(): ReactElement {
             disabled={table === null || building}
             onClick={runBuildContext}
           >
-            {building ? "Building context…" : "Build context"}
+            {building
+              ? "Building context…"
+              : knowledge === null
+                ? "Build context"
+                : "Rebuild context"}
           </button>
         </div>
         {error !== null ? <p className="error-text">{error}</p> : null}

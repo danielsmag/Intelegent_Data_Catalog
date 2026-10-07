@@ -484,6 +484,25 @@ class TableTagRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class TableKnowledgeContextRow(Base):
+    """Latest built analysis context for one catalog table."""
+
+    __tablename__: str = "table_knowledge_contexts"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("table_id", name="uq_table_knowledge_contexts_table"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    table_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("catalog_tables.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class MarquezMappingRow(Base):
     """Catalog table identity mapped to a Marquez dataset. Marquez ids are not catalog ids."""
 

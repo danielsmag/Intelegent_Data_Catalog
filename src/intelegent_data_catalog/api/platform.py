@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.settings import AppSettings
-from intelegent_data_catalog.exceptions import TrinoUnavailableError
+from intelegent_data_catalog.exceptions import EntityNotFoundError, TrinoUnavailableError
 from intelegent_data_catalog.graph.neo4j_store import Neo4jProjection
 from intelegent_data_catalog.graph.service import GraphService
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
@@ -17,6 +17,7 @@ from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
+from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.llm.factory import build_table_operation_agent
@@ -76,7 +77,7 @@ class RequestPlatform:
         table_id: UUID,
         options: TableContextOptions,
     ) -> TableAnalysisContext:
-        """Build one table context. This does not write Neo4j or call the model."""
+        """Build one table context and store it. This does not write Neo4j or call the model."""
         reader: LineageReader = self._lineage if self._lineage is not None else EmptyLineageReader()
         factory: TableAgentFactory = build_table_agent_factory(
             self._session,
@@ -87,7 +88,16 @@ class RequestPlatform:
             operation_agent=self._operation_agent,
         )
         agent: TableAgent = factory.create(table_id)
-        return agent.build_context(options)
+        built: TableAnalysisContext = agent.build_context(options)
+        KnowledgeContextStore(self._session).save(built)
+        return built
+
+    def read_knowledge_context(self, table_id: UUID) -> TableAnalysisContext:
+        """Return the last context saved for this table."""
+        saved: TableAnalysisContext | None = KnowledgeContextStore(self._session).get(table_id)
+        if saved is None:
+            raise EntityNotFoundError("knowledge context", str(table_id))
+        return saved
 
 
 class _UnconfiguredTrino:

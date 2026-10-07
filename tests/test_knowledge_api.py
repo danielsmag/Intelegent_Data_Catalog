@@ -81,6 +81,39 @@ def test_build_context_missing_table_is_not_found(tmp_path: Path) -> None:
         database.dispose()
 
 
+def test_built_context_is_saved_and_readable(tmp_path: Path) -> None:
+    """A later read returns the snapshot written by build, including after a new client."""
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        table_id: str = _table(app)
+        missing: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert missing.status_code == 404
+        built: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/tables/{table_id}/knowledge-context",
+            {},
+        )
+        assert built.status_code == 200
+        saved: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert saved.status_code == 200
+        assert _nested(_object(saved), "table")["name"] == "Orders"
+        again: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/tables/{table_id}/knowledge-context",
+            {"include_lineage": False},
+        )
+        assert again.status_code == 200
+        replaced: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert replaced.status_code == 200
+        assert _object(replaced)["lineage"] is None
+    finally:
+        database.dispose()
+
+
 def test_build_context_refuses_physical_profile_without_a_profiler(tmp_path: Path) -> None:
     """Asking for a data profile fails until a physical profiler exists."""
     app: FastAPI
