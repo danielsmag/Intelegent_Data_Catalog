@@ -24,6 +24,14 @@ class RelationshipGraphReader(Protocol):
         ...
 
 
+class GraphPublisher(Protocol):
+    """Replaces the Neo4j projection. PostgreSQL stays authoritative."""
+
+    def rebuild(self) -> dict[str, int]:
+        """Write the current projection and return node and edge counts."""
+        ...
+
+
 class ProjectionGraphContextProvider:
     """Neighbors from the projection PostgreSQL already serves to Neo4j.
 

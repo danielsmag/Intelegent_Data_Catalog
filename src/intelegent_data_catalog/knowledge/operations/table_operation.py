@@ -2,7 +2,11 @@
 
 from uuid import UUID
 
-from intelegent_data_catalog.exceptions import LlmUnavailableError, ValidationAppError
+from intelegent_data_catalog.exceptions import (
+    GraphUnavailableError,
+    LlmUnavailableError,
+    ValidationAppError,
+)
 from intelegent_data_catalog.knowledge.access import (
     accept_column_profile,
     accept_comparison,
@@ -12,7 +16,7 @@ from intelegent_data_catalog.knowledge.access import (
 )
 from intelegent_data_catalog.knowledge.context.builder import TableContextBuilder
 from intelegent_data_catalog.knowledge.context.catalog import CatalogContextProvider
-from intelegent_data_catalog.knowledge.context.graph import GraphContextProvider
+from intelegent_data_catalog.knowledge.context.graph import GraphContextProvider, GraphPublisher
 from intelegent_data_catalog.knowledge.context.lineage import LineageContextProvider
 from intelegent_data_catalog.knowledge.models import (
     ColumnComparisonProfile,
@@ -20,6 +24,7 @@ from intelegent_data_catalog.knowledge.models import (
     ColumnMetadata,
     DataProfileOptions,
     GraphNeighbor,
+    GraphPublishResult,
     KnowledgeDefaults,
     LineageContext,
     ProfileOverrides,
@@ -29,14 +34,14 @@ from intelegent_data_catalog.knowledge.models import (
     TableDataProfile,
 )
 from intelegent_data_catalog.knowledge.profiling.profiler import DataProfiler
-from intelegent_data_catalog.llm.catalog import TableQuestionAgent
+from intelegent_data_catalog.llm.catalog import TableOperationAgent
 
 
 class TableAgent:
     """Load metadata, statistics, neighbors, and lineage for one table id.
 
     Create it through ``TableAgentFactory`` and drop it when the call finishes.
-    PostgreSQL keeps the catalog. ``ask`` sends a question to the Pydantic AI agent.
+    PostgreSQL keeps the catalog. ``run`` asks the model to carry out one operation.
     """
 
     def __init__(
@@ -48,7 +53,8 @@ class TableAgent:
         lineage: LineageContextProvider,
         contexts: TableContextBuilder,
         defaults: KnowledgeDefaults | None = None,
-        question_agent: TableQuestionAgent | None = None,
+        publisher: GraphPublisher | None = None,
+        operation_agent: TableOperationAgent | None = None,
     ) -> None:
         self._table_id: UUID = table_id
         self._catalog: CatalogContextProvider = catalog
@@ -57,7 +63,8 @@ class TableAgent:
         self._lineage: LineageContextProvider = lineage
         self._contexts: TableContextBuilder = contexts
         self._defaults: KnowledgeDefaults = defaults or KnowledgeDefaults()
-        self._question_agent: TableQuestionAgent | None = question_agent
+        self._publisher: GraphPublisher | None = publisher
+        self._operation_agent: TableOperationAgent | None = operation_agent
 
     @property
     def table_id(self) -> UUID:
@@ -117,21 +124,30 @@ class TableAgent:
         """Combine metadata, an optional profile, neighbors, and lineage."""
         return self._contexts.build(self._table_id, options)
 
-    def ask(self, question: str) -> str:
-        """Answer a question about this table. The model may call catalog tools."""
-        cleaned: str = question.strip()
+    def publish_graph(self) -> GraphPublishResult:
+        """Replace the Neo4j projection. PostgreSQL rows stay unchanged."""
+        if self._publisher is None:
+            raise GraphUnavailableError("graph projection is not configured")
+        written: dict[str, int] = self._publisher.rebuild()
+        return GraphPublishResult(nodes=written["nodes"], edges=written["edges"])
+
+    def run(self, instruction: str) -> str:
+        """Carry out one catalog operation. The model may read context and publish Neo4j."""
+        cleaned: str = instruction.strip()
         if cleaned == "":
-            raise ValidationAppError("question is empty", field="question")
-        if self._question_agent is None:
+            raise ValidationAppError("instruction is empty", field="instruction")
+        if self._operation_agent is None:
             raise LlmUnavailableError("language model is not configured")
-        return self._question_agent.ask(cleaned, self, self._instructions())
+        return self._operation_agent.run(cleaned, self, self._instructions())
 
     def _instructions(self) -> str:
         return (
-            "You answer questions about one catalog table. "
+            "You carry out one catalog operation for this table. "
             f"The table id is {self._table_id}. "
-            "Call tools for metadata, profiles, neighbors, and lineage. "
-            "Do not invent statistics, keys, or relationships."
+            "Read metadata, profiles, neighbors, and lineage before you change anything. "
+            "publish_graph replaces the Neo4j projection from PostgreSQL and Marquez. "
+            "Do not invent statistics or relationships. "
+            "Do not claim the graph was written unless publish_graph returns counts."
         )
 
     def _context(self) -> TableCatalogContext:

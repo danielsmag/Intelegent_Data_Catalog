@@ -286,6 +286,15 @@ class TableAnalysisContext(BaseModel):
     lineage: LineageContext | None = None
 
 
+class GraphPublishResult(BaseModel):
+    """Counts written when the Neo4j projection is replaced."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: int = Field(ge=0)
+    edges: int = Field(ge=0)
+
+
 class DatasetIdentity(BaseModel):
     """Catalog table mapped to one Marquez dataset."""
 

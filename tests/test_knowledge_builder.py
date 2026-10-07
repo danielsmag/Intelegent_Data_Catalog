@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
+    GraphUnavailableError,
     LlmError,
     LlmUnavailableError,
     ValidationAppError,
@@ -25,7 +26,6 @@ from intelegent_data_catalog.exceptions import (
 from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView
 from intelegent_data_catalog.graph.projection import LineageLink
 from intelegent_data_catalog.graph.service import GraphService
-from intelegent_data_catalog.knowledge.agents.table_agent import TableAgent
 from intelegent_data_catalog.knowledge.context.graph import ProjectionGraphContextProvider
 from intelegent_data_catalog.knowledge.context.lineage import MarquezLineageContextProvider
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
@@ -55,7 +55,8 @@ from intelegent_data_catalog.knowledge.models import (
     TableRelation,
     TagSummary,
 )
-from intelegent_data_catalog.llm.catalog import TableQuestionAgent
+from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
+from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
     DataSourceType,
@@ -91,23 +92,23 @@ def test_default_access_mode_is_profile_only() -> None:
     assert defaults.max_sample_values == 5
 
 
-def test_ask_without_model_raises() -> None:
-    """ask fails until the factory is given a language model."""
+def test_run_without_model_raises() -> None:
+    """run fails until the factory is given a language model."""
     table_id: UUID = uuid4()
     agent: TableAgent = _factory(_context(table_id)).create(table_id)
     with pytest.raises(LlmUnavailableError, match="not configured"):
-        agent.ask("what is this table?")
+        agent.run("publish the graph")
 
 
-def test_ask_rejects_blank_question() -> None:
-    """An empty question never reaches the model."""
+def test_run_rejects_blank_instruction() -> None:
+    """An empty instruction never reaches the model."""
     table_id: UUID = uuid4()
     agent: TableAgent = _factory(_context(table_id)).create(table_id)
-    with pytest.raises(ValidationAppError, match="question"):
-        agent.ask("   ")
+    with pytest.raises(ValidationAppError, match="instruction"):
+        agent.run("   ")
 
 
-def test_ask_reads_metadata_through_tools() -> None:
+def test_run_reads_metadata_through_tools() -> None:
     """The model can load this table, and the tool result includes the catalog name."""
     table_id: UUID = uuid4()
     seen: list[str] = []
@@ -123,9 +124,9 @@ def test_ask_reads_metadata_through_tools() -> None:
 
     agent: TableAgent = _factory(
         _context(table_id),
-        question_agent=_question_agent(respond),
+        operation_agent=_operation_agent(respond),
     ).create(table_id)
-    answer: str = agent.ask("what is this table?")
+    answer: str = agent.run("describe this table")
     assert answer == "The table is orders."
     assert seen
     assert "orders" in seen[0]
@@ -136,10 +137,71 @@ def test_ask_reads_metadata_through_tools() -> None:
         "compare_columns",
         "get_neighbors",
         "get_lineage",
+        "publish_graph",
     }
 
 
-def test_ask_returns_invalid_column_to_the_model() -> None:
+def test_run_publishes_the_neo4j_projection() -> None:
+    """publish_graph replaces the projection and reports the written counts."""
+    table_id: UUID = uuid4()
+    publisher: _Publisher = _Publisher()
+    seen: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        feedback: str = _feedback(messages)
+        if feedback == "":
+            return ModelResponse(parts=[ToolCallPart(tool_name="publish_graph", args={})])
+        seen.append(feedback)
+        return ModelResponse(parts=[TextPart(content="Wrote the projection.")])
+
+    agent: TableAgent = _factory(
+        _context(table_id),
+        publisher=publisher,
+        operation_agent=_operation_agent(respond),
+    ).create(table_id)
+    answer: str = agent.run("publish the graph")
+    assert answer == "Wrote the projection."
+    assert publisher.calls == 1
+    assert seen
+    assert "nodes" in seen[0]
+    assert "edges" in seen[0]
+    assert "3" in seen[0]
+    assert "2" in seen[0]
+
+
+def test_run_reports_missing_neo4j() -> None:
+    """A publish with no Neo4j publisher is reported back to the model."""
+    table_id: UUID = uuid4()
+    seen: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        feedback: str = _feedback(messages)
+        if feedback == "":
+            return ModelResponse(parts=[ToolCallPart(tool_name="publish_graph", args={})])
+        seen.append(feedback)
+        return ModelResponse(parts=[TextPart(content="Neo4j is not configured.")])
+
+    agent: TableAgent = _factory(
+        _context(table_id),
+        operation_agent=_operation_agent(respond),
+    ).create(table_id)
+    answer: str = agent.run("publish the graph")
+    assert answer == "Neo4j is not configured."
+    assert seen
+    assert "not configured" in seen[0]
+
+
+def test_publish_graph_without_neo4j_raises() -> None:
+    """A direct publish fails when no publisher was injected."""
+    table_id: UUID = uuid4()
+    agent: TableAgent = _factory(_context(table_id)).create(table_id)
+    with pytest.raises(GraphUnavailableError, match="not configured"):
+        agent.publish_graph()
+
+
+def test_run_returns_invalid_column_to_the_model() -> None:
     """A column id that is not a uuid is returned to the model."""
     table_id: UUID = uuid4()
     seen: list[str] = []
@@ -156,15 +218,15 @@ def test_ask_returns_invalid_column_to_the_model() -> None:
 
     agent: TableAgent = _factory(
         _context(table_id),
-        question_agent=_question_agent(respond),
+        operation_agent=_operation_agent(respond),
     ).create(table_id)
-    answer: str = agent.ask("profile the column")
+    answer: str = agent.run("profile the column")
     assert answer == "The column id was invalid."
     assert seen
     assert "uuid" in seen[0].lower()
 
 
-def test_ask_stops_at_the_request_limit() -> None:
+def test_run_stops_at_the_request_limit() -> None:
     """A model that keeps calling tools is cut off."""
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -174,10 +236,10 @@ def test_ask_stops_at_the_request_limit() -> None:
     table_id: UUID = uuid4()
     agent: TableAgent = _factory(
         _context(table_id),
-        question_agent=_question_agent(respond, max_requests=1),
+        operation_agent=_operation_agent(respond, max_requests=1),
     ).create(table_id)
     with pytest.raises(LlmError, match="tool step limit"):
-        agent.ask("loop")
+        agent.run("loop")
 
 
 def test_factory_creates_a_fresh_agent() -> None:
@@ -791,6 +853,18 @@ class _Links:
         return self.links
 
 
+class _Publisher:
+    """Records one projection rebuild."""
+
+    def __init__(self) -> None:
+        self.calls: int = 0
+
+    def rebuild(self) -> dict[str, int]:
+        """Return scripted node and edge counts."""
+        self.calls += 1
+        return {"nodes": 3, "edges": 2}
+
+
 def _factory(
     context: TableCatalogContext,
     *,
@@ -799,7 +873,8 @@ def _factory(
     graph: _Neighbors | None = None,
     lineage: _Lineage | None = None,
     defaults: KnowledgeDefaults | None = None,
-    question_agent: TableQuestionAgent | None = None,
+    publisher: _Publisher | None = None,
+    operation_agent: TableOperationAgent | None = None,
 ) -> TableAgentFactory:
     selected_profiler: _Profiler = profiler or _Profiler(
         _table_profile(context.table.id, context.columns[0].id)
@@ -810,16 +885,17 @@ def _factory(
         graph=graph or _Neighbors([]),
         lineage=lineage or _Lineage(context.table.id),
         defaults=defaults,
-        question_agent=question_agent,
+        publisher=publisher,
+        operation_agent=operation_agent,
     )
 
 
-def _question_agent(
+def _operation_agent(
     respond: Callable[[list[ModelMessage], AgentInfo], ModelResponse],
     *,
     max_requests: int = 4,
-) -> TableQuestionAgent:
-    return TableQuestionAgent(
+) -> TableOperationAgent:
+    return TableOperationAgent(
         FunctionModel(respond),
         max_requests=max_requests,
         temperature=0.0,

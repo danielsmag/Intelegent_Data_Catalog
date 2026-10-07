@@ -7,12 +7,13 @@ from uuid import UUID
 from pydantic import Field
 from pydantic_ai import ModelRetry, RunContext
 
-from intelegent_data_catalog.exceptions import ValidationAppError
+from intelegent_data_catalog.exceptions import GraphUnavailableError, ValidationAppError
 from intelegent_data_catalog.knowledge.models import (
     ColumnComparisonProfile,
     ColumnDataProfile,
     DataAccessMode,
     GraphNeighbor,
+    GraphPublishResult,
     LineageContext,
     ProfileOverrides,
     TableCatalogContext,
@@ -56,6 +57,10 @@ class TableToolSource(Protocol):
 
     def get_lineage(self) -> LineageContext:
         """Load upstream, downstream, and jobs."""
+        ...
+
+    def publish_graph(self) -> GraphPublishResult:
+        """Replace the Neo4j projection from PostgreSQL and Marquez."""
         ...
 
 
@@ -131,6 +136,17 @@ def get_neighbors(ctx: RunContext[TableToolSource]) -> list[GraphNeighbor]:
 def get_lineage(ctx: RunContext[TableToolSource]) -> LineageContext:
     """Load upstream datasets, downstream datasets, and jobs for this table."""
     return ctx.deps.get_lineage()
+
+
+def publish_graph(ctx: RunContext[TableToolSource]) -> GraphPublishResult:
+    """Replace the Neo4j projection from PostgreSQL and Marquez.
+
+    This rewrites the whole projection, not only this table.
+    """
+    try:
+        return ctx.deps.publish_graph()
+    except GraphUnavailableError as err:
+        raise ModelRetry(str(err)) from err
 
 
 def _overrides(

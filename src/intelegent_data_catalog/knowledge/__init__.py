@@ -1,11 +1,10 @@
 """Knowledge Builder foundation.
 
-A table agent is created for one catalog id, loads context, and can ask the
-configured language model. Persistent knowledge stays in PostgreSQL. This
-package does not write to Neo4j.
+A table agent is created for one catalog id, loads context, and can run one
+catalog operation. Persistent knowledge stays in PostgreSQL. Neo4j is written
+only when an operation calls the injected graph publisher.
 """
 
-from intelegent_data_catalog.knowledge.agents.table_agent import TableAgent
 from intelegent_data_catalog.knowledge.context.builder import TableContextBuilder
 from intelegent_data_catalog.knowledge.context.catalog import (
     CatalogContextProvider,
@@ -37,6 +36,7 @@ from intelegent_data_catalog.knowledge.models import (
     TableDataProfile,
     TableMetadata,
 )
+from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import DataProfiler
 
 __all__ = [

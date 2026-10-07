@@ -1,4 +1,4 @@
-"""Short-lived Pydantic AI agent for one question about a catalog table."""
+"""Short-lived Pydantic AI agent for one catalog operation."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from intelegent_data_catalog.llm.tools.table import TableToolSource
 
 
-class TableQuestionAgent:
-    """Asks one configured model about a table. Tools read the catalog, not the model."""
+class TableOperationAgent:
+    """Runs one catalog operation. Tools read the catalog and can publish Neo4j."""
 
     def __init__(
         self,
@@ -45,14 +45,14 @@ class TableQuestionAgent:
         }
         self._agent: Agent[TableToolSource, str] = _table_agent(model)
 
-    def ask(self, question: str, source: TableToolSource, instructions: str) -> str:
-        """Run the model until it answers or the request limit is reached."""
-        return asyncio.run(self._ask(question, source, instructions))
+    def run(self, instruction: str, source: TableToolSource, instructions: str) -> str:
+        """Run the model until the operation finishes or the request limit is reached."""
+        return asyncio.run(self._run(instruction, source, instructions))
 
-    async def _ask(self, question: str, source: TableToolSource, instructions: str) -> str:
+    async def _run(self, instruction: str, source: TableToolSource, instructions: str) -> str:
         try:
             result: AgentRunResult[str] = await self._agent.run(
-                question,
+                instruction,
                 deps=source,
                 instructions=instructions,
                 model_settings=self._settings,
@@ -84,6 +84,7 @@ def _table_agent(model: Model) -> Agent[TableToolSource, str]:
         get_lineage,
         get_metadata,
         get_neighbors,
+        publish_graph,
     )
 
     agent: Agent[TableToolSource, str] = Agent(
@@ -98,4 +99,5 @@ def _table_agent(model: Model) -> Agent[TableToolSource, str]:
     agent.tool(compare_columns)
     agent.tool(get_neighbors)
     agent.tool(get_lineage)
+    agent.tool(publish_graph)
     return agent

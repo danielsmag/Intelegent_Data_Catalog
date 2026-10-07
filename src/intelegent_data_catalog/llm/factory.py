@@ -10,12 +10,12 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from intelegent_data_catalog.core.settings import LlmSettings
 from intelegent_data_catalog.exceptions import LlmUnavailableError
-from intelegent_data_catalog.llm.catalog import TableQuestionAgent
+from intelegent_data_catalog.llm.catalog import TableOperationAgent
 
 
-def build_table_question_agent(settings: LlmSettings) -> TableQuestionAgent:
+def build_table_operation_agent(settings: LlmSettings) -> TableOperationAgent:
     """Return an agent for ``settings.provider``. Ollama is the local default."""
-    return TableQuestionAgent(
+    return TableOperationAgent(
         build_model(settings),
         max_requests=settings.max_tool_steps,
         temperature=settings.temperature,

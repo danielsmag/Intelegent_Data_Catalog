@@ -9,17 +9,17 @@ from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import TrinoUnavailableError
 from intelegent_data_catalog.graph.neo4j_store import Neo4jProjection
 from intelegent_data_catalog.graph.service import GraphService
-from intelegent_data_catalog.knowledge.agents.table_agent import TableAgent
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     TableAgentFactory,
     build_table_agent_factory,
 )
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
+from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
-from intelegent_data_catalog.llm.catalog import TableQuestionAgent
-from intelegent_data_catalog.llm.factory import build_table_question_agent
+from intelegent_data_catalog.llm.catalog import TableOperationAgent
+from intelegent_data_catalog.llm.factory import build_table_operation_agent
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
@@ -69,7 +69,7 @@ class RequestPlatform:
         )
         self.query: QueryService = query
         self.sample_limit: int = settings.query.sample_limit
-        self._question_agent: TableQuestionAgent = build_table_question_agent(settings.llm)
+        self._operation_agent: TableOperationAgent = build_table_operation_agent(settings.llm)
 
     def build_knowledge_context(
         self,
@@ -83,7 +83,8 @@ class RequestPlatform:
             self.graph,
             reader,
             UnconfiguredDataProfiler(),
-            question_agent=self._question_agent,
+            publisher=self.graph,
+            operation_agent=self._operation_agent,
         )
         agent: TableAgent = factory.create(table_id)
         return agent.build_context(options)
