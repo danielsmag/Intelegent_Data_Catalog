@@ -263,6 +263,10 @@ services:
       CATALOG_NEO4J__URI: bolt://neo4j:7687
       CATALOG_NEO4J__USER: ${NEO4J_USER:-neo4j}
       CATALOG_NEO4J__PASSWORD: ${NEO4J_PASSWORD:-password}
+      # Ollama runs on the host. 127.0.0.1 inside this container is not that server.
+      CATALOG_LLM__PROVIDER: ollama
+      CATALOG_LLM__BASE_URL: http://host.docker.internal:11434
+      CATALOG_LLM__MODEL: ${CATALOG_OLLAMA_MODEL:-qwen3:4b}
       CATALOG_MARQUEZ__ENABLED: "true"
       CATALOG_MARQUEZ__URL: http://marquez:5000
     healthcheck:

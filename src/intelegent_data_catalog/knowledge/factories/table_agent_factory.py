@@ -9,6 +9,7 @@ from intelegent_data_catalog.knowledge.context.catalog import (
     CatalogContextProvider,
     PostgresCatalogContextProvider,
 )
+from intelegent_data_catalog.knowledge.context.column_graph import ColumnGraphAppender
 from intelegent_data_catalog.knowledge.context.graph import (
     GraphContextProvider,
     GraphPublisher,
@@ -40,6 +41,7 @@ class TableAgentFactory:
         defaults: KnowledgeDefaults | None = None,
         publisher: GraphPublisher | None = None,
         operation_agent: TableOperationAgent | None = None,
+        column_graph: ColumnGraphAppender | None = None,
     ) -> None:
         self._defaults: KnowledgeDefaults = defaults or KnowledgeDefaults()
         self._catalog: CatalogContextProvider = catalog
@@ -48,6 +50,7 @@ class TableAgentFactory:
         self._lineage: LineageContextProvider = lineage
         self._publisher: GraphPublisher | None = publisher
         self._operation_agent: TableOperationAgent | None = operation_agent
+        self._column_graph: ColumnGraphAppender | None = column_graph
         self._contexts: TableContextBuilder = TableContextBuilder(
             catalog=catalog,
             profiler=profiler,
@@ -68,6 +71,7 @@ class TableAgentFactory:
             defaults=self._defaults,
             publisher=self._publisher,
             operation_agent=self._operation_agent,
+            column_graph=self._column_graph,
         )
 
 
@@ -79,12 +83,14 @@ def build_table_agent_factory(
     defaults: KnowledgeDefaults | None = None,
     publisher: GraphPublisher | None = None,
     operation_agent: TableOperationAgent | None = None,
+    column_graph: ColumnGraphAppender | None = None,
 ) -> TableAgentFactory:
     """Wire PostgreSQL, the graph projection, Marquez, and the operation agent.
 
-    ``graph`` is read with ``relationships``. ``publisher`` writes Neo4j only when
-    an operation calls ``publish_graph``. Without ``operation_agent``, ``run``
-    fails until a model is configured.
+    ``graph`` is read with ``relationships``. ``publisher`` writes the full Neo4j
+    projection when an operation calls ``publish_graph``. ``column_graph`` writes
+    a column subgraph when ``build_context`` runs. Without ``operation_agent``,
+    ``run`` fails until a model is configured.
     """
     repository: RegistryRepository = RegistryRepository(session)
     return TableAgentFactory(
@@ -95,4 +101,5 @@ def build_table_agent_factory(
         defaults=defaults,
         publisher=publisher,
         operation_agent=operation_agent,
+        column_graph=column_graph,
     )

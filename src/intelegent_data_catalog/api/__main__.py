@@ -6,6 +6,7 @@ import sys
 import uvicorn
 from fastapi import FastAPI
 
+from intelegent_data_catalog.api.access_log import uvicorn_log_config
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AppSettings
@@ -34,7 +35,12 @@ def main() -> None:
     except CatalogError as err:
         print(f"startup failed: {err}", file=sys.stderr)
         raise SystemExit(1) from err
-    uvicorn.run(app, host=settings.api.host, port=settings.api.port)
+    uvicorn.run(
+        app,
+        host=settings.api.host,
+        port=settings.api.port,
+        log_config=uvicorn_log_config(),
+    )
 
 
 def _project_seed_lake(

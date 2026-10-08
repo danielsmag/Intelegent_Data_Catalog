@@ -77,7 +77,9 @@ class QueryHandler(BaseHTTPRequestHandler):
         self._reply(200, {"columns": columns, "rows": rows})
 
     def log_message(self, format: str, *args: object) -> None:
-        """Keep request logs on stdout for Compose."""
+        """Keep request logs on stdout. Successful health checks stay quiet."""
+        if _successful_health(args):
+            return
         message: str = format % args
         print(f"{self.address_string()} {message}")
 
@@ -186,6 +188,23 @@ def _cell(value: object) -> object:
     if isinstance(value, list | tuple):
         return [_cell(item) for item in value]
     return str(value)
+
+
+def _successful_health(args: tuple[object, ...]) -> bool:
+    """True for a health probe whose status is below 400."""
+    if len(args) < 2:
+        return False
+    request_line: object = args[0]
+    status_text: object = args[1]
+    if not isinstance(request_line, str) or not isinstance(status_text, str):
+        return False
+    parts: list[str] = request_line.split(" ")
+    if len(parts) < 2:
+        return False
+    path: str = parts[1].split("?", 1)[0]
+    if path != "/health":
+        return False
+    return status_text.isdigit() and int(status_text) < 400
 
 
 if __name__ == "__main__":

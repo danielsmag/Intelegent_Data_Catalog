@@ -86,6 +86,13 @@ class GraphService:
             direction="both",
         )
 
+    def knowledge_subgraph(self, table_id: UUID) -> GraphView:
+        """Return the Neo4j column subgraph owned by one table."""
+        self._require_table(table_id)
+        if self._neo4j is None:
+            raise GraphUnavailableError("graph projection is not configured")
+        return self._neo4j.read_knowledge(str(table_id))
+
     def publish(self) -> None:
         """Write the current projection when Neo4j is configured."""
         if self._neo4j is None:

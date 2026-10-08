@@ -1,7 +1,9 @@
 """Assemble one analysis context from catalog, profile, graph, and lineage."""
 
+import logging
 from uuid import UUID
 
+from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.access import (
     accept_table_profile,
@@ -13,6 +15,7 @@ from intelegent_data_catalog.knowledge.context.graph import GraphContextProvider
 from intelegent_data_catalog.knowledge.context.lineage import LineageContextProvider
 from intelegent_data_catalog.knowledge.models import (
     DataProfileOptions,
+    GraphNeighbor,
     KnowledgeDefaults,
     LineageContext,
     TableAnalysisContext,
@@ -21,6 +24,8 @@ from intelegent_data_catalog.knowledge.models import (
     TableDataProfile,
 )
 from intelegent_data_catalog.knowledge.profiling.profiler import DataProfiler
+
+logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 
 
 class TableContextBuilder:
@@ -47,16 +52,39 @@ class TableContextBuilder:
     ) -> TableAnalysisContext:
         """Load the requested slices. Metadata-only options skip the profiler."""
         selected: TableContextOptions = options or TableContextOptions()
+        logger.info(
+            "build context start table_id=%s profile=%s graph=%s lineage=%s",
+            table_id,
+            selected.include_data_profile,
+            selected.include_graph,
+            selected.include_lineage,
+        )
         catalog: TableCatalogContext = self._catalog.get_table_context(table_id)
         if catalog.table.id != table_id:
             raise ValidationAppError("catalog context is for a different table", field="table_id")
+        profile: TableDataProfile | None = self._profile(table_id, catalog, selected)
+        neighbors: list[GraphNeighbor] = (
+            self._graph.get_neighbors(table_id) if selected.include_graph else []
+        )
+        lineage: LineageContext | None = self._lineage_context(table_id, selected)
+        logger.info(
+            "build context done table_id=%s columns=%s relationships=%s "
+            "profile=%s neighbors=%s upstream=%s downstream=%s",
+            table_id,
+            len(catalog.columns),
+            len(catalog.relationships),
+            _profile_state(profile),
+            len(neighbors) if selected.include_graph else "skipped",
+            "skipped" if lineage is None else len(lineage.upstream_datasets),
+            "skipped" if lineage is None else len(lineage.downstream_datasets),
+        )
         return TableAnalysisContext(
             table=catalog.table,
             columns=catalog.columns,
-            data_profile=self._profile(table_id, catalog, selected),
+            data_profile=profile,
             existing_relationships=catalog.relationships,
-            graph_neighbors=self._graph.get_neighbors(table_id) if selected.include_graph else [],
-            lineage=self._lineage_context(table_id, selected),
+            graph_neighbors=neighbors,
+            lineage=lineage,
         )
 
     def _profile(
@@ -85,3 +113,9 @@ class TableContextBuilder:
         if not selected.include_lineage:
             return None
         return self._lineage.get_lineage(table_id)
+
+
+def _profile_state(profile: TableDataProfile | None) -> str:
+    if profile is None:
+        return "skipped"
+    return "present"

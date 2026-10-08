@@ -1,6 +1,7 @@
 """HTTP entry for TableAgent.build_context."""
 
 import asyncio
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -33,14 +34,18 @@ def test_build_context_returns_catalog_graph_and_lineage(tmp_path: Path) -> None
             },
         )
         assert column.status_code == 201
-        built: httpx.Response = _send(
+        started: httpx.Response = _send(
             app,
             "POST",
             f"/api/v1/tables/{table_id}/knowledge-context",
             {},
         )
-        assert built.status_code == 200
-        body: dict[str, object] = _object(built)
+        assert started.status_code == 202
+        finished: dict[str, object] = _wait_for_build(app, _text(_object(started), "id"))
+        assert finished["status"] == "succeeded"
+        saved: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert saved.status_code == 200
+        body: dict[str, object] = _object(saved)
         table: dict[str, object] = _nested(body, "table")
         assert table["name"] == "Orders"
         space: dict[str, object] = _nested(table, "space")
@@ -60,6 +65,7 @@ def test_build_context_returns_catalog_graph_and_lineage(tmp_path: Path) -> None
         assert first["name"] == "id"
         assert first["is_primary_key"] is True
         assert first["is_foreign_key"] is False
+        assert body["column_relations"] == []
     finally:
         database.dispose()
 
@@ -90,13 +96,15 @@ def test_built_context_is_saved_and_readable(tmp_path: Path) -> None:
         table_id: str = _table(app)
         missing: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
         assert missing.status_code == 404
-        built: httpx.Response = _send(
+        started: httpx.Response = _send(
             app,
             "POST",
             f"/api/v1/tables/{table_id}/knowledge-context",
             {},
         )
-        assert built.status_code == 200
+        assert started.status_code == 202
+        finished: dict[str, object] = _wait_for_build(app, _text(_object(started), "id"))
+        assert finished["status"] == "succeeded"
         saved: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
         assert saved.status_code == 200
         assert _nested(_object(saved), "table")["name"] == "Orders"
@@ -106,7 +114,9 @@ def test_built_context_is_saved_and_readable(tmp_path: Path) -> None:
             f"/api/v1/tables/{table_id}/knowledge-context",
             {"include_lineage": False},
         )
-        assert again.status_code == 200
+        assert again.status_code == 202
+        replaced_job: dict[str, object] = _wait_for_build(app, _text(_object(again), "id"))
+        assert replaced_job["status"] == "succeeded"
         replaced: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
         assert replaced.status_code == 200
         assert _object(replaced)["lineage"] is None
@@ -121,14 +131,18 @@ def test_build_context_refuses_physical_profile_without_a_profiler(tmp_path: Pat
     app, database = _app(tmp_path)
     try:
         table_id: str = _table(app)
-        refused: httpx.Response = _send(
+        started: httpx.Response = _send(
             app,
             "POST",
             f"/api/v1/tables/{table_id}/knowledge-context",
             {"include_data_profile": True},
         )
-        assert refused.status_code == 501
-        assert "profiler" in refused.text
+        assert started.status_code == 202
+        failed: dict[str, object] = _wait_for_build(app, _text(_object(started), "id"))
+        assert failed["status"] == "failed"
+        error: object = failed["error"]
+        assert isinstance(error, str)
+        assert "profiler" in error
     finally:
         database.dispose()
 
@@ -199,6 +213,20 @@ def _nested(body: dict[str, object], key: str) -> dict[str, object]:
     value: object = body[key]
     assert isinstance(value, dict)
     return value
+
+
+def _wait_for_build(app: FastAPI, job_id: str) -> dict[str, object]:
+    """Poll until the background build leaves the running state."""
+    attempt: int
+    for attempt in range(50):
+        del attempt
+        current: httpx.Response = _send(app, "GET", f"/api/v1/knowledge-builds/{job_id}")
+        assert current.status_code == 200
+        body: dict[str, object] = _object(current)
+        if body["status"] != "running":
+            return body
+        time.sleep(0.05)
+    raise AssertionError("knowledge build did not finish")
 
 
 def _text(body: dict[str, object], key: str) -> str:

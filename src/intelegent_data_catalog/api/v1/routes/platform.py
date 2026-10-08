@@ -6,10 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
 
-from intelegent_data_catalog.api.dependencies import PlatformDep
+from intelegent_data_catalog.api.dependencies import KnowledgeBuildDep, PlatformDep
 from intelegent_data_catalog.catalog.models import QueryResult
-from intelegent_data_catalog.exceptions import ConflictError
+from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
 from intelegent_data_catalog.graph.document import GraphView
+from intelegent_data_catalog.jobs.models import KnowledgeBuildJobRead
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
 from intelegent_data_catalog.query.spark_bridge import (
     NOT_CONFIGURED,
@@ -157,20 +158,60 @@ def read_knowledge_context(table_id: UUID, platform: PlatformDep) -> TableAnalys
     return platform.read_knowledge_context(table_id)
 
 
-@router.post("/tables/{table_id}/knowledge-context", response_model=TableAnalysisContext)
+@router.post(
+    "/tables/{table_id}/knowledge-context",
+    response_model=KnowledgeBuildJobRead,
+    status_code=202,
+)
 def build_knowledge_context(
     table_id: UUID,
     platform: PlatformDep,
+    builds: KnowledgeBuildDep,
     body: KnowledgeContextRequest | None = None,
-) -> TableAnalysisContext:
-    """Run TableAgent.build_context for one catalog table. No model call."""
+) -> KnowledgeBuildJobRead:
+    """Start a context build and return before the model finishes.
+
+    When Neo4j is configured, the background build asks the model for a column subgraph.
+    PostgreSQL catalog rows stay unchanged.
+    """
+    table_name: str = platform.registry.get_table(table_id).name
     selected: KnowledgeContextRequest = body if body is not None else KnowledgeContextRequest()
     options: TableContextOptions = TableContextOptions(
         include_data_profile=selected.include_data_profile,
         include_graph=selected.include_graph,
         include_lineage=selected.include_lineage,
     )
-    return platform.build_knowledge_context(table_id, options)
+    return builds.start(table_id, table_name, options)
+
+
+@router.get("/knowledge-builds/{job_id}", response_model=KnowledgeBuildJobRead)
+def read_knowledge_build(job_id: UUID, builds: KnowledgeBuildDep) -> KnowledgeBuildJobRead:
+    """Return one background context build."""
+    job: KnowledgeBuildJobRead | None = builds.get(job_id)
+    if job is None:
+        raise EntityNotFoundError("knowledge build", str(job_id))
+    return job
+
+
+@router.get(
+    "/tables/{table_id}/knowledge-context/build",
+    response_model=KnowledgeBuildJobRead,
+)
+def read_latest_knowledge_build(
+    table_id: UUID,
+    builds: KnowledgeBuildDep,
+) -> KnowledgeBuildJobRead:
+    """Return the newest context build for a table."""
+    job: KnowledgeBuildJobRead | None = builds.latest(table_id)
+    if job is None:
+        raise EntityNotFoundError("knowledge build", str(table_id))
+    return job
+
+
+@router.get("/tables/{table_id}/knowledge-graph", response_model=GraphView)
+def read_knowledge_graph(table_id: UUID, platform: PlatformDep) -> GraphView:
+    """Return the Neo4j column subgraph owned by this table."""
+    return platform.graph.knowledge_subgraph(table_id)
 
 
 @router.get("/tables/{table_id}/context-graph", response_model=GraphView)

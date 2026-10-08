@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
@@ -219,6 +219,51 @@ class ColumnComparisonProfile(BaseModel):
     target_uniqueness_ratio: float | None = Field(default=None, ge=0, le=1)
 
 
+class ColumnRelationKind(StrEnum):
+    """Why two columns are linked in the knowledge subgraph."""
+
+    REFERENCES = "REFERENCES"
+    JOINS_ON = "JOINS_ON"
+    DERIVED_FROM = "DERIVED_FROM"
+    SAME_MEANING = "SAME_MEANING"
+
+
+class ColumnCandidate(BaseModel):
+    """One catalog column the model may use when it builds a column subgraph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    column_id: UUID
+    table_id: UUID
+    table_name: str
+    name: str
+    data_type: str | None
+    is_primary_key: bool | None
+    is_unique: bool | None
+    is_foreign_key: bool
+    on_focus_table: bool
+    description: str | None = None
+
+
+class ColumnRelation(BaseModel):
+    """Important link between two catalog columns. Both ids already exist."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_column_id: UUID
+    target_column_id: UUID
+    kind: ColumnRelationKind
+    reason: str = Field(min_length=1, max_length=280)
+
+    @field_validator("reason")
+    @classmethod
+    def _clean_reason(cls, value: str) -> str:
+        cleaned: str = value.strip()
+        if cleaned == "":
+            raise ValueError("reason is empty")
+        return cleaned
+
+
 class GraphNeighbor(BaseModel):
     """Another catalog table connected by the graph projection."""
 
@@ -274,7 +319,7 @@ class TableContextOptions(BaseModel):
 
 
 class TableAnalysisContext(BaseModel):
-    """Catalog metadata, optional statistics, graph neighbors, and lineage."""
+    """Catalog metadata, optional statistics, graph neighbors, lineage, and column links."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -284,6 +329,7 @@ class TableAnalysisContext(BaseModel):
     existing_relationships: list[TableRelation]
     graph_neighbors: list[GraphNeighbor]
     lineage: LineageContext | None = None
+    column_relations: list[ColumnRelation] = Field(default_factory=list)
 
 
 class GraphPublishResult(BaseModel):

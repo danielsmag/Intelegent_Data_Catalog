@@ -1,14 +1,20 @@
 """Request-scoped catalog platform. Discovery and query execution stay separate."""
 
+import logging
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.catalog.services.query_service import QueryService
+from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import EntityNotFoundError, TrinoUnavailableError
-from intelegent_data_catalog.graph.neo4j_store import Neo4jProjection
+from intelegent_data_catalog.graph.neo4j_store import Neo4jColumnSubgraph, Neo4jProjection
 from intelegent_data_catalog.graph.service import GraphService
+from intelegent_data_catalog.knowledge.context.column_graph import (
+    ColumnSubgraphBuilder,
+    ScopeColumnCatalog,
+)
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     TableAgentFactory,
@@ -20,14 +26,18 @@ from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDat
 from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
-from intelegent_data_catalog.llm.factory import build_table_operation_agent
+from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
+from intelegent_data_catalog.llm.factory import build_model, build_table_operation_agent
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
+from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
 from intelegent_data_catalog.sources.enrichment import PostgresForeignKeyEnricher
 from intelegent_data_catalog.sources.sync import MetadataSyncService
 from intelegent_data_catalog.sources.trino.client import TrinoClient
 from intelegent_data_catalog.sources.trino.discovery import TrinoCatalogSource
+
+logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 
 
 class RequestPlatform:
@@ -49,6 +59,17 @@ class RequestPlatform:
         if settings.marquez.enabled:
             lineage = MarquezClient(settings.marquez.url, settings.marquez.timeout_seconds)
         self._lineage: LineageReader | None = lineage
+        self._neo4j: Neo4jProjection | None = neo4j
+        self._column_proposer: ColumnSubgraphAgent | None = None
+        if neo4j is not None:
+            column_timeout: float = max(settings.llm.timeout_seconds, 600.0)
+            self._column_proposer = ColumnSubgraphAgent(
+                build_model(settings.llm),
+                max_requests=settings.llm.max_tool_steps,
+                temperature=settings.llm.temperature,
+                max_tokens=settings.llm.max_tokens,
+                timeout_seconds=column_timeout,
+            )
         self.graph: GraphService = GraphService(session, lineage, neo4j)
         source: TrinoCatalogSource | _UnconfiguredTrino
         if settings.trino.enabled:
@@ -77,8 +98,26 @@ class RequestPlatform:
         table_id: UUID,
         options: TableContextOptions,
     ) -> TableAnalysisContext:
-        """Build one table context and store it. This does not write Neo4j or call the model."""
+        """Build one table context and store it.
+
+        When Neo4j is configured, the model writes a column subgraph for this table.
+        PostgreSQL catalog rows stay unchanged.
+        """
+        logger.info(
+            "build knowledge context start table_id=%s profile=%s graph=%s lineage=%s",
+            table_id,
+            options.include_data_profile,
+            options.include_graph,
+            options.include_lineage,
+        )
         reader: LineageReader = self._lineage if self._lineage is not None else EmptyLineageReader()
+        column_graph: ColumnSubgraphBuilder | None = None
+        if self._neo4j is not None and self._column_proposer is not None:
+            column_graph = ColumnSubgraphBuilder(
+                candidates=ScopeColumnCatalog(RegistryRepository(self._session)),
+                proposer=self._column_proposer,
+                writer=Neo4jColumnSubgraph(self._neo4j),
+            )
         factory: TableAgentFactory = build_table_agent_factory(
             self._session,
             self.graph,
@@ -86,10 +125,17 @@ class RequestPlatform:
             UnconfiguredDataProfiler(),
             publisher=self.graph,
             operation_agent=self._operation_agent,
+            column_graph=column_graph,
         )
         agent: TableAgent = factory.create(table_id)
         built: TableAnalysisContext = agent.build_context(options)
         KnowledgeContextStore(self._session).save(built)
+        logger.info(
+            "build knowledge context done table_id=%s columns=%s relations=%s",
+            table_id,
+            len(built.columns),
+            len(built.column_relations),
+        )
         return built
 
     def read_knowledge_context(self, table_id: UUID) -> TableAnalysisContext:

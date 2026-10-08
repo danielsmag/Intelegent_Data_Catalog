@@ -1,5 +1,6 @@
 """Table agent foundation: metadata, profiles, graph neighbors, and lineage."""
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -26,6 +27,7 @@ from intelegent_data_catalog.exceptions import (
 from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView
 from intelegent_data_catalog.graph.projection import LineageLink
 from intelegent_data_catalog.graph.service import GraphService
+from intelegent_data_catalog.knowledge.context.column_graph import ColumnGraphAppender
 from intelegent_data_catalog.knowledge.context.graph import ProjectionGraphContextProvider
 from intelegent_data_catalog.knowledge.context.lineage import MarquezLineageContextProvider
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
@@ -108,8 +110,9 @@ def test_run_rejects_blank_instruction() -> None:
         agent.run("   ")
 
 
-def test_run_reads_metadata_through_tools() -> None:
+def test_run_reads_metadata_through_tools(caplog: pytest.LogCaptureFixture) -> None:
     """The model can load this table, and the tool result includes the catalog name."""
+    caplog.set_level(logging.INFO, logger="intelegent_data_catalog.llm")
     table_id: UUID = uuid4()
     seen: list[str] = []
     names: set[str] = set()
@@ -128,6 +131,8 @@ def test_run_reads_metadata_through_tools() -> None:
     ).create(table_id)
     answer: str = agent.run("describe this table")
     assert answer == "The table is orders."
+    assert "describe this table" in caplog.text
+    assert "get_metadata" in caplog.text
     assert seen
     assert "orders" in seen[0]
     assert names == {
@@ -569,6 +574,24 @@ def test_build_context_combines_metadata_profile_graph_and_lineage() -> None:
     assert len(profiler.table_options) == 1
 
 
+def test_build_context_logs_requested_slices(caplog: pytest.LogCaptureFixture) -> None:
+    """Build logs the table id and which slices were requested."""
+    caplog.set_level(logging.INFO, logger="intelegent_data_catalog.knowledge")
+    table_id: UUID = uuid4()
+    agent: TableAgent = _factory(_context(table_id)).create(table_id)
+    agent.build_context(
+        TableContextOptions(
+            include_data_profile=False,
+            include_graph=True,
+            include_lineage=False,
+        )
+    )
+    assert str(table_id) in caplog.text
+    assert "profile=False" in caplog.text
+    assert "graph=True" in caplog.text
+    assert "lineage=False" in caplog.text
+
+
 def test_build_context_can_skip_graph_and_lineage() -> None:
     """Flags avoid reads the caller did not ask for."""
     table_id: UUID = uuid4()
@@ -875,6 +898,7 @@ def _factory(
     defaults: KnowledgeDefaults | None = None,
     publisher: _Publisher | None = None,
     operation_agent: TableOperationAgent | None = None,
+    column_graph: ColumnGraphAppender | None = None,
 ) -> TableAgentFactory:
     selected_profiler: _Profiler = profiler or _Profiler(
         _table_profile(context.table.id, context.columns[0].id)
@@ -887,6 +911,7 @@ def _factory(
         defaults=defaults,
         publisher=publisher,
         operation_agent=operation_agent,
+        column_graph=column_graph,
     )
 
 

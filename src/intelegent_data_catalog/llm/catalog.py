@@ -20,6 +20,7 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from intelegent_data_catalog.exceptions import LlmError, LlmUnavailableError
+from intelegent_data_catalog.llm.trace import AgentTrace
 
 if TYPE_CHECKING:
     from intelegent_data_catalog.llm.tools.table import TableToolSource
@@ -50,6 +51,8 @@ class TableOperationAgent:
         return asyncio.run(self._run(instruction, source, instructions))
 
     async def _run(self, instruction: str, source: TableToolSource, instructions: str) -> str:
+        trace: AgentTrace = AgentTrace("table-catalog")
+        trace.start(instruction)
         try:
             result: AgentRunResult[str] = await self._agent.run(
                 instruction,
@@ -70,6 +73,7 @@ class TableOperationAgent:
             raise LlmError("language model returned an unexpected response") from err
         except UserError as err:
             raise LlmUnavailableError("language model is not configured") from err
+        trace.finish(result)
         answer: str = result.output
         return answer
 

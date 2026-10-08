@@ -84,6 +84,7 @@ export type GraphEdgeRecord = {
   target: string
   kind: string
   style: string
+  reason?: string | null
 }
 
 export type GraphViewRecord = {
@@ -237,6 +238,13 @@ export async function fetchContextGraph(
   return readJson<GraphViewRecord>(`/api/v1/tables/${tableId}/context-graph?depth=2`, signal)
 }
 
+export async function fetchKnowledgeGraph(
+  tableId: string,
+  signal: AbortSignal,
+): Promise<GraphViewRecord> {
+  return readJson<GraphViewRecord>(`/api/v1/tables/${tableId}/knowledge-graph`, signal)
+}
+
 export async function fetchBindings(
   tableId: string,
   signal: AbortSignal,
@@ -319,10 +327,15 @@ export async function fetchKnowledgeContext(
   return (await response.json()) as KnowledgeContext
 }
 
-export async function buildKnowledgeContext(
-  tableId: string,
-  signal: AbortSignal,
-): Promise<KnowledgeContext> {
+export type KnowledgeBuildJob = {
+  id: string
+  table_id: string
+  table_name: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+}
+
+export async function startKnowledgeBuild(tableId: string): Promise<KnowledgeBuildJob> {
   const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -331,12 +344,35 @@ export async function buildKnowledgeContext(
       include_graph: true,
       include_lineage: true,
     }),
-    signal,
   })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
-  return (await response.json()) as KnowledgeContext
+  return (await response.json()) as KnowledgeBuildJob
+}
+
+export async function fetchKnowledgeBuild(jobId: string): Promise<KnowledgeBuildJob> {
+  const response: Response = await fetch(`/api/v1/knowledge-builds/${jobId}`)
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as KnowledgeBuildJob
+}
+
+export async function fetchLatestKnowledgeBuild(
+  tableId: string,
+  signal: AbortSignal,
+): Promise<KnowledgeBuildJob | null> {
+  const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context/build`, {
+    signal,
+  })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as KnowledgeBuildJob
 }
 
 export async function fetchDataSources(signal: AbortSignal): Promise<DataSourceRecord[]> {

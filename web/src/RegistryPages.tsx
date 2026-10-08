@@ -5,19 +5,25 @@ import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
+import { SubgraphView } from "./SubgraphView"
+import {
+  followKnowledgeBuild,
+  onKnowledgeBuildFinished,
+  requestKnowledgeBuild,
+} from "./knowledgeBuild"
 import { HierarchyTree } from "./HierarchyTree"
 import { PanelChevron, PlusIcon } from "./icons"
 import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { errorMessage, isAbortError } from "./api"
 import {
-  buildKnowledgeContext,
   fetchKnowledgeContext,
+  fetchLatestKnowledgeBuild,
   createScope,
   createSpace,
   fetchBindings,
   fetchCatalogColumns,
   fetchCatalogTable,
-  fetchContextGraph,
+  fetchKnowledgeGraph,
   fetchDataSources,
   fetchLineage,
   fetchRelationshipGraph,
@@ -35,6 +41,7 @@ import {
   type CatalogTableRecord,
   type DataSourceRecord,
   type GraphViewRecord,
+  type KnowledgeBuildJob,
   type KnowledgeContext,
   type ScopeRecord,
   type SearchHitRecord,
@@ -484,12 +491,12 @@ export function RegistryTablePage(): ReactElement {
   const [tags, setTags] = useState<TagRecord[]>([])
   const [lineage, setLineage] = useState<GraphViewRecord | null>(null)
   const [relationGraph, setRelationGraph] = useState<GraphViewRecord | null>(null)
-  const [contextGraph, setContextGraph] = useState<GraphViewRecord | null>(null)
+  const [knowledgeGraph, setKnowledgeGraph] = useState<GraphViewRecord | null>(null)
+  const [graphError, setGraphError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [knowledge, setKnowledge] = useState<KnowledgeContext | null>(null)
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
-  const buildAbort = useRef<AbortController | null>(null)
   const loadAbort = useRef<AbortController | null>(null)
   useEffect(() => {
     const controller: AbortController = new AbortController()
@@ -534,13 +541,16 @@ export function RegistryTablePage(): ReactElement {
           setRelationGraph({ nodes: [], edges: [], truncated: false })
         }
       })
-    void fetchContextGraph(tableId, controller.signal)
+    setKnowledgeGraph(null)
+    setGraphError(null)
+    void fetchKnowledgeGraph(tableId, controller.signal)
       .then((loaded: GraphViewRecord) => {
-        setContextGraph(loaded)
+        setKnowledgeGraph(loaded)
       })
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
-          setContextGraph({ nodes: [], edges: [], truncated: false })
+          setKnowledgeGraph({ nodes: [], edges: [], truncated: false })
+          setGraphError(errorMessage(err))
         }
       })
     setKnowledge(null)
@@ -557,33 +567,67 @@ export function RegistryTablePage(): ReactElement {
           setKnowledgeError(errorMessage(err))
         }
       })
-    return () => {
-      controller.abort()
-      knowledgeController.abort()
-      buildAbort.current?.abort()
-    }
-  }, [tableId])
-  function runBuildContext(): void {
-    loadAbort.current?.abort()
-    buildAbort.current?.abort()
-    const controller: AbortController = new AbortController()
-    buildAbort.current = controller
-    setBuilding(true)
-    setKnowledgeError(null)
-    void buildKnowledgeContext(tableId, controller.signal)
-      .then((loaded: KnowledgeContext) => {
-        setKnowledge(loaded)
+    void fetchLatestKnowledgeBuild(tableId, controller.signal)
+      .then((job: KnowledgeBuildJob | null) => {
+        if (controller.signal.aborted || job === null || job.status !== "running") {
+          return
+        }
+        setBuilding(true)
+        followKnowledgeBuild(job)
       })
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
-          setKnowledge(null)
           setKnowledgeError(errorMessage(err))
         }
       })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setBuilding(false)
-        }
+    return () => {
+      controller.abort()
+      knowledgeController.abort()
+    }
+  }, [tableId])
+  useEffect(() => {
+    return onKnowledgeBuildFinished((job: KnowledgeBuildJob) => {
+      if (job.table_id !== tableId) {
+        return
+      }
+      setBuilding(false)
+      if (job.status === "failed") {
+        setKnowledgeError(job.error ?? "Context build failed.")
+        return
+      }
+      const controller: AbortController = new AbortController()
+      void fetchKnowledgeContext(tableId, controller.signal)
+        .then((loaded: KnowledgeContext | null) => {
+          setKnowledge(loaded)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setKnowledgeError(errorMessage(err))
+          }
+        })
+      void fetchKnowledgeGraph(tableId, controller.signal)
+        .then((loaded: GraphViewRecord) => {
+          setKnowledgeGraph(loaded)
+          setGraphError(null)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setKnowledgeGraph({ nodes: [], edges: [], truncated: false })
+            setGraphError(errorMessage(err))
+          }
+        })
+    })
+  }, [tableId])
+  function runBuildContext(): void {
+    setBuilding(true)
+    setKnowledgeError(null)
+    void requestKnowledgeBuild(tableId)
+      .then((job: KnowledgeBuildJob) => {
+        setBuilding(job.status === "running")
+      })
+      .catch((err: unknown) => {
+        setBuilding(false)
+        setKnowledgeError(errorMessage(err))
       })
   }
   const qualified: string = table?.source_key ?? "Table"
@@ -615,9 +659,13 @@ export function RegistryTablePage(): ReactElement {
                 : "Rebuild context"}
           </button>
         </div>
+        {building ? (
+          <p className="comment">
+            Building in the background. Keep using the catalog. An alert appears when it finishes.
+          </p>
+        ) : null}
         {error !== null ? <p className="error-text">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text">{knowledgeError}</p> : null}
-        {knowledge !== null ? <KnowledgeContextPanel context={knowledge} /> : null}
         <div className="tabs" role="tablist">
           {(["overview", "columns", "relationships", "lineage", "graph", "source"] as const).map(
             (name: TabName) => (
@@ -636,14 +684,19 @@ export function RegistryTablePage(): ReactElement {
             ),
           )}
         </div>
-        {tab === "overview" && table !== null ? (
+        {tab === "overview" ? (
           <div>
-            <p>{qualified}</p>
-            <p>{table.description ?? table.source_description ?? "No description"}</p>
-            <p>
-              Tags: {tags.length === 0 ? "None" : tags.map((tag: TagRecord) => tag.name).join(", ")}
-            </p>
-            <p className="comment">Last synced {table.last_synced_at ?? "never"}</p>
+            {knowledge !== null ? <KnowledgeContextPanel context={knowledge} /> : null}
+            {table !== null ? (
+              <>
+                <p>{qualified}</p>
+                <p>{table.description ?? table.source_description ?? "No description"}</p>
+                <p>
+                  Tags: {tags.length === 0 ? "None" : tags.map((tag: TagRecord) => tag.name).join(", ")}
+                </p>
+                <p className="comment">Last synced {table.last_synced_at ?? "never"}</p>
+              </>
+            ) : null}
           </div>
         ) : null}
         {tab === "columns" ? <ColumnTable columns={columns} /> : null}
@@ -651,7 +704,9 @@ export function RegistryTablePage(): ReactElement {
           <RelationshipLists relationships={relationships} graph={relationGraph} />
         ) : null}
         {tab === "lineage" ? <GraphList graph={lineage} empty="No lineage recorded." /> : null}
-        {tab === "graph" ? <GraphList graph={contextGraph} empty="No graph around this table." /> : null}
+        {tab === "graph" ? (
+          <SubgraphView graph={knowledgeGraph} error={graphError} focusTableId={tableId} />
+        ) : null}
         {tab === "source" && table !== null ? (
           <SourceTab table={table} bindings={bindings} spark={spark} />
         ) : null}

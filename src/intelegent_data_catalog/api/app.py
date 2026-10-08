@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from intelegent_data_catalog.api.access_log import should_log_access
 from intelegent_data_catalog.api.exception_handlers import register_exception_handlers
 from intelegent_data_catalog.api.v1.router import router as v1_router
 from intelegent_data_catalog.core.logger import LOGGER_NAME
@@ -39,11 +40,12 @@ def _add_access_log(app: FastAPI) -> None:
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         response: Response = await call_next(request)
-        logger: logging.Logger = logging.getLogger(LOGGER_NAME)
-        logger.info(
-            "request method=%s path=%s status=%s",
-            request.method,
-            request.url.path,
-            response.status_code,
-        )
+        if should_log_access(request.url.path, response.status_code):
+            logger: logging.Logger = logging.getLogger(LOGGER_NAME)
+            logger.info(
+                "request method=%s path=%s status=%s",
+                request.method,
+                request.url.path,
+                response.status_code,
+            )
         return response

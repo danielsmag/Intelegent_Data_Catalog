@@ -16,6 +16,7 @@ from intelegent_data_catalog.knowledge.access import (
 )
 from intelegent_data_catalog.knowledge.context.builder import TableContextBuilder
 from intelegent_data_catalog.knowledge.context.catalog import CatalogContextProvider
+from intelegent_data_catalog.knowledge.context.column_graph import ColumnGraphAppender
 from intelegent_data_catalog.knowledge.context.graph import GraphContextProvider, GraphPublisher
 from intelegent_data_catalog.knowledge.context.lineage import LineageContextProvider
 from intelegent_data_catalog.knowledge.models import (
@@ -55,6 +56,7 @@ class TableAgent:
         defaults: KnowledgeDefaults | None = None,
         publisher: GraphPublisher | None = None,
         operation_agent: TableOperationAgent | None = None,
+        column_graph: ColumnGraphAppender | None = None,
     ) -> None:
         self._table_id: UUID = table_id
         self._catalog: CatalogContextProvider = catalog
@@ -65,6 +67,7 @@ class TableAgent:
         self._defaults: KnowledgeDefaults = defaults or KnowledgeDefaults()
         self._publisher: GraphPublisher | None = publisher
         self._operation_agent: TableOperationAgent | None = operation_agent
+        self._column_graph: ColumnGraphAppender | None = column_graph
 
     @property
     def table_id(self) -> UUID:
@@ -121,8 +124,18 @@ class TableAgent:
         return self._lineage.get_lineage(self._table_id)
 
     def build_context(self, options: TableContextOptions | None = None) -> TableAnalysisContext:
-        """Combine metadata, an optional profile, neighbors, and lineage."""
-        return self._contexts.build(self._table_id, options)
+        """Combine metadata, an optional profile, neighbors, and lineage.
+
+        When a column-graph appender is configured, the model writes a Neo4j
+        subgraph of important column relations for this table.
+        """
+        built: TableAnalysisContext = self._contexts.build(self._table_id, options)
+        if self._column_graph is None:
+            return built
+        written: TableAnalysisContext = self._column_graph.apply(built)
+        if written.table.id != self._table_id:
+            raise ValidationAppError("catalog context is for a different table", field="table_id")
+        return written
 
     def publish_graph(self) -> GraphPublishResult:
         """Replace the Neo4j projection. PostgreSQL rows stay unchanged."""

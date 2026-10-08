@@ -1,8 +1,9 @@
 """Knowledge Builder foundation.
 
 A table agent is created for one catalog id, loads context, and can run one
-catalog operation. Persistent knowledge stays in PostgreSQL. Neo4j is written
-only when an operation calls the injected graph publisher.
+catalog operation. Persistent knowledge stays in PostgreSQL. The full Neo4j
+projection is written when an operation calls the graph publisher. A context
+build writes a column subgraph when a column-graph appender is configured.
 """
 
 from intelegent_data_catalog.knowledge.context.builder import TableContextBuilder

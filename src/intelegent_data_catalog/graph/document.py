@@ -24,6 +24,7 @@ class GraphEdge(BaseModel):
     target: str
     kind: str
     style: str
+    reason: str | None = None
 
 
 class GraphDocument(BaseModel):
@@ -46,7 +47,9 @@ class GraphView(BaseModel):
 
 
 _HIERARCHY: frozenset[str] = frozenset({"HAS_SCOPE", "HAS_TABLE", "HAS_COLUMN"})
-_RELATIONSHIP: frozenset[str] = frozenset({"REFERENCES", "RELATED_TO"})
+_RELATIONSHIP: frozenset[str] = frozenset(
+    {"REFERENCES", "RELATED_TO", "JOINS_ON", "DERIVED_FROM", "SAME_MEANING"}
+)
 _LINEAGE: frozenset[str] = frozenset({"INPUT_TO", "OUTPUTS"})
 
 
