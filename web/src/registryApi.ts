@@ -375,6 +375,106 @@ export async function fetchLatestKnowledgeBuild(
   return (await response.json()) as KnowledgeBuildJob
 }
 
+export type ScopeTableColumn = {
+  id: string
+  name: string
+}
+
+export type ScopeTableSummary = {
+  id: string
+  name: string
+  display_name: string | null
+  description: string | null
+  status: string
+  columns: ScopeTableColumn[]
+}
+
+export type ScopeTableLink = {
+  source_table_id: string
+  target_table_id: string
+  source_column_id: string
+  target_column_id: string
+  kind: string
+  reason: string
+}
+
+export type ScopeKnowledgeContext = {
+  scope: { id: string; name: string; description: string | null }
+  space: { id: string; name: string }
+  tables: ScopeTableSummary[]
+  existing_relationships: { id: string; relationship_type: string; origin: string }[]
+  table_links: ScopeTableLink[]
+  summary: string | null
+  tables_without_context: string[]
+  previous_links_kept: number
+}
+
+export async function fetchScopeGraph(scopeId: string, signal: AbortSignal): Promise<GraphViewRecord> {
+  return readJson<GraphViewRecord>(`/api/v1/scopes/${scopeId}/graph`, signal)
+}
+
+export async function fetchScopeKnowledgeContext(
+  scopeId: string,
+  signal: AbortSignal,
+): Promise<ScopeKnowledgeContext | null> {
+  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context`, { signal })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ScopeKnowledgeContext
+}
+
+export type ScopeBuildJob = {
+  id: string
+  scope_id: string
+  scope_name: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+}
+
+export async function startScopeBuild(scopeId: string): Promise<ScopeBuildJob> {
+  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      include_table_knowledge: true,
+      include_previous: true,
+      include_summary: true,
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ScopeBuildJob
+}
+
+export async function fetchScopeBuild(jobId: string): Promise<ScopeBuildJob> {
+  const response: Response = await fetch(`/api/v1/scope-builds/${jobId}`)
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ScopeBuildJob
+}
+
+export async function fetchLatestScopeBuild(
+  scopeId: string,
+  signal: AbortSignal,
+): Promise<ScopeBuildJob | null> {
+  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context/build`, {
+    signal,
+  })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ScopeBuildJob
+}
+
 export async function fetchDataSources(signal: AbortSignal): Promise<DataSourceRecord[]> {
   return readJson<DataSourceRecord[]>("/api/v1/data-sources", signal)
 }

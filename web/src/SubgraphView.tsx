@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactElement } from "react"
+import { Link } from "react-router-dom"
 import type { GraphEdgeRecord, GraphNodeRecord, GraphViewRecord } from "./registryApi"
 
 const VIEW_WIDTH: number = 1000
@@ -9,6 +10,22 @@ const COLUMN_RADIUS: number = 20
 type Point = {
   x: number
   y: number
+}
+
+type Body = {
+  id: string
+  x: number
+  y: number
+}
+
+type Frame = {
+  width: number
+  height: number
+}
+
+type Fitted = {
+  positions: Map<string, Point>
+  scale: number
 }
 
 type Camera = {
@@ -24,7 +41,8 @@ type Drag =
 export function SubgraphView(props: {
   graph: GraphViewRecord | null
   error: string | null
-  focusTableId: string
+  focusTableId?: string
+  emptyMessage?: string
 }): ReactElement {
   if (props.error !== null) {
     return <p className="error-text">{props.error}</p>
@@ -33,29 +51,62 @@ export function SubgraphView(props: {
     return <p className="note">Loading subgraph…</p>
   }
   if (props.graph.nodes.length === 0) {
-    return <p className="note">No subgraph for this table. Build context to write one.</p>
+    return (
+      <p className="note">
+        {props.emptyMessage ?? "No subgraph for this table. Build context to write one."}
+      </p>
+    )
   }
-  return <SubgraphCanvas graph={props.graph} focusTableId={props.focusTableId} />
+  return <SubgraphCanvas graph={props.graph} focusTableId={props.focusTableId ?? null} />
 }
 
-function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string }): ReactElement {
+function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string | null }): ReactElement {
   const graph: GraphViewRecord = props.graph
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<Drag | null>(null)
   const movedRef = useRef<boolean>(false)
-  const [positions, setPositions] = useState<Map<string, Point>>(() => layoutGraph(graph.nodes, graph.edges))
+  const [model, setModel] = useState<Body[]>(() => simulateGraph(graph.nodes, graph.edges))
+  const [frame, setFrame] = useState<Frame>({ width: VIEW_WIDTH, height: VIEW_HEIGHT })
   const [selected, setSelected] = useState<string | null>(null)
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, scale: 1 })
   const cameraRef = useRef<Camera>(camera)
   cameraRef.current = camera
+  const fitted: Fitted = fitBodies(model, frame.width, frame.height)
+  const positions: Map<string, Point> = fitted.positions
+  const fitScaleRef = useRef<number>(fitted.scale)
+  fitScaleRef.current = fitted.scale
   useEffect(() => {
-    setPositions(layoutGraph(graph.nodes, graph.edges))
-    const focus: GraphNodeRecord | undefined = graph.nodes.find(
-      (node: GraphNodeRecord) => node.kind === "table" && node.catalog_id === props.focusTableId,
-    )
+    setModel(simulateGraph(graph.nodes, graph.edges))
+    const focus: GraphNodeRecord | undefined =
+      props.focusTableId === null
+        ? undefined
+        : graph.nodes.find(
+            (node: GraphNodeRecord) => node.kind === "table" && node.catalog_id === props.focusTableId,
+          )
     setSelected(focus?.id ?? graph.nodes[0]?.id ?? null)
     setCamera({ x: 0, y: 0, scale: 1 })
   }, [graph, props.focusTableId])
+  useEffect(() => {
+    const svg: SVGSVGElement | null = svgRef.current
+    if (svg === null) {
+      return
+    }
+    const observer: ResizeObserver = new ResizeObserver((entries: ResizeObserverEntry[]) => {
+      const entry: ResizeObserverEntry | undefined = entries[0]
+      if (entry === undefined) {
+        return
+      }
+      const width: number = Math.max(1, Math.round(entry.contentRect.width))
+      const height: number = Math.max(1, Math.round(entry.contentRect.height))
+      setFrame((current: Frame) =>
+        current.width === width && current.height === height ? current : { width, height },
+      )
+    })
+    observer.observe(svg)
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
   useEffect(() => {
     const svg: SVGSVGElement | null = svgRef.current
     if (svg === null) {
@@ -128,15 +179,15 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string })
       setCamera((current: Camera) => ({ ...current, x: current.x + dx, y: current.y + dy }))
       return
     }
-    const scale: number = cameraRef.current.scale
-    setPositions((current: Map<string, Point>) => {
-      const point: Point | undefined = current.get(drag.id)
+    const scale: number = cameraRef.current.scale * fitScaleRef.current
+    setModel((current: Body[]) => {
+      const point: Body | undefined = current.find((body: Body) => body.id === drag.id)
       if (point === undefined) {
         return current
       }
-      const next: Map<string, Point> = new Map(current)
-      next.set(drag.id, { x: point.x + dx / scale, y: point.y + dy / scale })
-      return next
+      return current.map((body: Body) =>
+        body.id === drag.id ? { ...body, x: point.x + dx / scale, y: point.y + dy / scale } : body,
+      )
     })
   }
   function onPointerUp(): void {
@@ -165,7 +216,8 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string })
         <svg
           ref={svgRef}
           className="subgraph-svg"
-          viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+          viewBox={`0 0 ${frame.width} ${frame.height}`}
+          preserveAspectRatio="xMidYMid meet"
           role="img"
           aria-label="Table subgraph"
           onPointerDown={onPointerDown}
@@ -173,7 +225,7 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string })
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          <rect className="subgraph-bg" width={VIEW_WIDTH} height={VIEW_HEIGHT} />
+          <rect className="subgraph-bg" width={frame.width} height={frame.height} />
           <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
             {graph.edges.map((edge: GraphEdgeRecord, index: number) => (
               <SubgraphEdge
@@ -297,6 +349,11 @@ function NodeDetails(props: {
         <dt>resolved</dt>
         <dd>{node.resolved ? "true" : "false"}</dd>
       </dl>
+      {node.kind === "table" && node.catalog_id !== null ? (
+        <Link className="subgraph-open" to={`/registry/tables/${node.catalog_id}`}>
+          Open table
+        </Link>
+      ) : null}
       <h3>Relationships</h3>
       {links.length === 0 ? <p className="note">No relationships.</p> : null}
       <ul className="registry-list">
@@ -343,7 +400,7 @@ function trimLine(source: Point, target: Point, sourceRadius: number, targetRadi
   ]
 }
 
-function layoutGraph(nodes: GraphNodeRecord[], edges: GraphEdgeRecord[]): Map<string, Point> {
+function simulateGraph(nodes: GraphNodeRecord[], edges: GraphEdgeRecord[]): Body[] {
   const placed: Array<{ id: string; x: number; y: number; vx: number; vy: number }> = nodes.map(
     (node: GraphNodeRecord, index: number) => {
       const angle: number = (Math.PI * 2 * index) / Math.max(nodes.length, 1)
@@ -417,13 +474,12 @@ function layoutGraph(nodes: GraphNodeRecord[], edges: GraphEdgeRecord[]): Map<st
       node.y += Math.max(-24, Math.min(24, node.vy))
     }
   }
-  fit(placed)
-  return new Map(placed.map((node) => [node.id, { x: node.x, y: node.y }]))
+  return placed.map((node: Body) => ({ id: node.id, x: node.x, y: node.y }))
 }
 
-function fit(nodes: Array<{ x: number; y: number }>): void {
+function fitBodies(nodes: Body[], width: number, height: number): Fitted {
   if (nodes.length === 0) {
-    return
+    return { positions: new Map<string, Point>(), scale: 1 }
   }
   let minX: number = Number.POSITIVE_INFINITY
   let minY: number = Number.POSITIVE_INFINITY
@@ -435,11 +491,31 @@ function fit(nodes: Array<{ x: number; y: number }>): void {
     maxX = Math.max(maxX, node.x)
     maxY = Math.max(maxY, node.y)
   }
-  const spanX: number = Math.max(maxX - minX, 1)
-  const spanY: number = Math.max(maxY - minY, 1)
-  const pad: number = 72
-  for (const node of nodes) {
-    node.x = pad + ((node.x - minX) / spanX) * (VIEW_WIDTH - pad * 2)
-    node.y = pad + ((node.y - minY) / spanY) * (VIEW_HEIGHT - pad * 2)
+  const spanX: number = maxX - minX
+  const spanY: number = maxY - minY
+  const pad: number = Math.min(72, width * 0.08, height * 0.08)
+  const innerW: number = Math.max(width - pad * 2, 1)
+  const innerH: number = Math.max(height - pad * 2, 1)
+  let scale: number = 1
+  if (spanX > 0 && spanY > 0) {
+    scale = Math.min(innerW / spanX, innerH / spanY)
+  } else if (spanX > 0) {
+    scale = innerW / spanX
+  } else if (spanY > 0) {
+    scale = innerH / spanY
   }
+  const usedW: number = spanX * scale
+  const usedH: number = spanY * scale
+  const offsetX: number = pad + (innerW - usedW) / 2
+  const offsetY: number = pad + (innerH - usedH) / 2
+  const positions: Map<string, Point> = new Map(
+    nodes.map((node: Body) => [
+      node.id,
+      {
+        x: offsetX + (node.x - minX) * scale,
+        y: offsetY + (node.y - minY) * scale,
+      },
+    ]),
+  )
+  return { positions, scale }
 }

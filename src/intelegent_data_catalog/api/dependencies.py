@@ -16,7 +16,7 @@ from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import PersistenceUnavailableError
-from intelegent_data_catalog.jobs.queue import KnowledgeBuildQueue
+from intelegent_data_catalog.jobs.queue import KnowledgeBuildQueue, ScopeBuildQueue
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.service import RegistryService
 
@@ -134,3 +134,14 @@ def get_knowledge_builds(request: Request) -> KnowledgeBuildQueue:
 
 
 KnowledgeBuildDep = Annotated[KnowledgeBuildQueue, Depends(get_knowledge_builds)]
+
+
+def get_scope_builds(request: Request) -> ScopeBuildQueue:
+    """Return the process-wide scope queue created with the application."""
+    queue: object = getattr(request.app.state, "scope_builds", None)
+    if not isinstance(queue, ScopeBuildQueue):
+        raise RuntimeError("scope builds are not configured")
+    return queue
+
+
+ScopeBuildDep = Annotated[ScopeBuildQueue, Depends(get_scope_builds)]

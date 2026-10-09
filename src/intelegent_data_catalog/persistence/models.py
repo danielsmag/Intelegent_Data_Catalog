@@ -503,6 +503,25 @@ class TableKnowledgeContextRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ScopeKnowledgeContextRow(Base):
+    """Latest built analysis context for one catalog scope."""
+
+    __tablename__: str = "scope_knowledge_contexts"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("scope_id", name="uq_scope_knowledge_contexts_scope"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    scope_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("scopes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class MarquezMappingRow(Base):
     """Catalog table identity mapped to a Marquez dataset. Marquez ids are not catalog ids."""
 

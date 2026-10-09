@@ -6,12 +6,17 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
 
-from intelegent_data_catalog.api.dependencies import KnowledgeBuildDep, PlatformDep
+from intelegent_data_catalog.api.dependencies import KnowledgeBuildDep, PlatformDep, ScopeBuildDep
 from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
 from intelegent_data_catalog.graph.document import GraphView
-from intelegent_data_catalog.jobs.models import KnowledgeBuildJobRead
-from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
+from intelegent_data_catalog.jobs.models import KnowledgeBuildJobRead, ScopeBuildJobRead
+from intelegent_data_catalog.knowledge.models import (
+    ScopeAnalysisContext,
+    ScopeContextOptions,
+    TableAnalysisContext,
+    TableContextOptions,
+)
 from intelegent_data_catalog.query.spark_bridge import (
     NOT_CONFIGURED,
     SparkQueryPreview,
@@ -48,6 +53,16 @@ class KnowledgeContextRequest(BaseModel):
     include_data_profile: bool = False
     include_graph: bool = True
     include_lineage: bool = True
+
+
+class ScopeContextRequest(BaseModel):
+    """Which slices a scope build should load."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_table_knowledge: bool = True
+    include_previous: bool = True
+    include_summary: bool = True
 
 
 class GraphRebuildResponse(BaseModel):
@@ -212,6 +227,70 @@ def read_latest_knowledge_build(
 def read_knowledge_graph(table_id: UUID, platform: PlatformDep) -> GraphView:
     """Return the Neo4j column subgraph owned by this table."""
     return platform.graph.knowledge_subgraph(table_id)
+
+
+@router.get("/scopes/{scope_id}/graph", response_model=GraphView)
+def read_scope_graph(scope_id: UUID, platform: PlatformDep) -> GraphView:
+    """Return tables in a scope and the relationships between them."""
+    return platform.graph.scope_overview(scope_id)
+
+
+@router.get("/scopes/{scope_id}/knowledge-graph", response_model=GraphView)
+def read_scope_knowledge_graph(scope_id: UUID, platform: PlatformDep) -> GraphView:
+    """Return the Neo4j table subgraph owned by this scope."""
+    return platform.graph.scope_knowledge_subgraph(scope_id)
+
+
+@router.get("/scopes/{scope_id}/knowledge-context", response_model=ScopeAnalysisContext)
+def read_scope_knowledge_context(scope_id: UUID, platform: PlatformDep) -> ScopeAnalysisContext:
+    """Return the context last built for this scope."""
+    return platform.read_scope_context(scope_id)
+
+
+@router.post(
+    "/scopes/{scope_id}/knowledge-context",
+    response_model=ScopeBuildJobRead,
+    status_code=202,
+)
+def build_scope_knowledge_context(
+    scope_id: UUID,
+    platform: PlatformDep,
+    builds: ScopeBuildDep,
+    body: ScopeContextRequest | None = None,
+) -> ScopeBuildJobRead:
+    """Start a scope build and return before the model finishes.
+
+    Accepted links replace prior LLM relationships for tables in this scope.
+    """
+    scope_name: str = platform.registry.get_scope(scope_id).name
+    selected: ScopeContextRequest = body if body is not None else ScopeContextRequest()
+    options: ScopeContextOptions = ScopeContextOptions(
+        include_table_knowledge=selected.include_table_knowledge,
+        include_previous=selected.include_previous,
+        include_summary=selected.include_summary,
+    )
+    return builds.start(scope_id, scope_name, options)
+
+
+@router.get("/scope-builds/{job_id}", response_model=ScopeBuildJobRead)
+def read_scope_build(job_id: UUID, builds: ScopeBuildDep) -> ScopeBuildJobRead:
+    """Return one background scope build."""
+    job: ScopeBuildJobRead | None = builds.get(job_id)
+    if job is None:
+        raise EntityNotFoundError("scope build", str(job_id))
+    return job
+
+
+@router.get(
+    "/scopes/{scope_id}/knowledge-context/build",
+    response_model=ScopeBuildJobRead,
+)
+def read_latest_scope_build(scope_id: UUID, builds: ScopeBuildDep) -> ScopeBuildJobRead:
+    """Return the newest context build for a scope."""
+    job: ScopeBuildJobRead | None = builds.latest(scope_id)
+    if job is None:
+        raise EntityNotFoundError("scope build", str(scope_id))
+    return job
 
 
 @router.get("/tables/{table_id}/context-graph", response_model=GraphView)

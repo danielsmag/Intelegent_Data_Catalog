@@ -7,8 +7,8 @@ from fastapi import FastAPI
 
 from intelegent_data_catalog.api.app import configure_app
 from intelegent_data_catalog.api.container import AppContainer
-from intelegent_data_catalog.jobs.catalog import CatalogKnowledgeBuild
-from intelegent_data_catalog.jobs.queue import KnowledgeBuildQueue
+from intelegent_data_catalog.jobs.catalog import CatalogKnowledgeBuild, CatalogScopeBuild
+from intelegent_data_catalog.jobs.queue import KnowledgeBuildQueue, ScopeBuildQueue
 
 
 def create_app(container: AppContainer | None = None) -> FastAPI:
@@ -20,6 +20,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     )
     app.state.container = app_container
     app.state.knowledge_builds = KnowledgeBuildQueue(CatalogKnowledgeBuild(app_container))
+    app.state.scope_builds = ScopeBuildQueue(CatalogScopeBuild(app_container))
     configure_app(app)
     return app
 

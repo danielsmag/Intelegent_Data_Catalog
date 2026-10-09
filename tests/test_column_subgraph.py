@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import LiteralString
 from uuid import UUID, uuid4
 
 import pytest
@@ -190,7 +191,7 @@ def test_assemble_writes_only_the_focus_table() -> None:
     assert document.edges[-1].reason == inside.reason
     assert document.owner_table_id == str(focus_table)
     assert any(edge.kind == "HAS_COLUMN" for edge in document.edges)
-    statements: list[tuple[str, dict[str, object]]] = knowledge_statements(document)
+    statements: list[tuple[LiteralString, dict[str, object]]] = knowledge_statements(document)
     delete_query: str = statements[0][0]
     assert "projection = 'knowledge'" in delete_query
     assert "DERIVED_FROM" in statements[-1][0]

@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react"
 import { Link, useParams } from "react-router-dom"
+import { useTabParam } from "./useTabParam"
 import { ActivityBar } from "./ActivityBar"
 import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
+import { ScopeContextPanel } from "./ScopeContextPanel"
 import { SubgraphView } from "./SubgraphView"
 import {
   followKnowledgeBuild,
+  followScopeBuild,
   onKnowledgeBuildFinished,
+  onScopeBuildFinished,
   requestKnowledgeBuild,
+  requestScopeBuild,
 } from "./knowledgeBuild"
 import { HierarchyTree } from "./HierarchyTree"
 import { PanelChevron, PlusIcon } from "./icons"
@@ -18,6 +23,9 @@ import { errorMessage, isAbortError } from "./api"
 import {
   fetchKnowledgeContext,
   fetchLatestKnowledgeBuild,
+  fetchLatestScopeBuild,
+  fetchScopeGraph,
+  fetchScopeKnowledgeContext,
   createScope,
   createSpace,
   fetchBindings,
@@ -43,6 +51,8 @@ import {
   type GraphViewRecord,
   type KnowledgeBuildJob,
   type KnowledgeContext,
+  type ScopeBuildJob,
+  type ScopeKnowledgeContext,
   type ScopeRecord,
   type SearchHitRecord,
   type SpaceRecord,
@@ -357,17 +367,30 @@ export function SpacePage(): ReactElement {
   )
 }
 
+const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "graph"]
+
+type ScopeTab = "overview" | "tables" | "graph"
+
 export function ScopePage(): ReactElement {
   const scopeId: string = useParams().scopeId ?? ""
   const revision: number = useCatalogRevision()
+  const [tab, selectTab] = useTabParam<ScopeTab>(SCOPE_TABS, "overview")
   const [scope, setScope] = useState<ScopeRecord | null>(null)
   const [spaceName, setSpaceName] = useState<string | null>(null)
   const [tables, setTables] = useState<CatalogTableRecord[] | null>(null)
+  const [scopeGraph, setScopeGraph] = useState<GraphViewRecord | null>(null)
+  const [graphError, setGraphError] = useState<string | null>(null)
+  const [knowledge, setKnowledge] = useState<ScopeKnowledgeContext | null>(null)
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
+  const [building, setBuilding] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [attaching, setAttaching] = useState<boolean>(false)
   useEffect(() => {
     setAttaching(false)
     setSpaceName(null)
+    setBuilding(false)
+    setKnowledge(null)
+    setScopeGraph(null)
   }, [scopeId])
   useEffect(() => {
     const controller: AbortController = new AbortController()
@@ -393,10 +416,93 @@ export function ScopePage(): ReactElement {
           setError(errorMessage(err))
         }
       })
+    setScopeGraph(null)
+    setGraphError(null)
+    void fetchScopeGraph(scopeId, controller.signal)
+      .then((loaded: GraphViewRecord) => {
+        setScopeGraph(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setScopeGraph({ nodes: [], edges: [], truncated: false })
+          setGraphError(errorMessage(err))
+        }
+      })
+    setKnowledge(null)
+    setKnowledgeError(null)
+    void fetchScopeKnowledgeContext(scopeId, controller.signal)
+      .then((loaded: ScopeKnowledgeContext | null) => {
+        setKnowledge(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledge(null)
+          setKnowledgeError(errorMessage(err))
+        }
+      })
+    void fetchLatestScopeBuild(scopeId, controller.signal)
+      .then((job: ScopeBuildJob | null) => {
+        if (controller.signal.aborted || job === null || job.status !== "running") {
+          return
+        }
+        setBuilding(true)
+        followScopeBuild(job)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledgeError(errorMessage(err))
+        }
+      })
     return () => {
       controller.abort()
     }
   }, [scopeId, revision])
+  useEffect(() => {
+    return onScopeBuildFinished((job: ScopeBuildJob) => {
+      if (job.scope_id !== scopeId) {
+        return
+      }
+      setBuilding(false)
+      if (job.status === "failed") {
+        setKnowledgeError(job.error ?? "Scope context build failed.")
+        return
+      }
+      const controller: AbortController = new AbortController()
+      void fetchScopeKnowledgeContext(scopeId, controller.signal)
+        .then((loaded: ScopeKnowledgeContext | null) => {
+          setKnowledge(loaded)
+          setKnowledgeError(null)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setKnowledgeError(errorMessage(err))
+          }
+        })
+      void fetchScopeGraph(scopeId, controller.signal)
+        .then((loaded: GraphViewRecord) => {
+          setScopeGraph(loaded)
+          setGraphError(null)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setScopeGraph({ nodes: [], edges: [], truncated: false })
+            setGraphError(errorMessage(err))
+          }
+        })
+    })
+  }, [scopeId])
+  function runBuildContext(): void {
+    setBuilding(true)
+    setKnowledgeError(null)
+    void requestScopeBuild(scopeId)
+      .then((job: ScopeBuildJob) => {
+        setBuilding(job.status === "running")
+      })
+      .catch((err: unknown) => {
+        setBuilding(false)
+        setKnowledgeError(errorMessage(err))
+      })
+  }
   const loading: boolean = scope === null && error === null
   const cards: EntityCardItem[] = (tables ?? []).map((table: CatalogTableRecord): EntityCardItem => {
     const qualified: string = `${table.physical_catalog}.${table.physical_namespace}.${table.physical_table}`
@@ -415,7 +521,7 @@ export function ScopePage(): ReactElement {
       : "Tables attached to this scope."
   return (
     <Shell status={scope?.name ?? "Scope"} tree>
-      <section className="catalog-page">
+      <section className={tab === "graph" ? "catalog-page catalog-page-graph" : "catalog-page"}>
         <header className="catalog-hero">
           <div className="catalog-hero-top">
             <div className="catalog-hero-copy">
@@ -435,12 +541,25 @@ export function ScopePage(): ReactElement {
               <span className="catalog-count">{countLabel(tables.length, "table", "tables")}</span>
             ) : null}
             <button
+              className="button secondary"
+              type="button"
+              disabled={scope === null || building}
+              onClick={runBuildContext}
+            >
+              {building
+                ? "Building scope context…"
+                : knowledge === null
+                  ? "Build scope context"
+                  : "Rebuild scope context"}
+            </button>
+            <button
               type="button"
               className="button with-icon"
               aria-expanded={attaching}
               disabled={scope === null}
               onClick={() => {
                 setAttaching((open: boolean) => !open)
+                selectTab("tables")
               }}
             >
               {attaching ? null : <PlusIcon />}
@@ -450,39 +569,81 @@ export function ScopePage(): ReactElement {
           </div>
           <p className="catalog-lead">{lead}</p>
         </header>
-        {attaching ? (
-          <div className="catalog-panel">
-            <AttachCatalogForm
-              scopeId={scopeId}
-              onCancel={() => {
-                setAttaching(false)
-              }}
-              onAttached={() => {
-                bumpCatalogRevision()
-              }}
-            />
-          </div>
+        {building ? (
+          <p className="comment">
+            Building in the background. Keep using the catalog. An alert appears when it finishes.
+          </p>
         ) : null}
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
-        {loading ? <EntitySkeletonGrid /> : null}
-        {tables !== null && tables.length === 0 ? (
-          <div className="catalog-empty">
-            <span className="entity-mark tone-c" aria-hidden="true">
-              Tb
-            </span>
-            <h2>No tables yet</h2>
-            <p>Attach a catalog namespace to bring tables into this scope.</p>
-          </div>
+        {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
+        <div className="tabs" role="tablist">
+          {SCOPE_TABS.map((name: ScopeTab) => (
+            <button
+              key={name}
+              type="button"
+              className={tab === name ? "tab selected" : "tab"}
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => {
+                selectTab(name)
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+        {tab === "overview" ? (
+          knowledge !== null ? (
+            <ScopeContextPanel context={knowledge} />
+          ) : (
+            <p className="note">Build scope context to get a summary and cross-table links.</p>
+          )
         ) : null}
-        {cards.length > 0 ? <EntityGrid items={cards} /> : null}
+        {tab === "tables" ? (
+          <>
+            {attaching ? (
+              <div className="catalog-panel">
+                <AttachCatalogForm
+                  scopeId={scopeId}
+                  onCancel={() => {
+                    setAttaching(false)
+                  }}
+                  onAttached={() => {
+                    bumpCatalogRevision()
+                  }}
+                />
+              </div>
+            ) : null}
+            {loading ? <EntitySkeletonGrid /> : null}
+            {tables !== null && tables.length === 0 ? (
+              <div className="catalog-empty">
+                <span className="entity-mark tone-c" aria-hidden="true">
+                  Tb
+                </span>
+                <h2>No tables yet</h2>
+                <p>Attach a catalog namespace to bring tables into this scope.</p>
+              </div>
+            ) : null}
+            {cards.length > 0 ? <EntityGrid items={cards} /> : null}
+          </>
+        ) : null}
+        {tab === "graph" ? (
+          <SubgraphView
+            graph={scopeGraph}
+            error={graphError}
+            emptyMessage="No tables in this scope."
+          />
+        ) : null}
       </section>
     </Shell>
   )
 }
 
+const TABLE_TABS: readonly TabName[] = ["overview", "columns", "relationships", "lineage", "graph", "source"]
+
 export function RegistryTablePage(): ReactElement {
   const tableId: string = useParams().tableId ?? ""
-  const [tab, setTab] = useState<TabName>("overview")
+  const [tab, selectTab] = useTabParam<TabName>(TABLE_TABS, "overview")
   const [table, setTable] = useState<CatalogTableRecord | null>(null)
   const [columns, setColumns] = useState<CatalogColumnRecord[]>([])
   const [relationships, setRelationships] = useState<TableRelationships | null>(null)
@@ -633,7 +794,7 @@ export function RegistryTablePage(): ReactElement {
   const qualified: string = table?.source_key ?? "Table"
   return (
     <Shell status={qualified} tree>
-      <section>
+      <section className={tab === "graph" ? "section-fill" : undefined}>
         <p className="crumb">
           <Link to="/spaces">Spaces</Link>
           {table !== null ? (
@@ -667,22 +828,20 @@ export function RegistryTablePage(): ReactElement {
         {error !== null ? <p className="error-text">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text">{knowledgeError}</p> : null}
         <div className="tabs" role="tablist">
-          {(["overview", "columns", "relationships", "lineage", "graph", "source"] as const).map(
-            (name: TabName) => (
-              <button
-                key={name}
-                type="button"
-                className={tab === name ? "tab selected" : "tab"}
-                role="tab"
-                aria-selected={tab === name}
-                onClick={() => {
-                  setTab(name)
-                }}
-              >
-                {name}
-              </button>
-            ),
-          )}
+          {TABLE_TABS.map((name: TabName) => (
+            <button
+              key={name}
+              type="button"
+              className={tab === name ? "tab selected" : "tab"}
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => {
+                selectTab(name)
+              }}
+            >
+              {name}
+            </button>
+          ))}
         </div>
         {tab === "overview" ? (
           <div>

@@ -4,18 +4,24 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import delete, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.exceptions import ConflictError, ValidationAppError
+from intelegent_data_catalog.persistence import migrate as migrate_module
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
     BindingRole,
     BindingState,
     DataSourceType,
     EngineType,
+    RelationshipOrigin,
+    RelationshipStatus,
+    RelationshipType,
     TableKind,
     TableStatus,
 )
@@ -28,10 +34,13 @@ from intelegent_data_catalog.registry.schemas import (
     CatalogTableRead,
     CatalogTableUpdate,
     ColumnCreate,
+    ColumnMappingWrite,
     ColumnObservation,
     DataSourceCreate,
     EngineConnectionCreate,
     EngineRef,
+    RelationshipCreate,
+    RelationshipRead,
     ScopeCreate,
     SourceBindingCreate,
     SourceRef,
@@ -53,6 +62,7 @@ _CORE_TABLES: frozenset[str] = frozenset(
         "source_engine_bindings",
         "asset_engine_bindings",
         "metadata_sync_runs",
+        "scope_knowledge_contexts",
     }
 )
 
@@ -67,6 +77,66 @@ def test_migration_creates_core_tables(tmp_path: Path) -> None:
         engine.dispose()
         database.dispose()
     assert names >= _CORE_TABLES
+
+
+def test_scope_migration_allows_llm_origin_after_upgrade(tmp_path: Path) -> None:
+    """Revision 0004 adds the scope snapshot and the LLM origin on an older database."""
+    url: str = f"sqlite:///{tmp_path / 'catalog.db'}"
+    upgrade_database(url)
+    config: Config = Config()
+    script: Path = Path(migrate_module.__file__).resolve().parent / "migrations"
+    config.set_main_option("script_location", str(script))
+    config.set_main_option("sqlalchemy.url", url)
+    command.downgrade(config, "20261007_0003")
+    command.upgrade(config, "head")
+    database: CatalogDatabase = CatalogDatabase(url)
+    session: Session = database.session()
+    service: RegistryService = RegistryService(session)
+    engine: Engine = _engine(database)
+    try:
+        names: set[str] = set(inspect(engine).get_table_names())
+        assert "scope_knowledge_contexts" in names
+        space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
+        scope_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
+        source_id: UUID = service.create_data_source(
+            DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
+        ).id
+        orders: CatalogTableRead = _table(
+            service, scope_id, source_id, "polaris", "sales", "orders"
+        )
+        customers: CatalogTableRead = _table(
+            service, scope_id, source_id, "polaris", "sales", "customers"
+        )
+        source_column: UUID = service.create_column(
+            orders.id,
+            ColumnCreate(name="customer_id", data_type="bigint", ordinal_position=0),
+        ).id
+        target_column: UUID = service.create_column(
+            customers.id,
+            ColumnCreate(name="id", data_type="bigint", ordinal_position=0, is_primary_key=True),
+        ).id
+        created: RelationshipRead = service.create_relationship(
+            RelationshipCreate(
+                source_table_id=orders.id,
+                target_table_id=customers.id,
+                relationship_type=RelationshipType.FOREIGN_KEY,
+                origin=RelationshipOrigin.LLM,
+                status=RelationshipStatus.UNVERIFIED,
+                description="customer_id points at the customer key",
+                column_mappings=[
+                    ColumnMappingWrite(
+                        source_column_id=source_column,
+                        target_column_id=target_column,
+                        position=0,
+                    )
+                ],
+            )
+        )
+        assert created.origin == RelationshipOrigin.LLM
+    finally:
+        session.close()
+        engine.dispose()
+        database.dispose()
 
 
 def test_space_delete_is_restricted_while_a_scope_exists(tmp_path: Path) -> None:

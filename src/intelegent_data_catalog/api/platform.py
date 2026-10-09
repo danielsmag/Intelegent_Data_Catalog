@@ -9,26 +9,57 @@ from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import EntityNotFoundError, TrinoUnavailableError
-from intelegent_data_catalog.graph.neo4j_store import Neo4jColumnSubgraph, Neo4jProjection
+from intelegent_data_catalog.graph.neo4j_store import (
+    Neo4jColumnSubgraph,
+    Neo4jProjection,
+    Neo4jScopeSubgraph,
+)
 from intelegent_data_catalog.graph.service import GraphService
 from intelegent_data_catalog.knowledge.context.column_graph import (
     ColumnSubgraphBuilder,
+    KnowledgeSubgraphWriter,
     ScopeColumnCatalog,
 )
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
+from intelegent_data_catalog.knowledge.context.scope_catalog import (
+    MergedTableKnowledgeReader,
+    Neo4jTableKnowledgeReader,
+    PostgresScopeCatalogContextProvider,
+    PostgresTableKnowledgeReader,
+    TableKnowledgeReader,
+)
+from intelegent_data_catalog.knowledge.context.scope_graph import (
+    EmptyKnowledgeSubgraphWriter,
+    ScopeGraphBuilder,
+)
+from intelegent_data_catalog.knowledge.factories.scope_agent_factory import (
+    ScopeAgentFactory,
+    build_scope_agent_factory,
+)
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     TableAgentFactory,
     build_table_agent_factory,
 )
-from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
+from intelegent_data_catalog.knowledge.models import (
+    ScopeAnalysisContext,
+    ScopeContextOptions,
+    TableAnalysisContext,
+    TableContextOptions,
+)
+from intelegent_data_catalog.knowledge.operations.scope_operation import ScopeAgent
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
-from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
+from intelegent_data_catalog.knowledge.store import (
+    KnowledgeContextStore,
+    ScopeKnowledgeContextStore,
+)
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
 from intelegent_data_catalog.llm.factory import build_model, build_table_operation_agent
+from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
+from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
@@ -92,6 +123,14 @@ class RequestPlatform:
         self.query: QueryService = query
         self.sample_limit: int = settings.query.sample_limit
         self._operation_agent: TableOperationAgent = build_table_operation_agent(settings.llm)
+        scope_timeout: float = max(settings.llm.timeout_seconds, 600.0)
+        self._scope_proposer: ScopeSubgraphAgent = ScopeSubgraphAgent(
+            build_model(settings.llm),
+            max_requests=settings.llm.max_tool_steps,
+            temperature=settings.llm.temperature,
+            max_tokens=settings.llm.max_tokens,
+            timeout_seconds=scope_timeout,
+        )
 
     def build_knowledge_context(
         self,
@@ -143,6 +182,59 @@ class RequestPlatform:
         saved: TableAnalysisContext | None = KnowledgeContextStore(self._session).get(table_id)
         if saved is None:
             raise EntityNotFoundError("knowledge context", str(table_id))
+        return saved
+
+    def build_scope_context(
+        self,
+        scope_id: UUID,
+        options: ScopeContextOptions,
+    ) -> ScopeAnalysisContext:
+        """Build one scope context and store it.
+
+        The model reads saved table contexts and, when Neo4j is configured, each
+        table's knowledge subgraph. Accepted links replace prior LLM relationships.
+        """
+        logger.info("build scope context start scope_id=%s", scope_id)
+        readers: list[TableKnowledgeReader] = [
+            PostgresTableKnowledgeReader(KnowledgeContextStore(self._session)),
+        ]
+        if self._neo4j is not None:
+            readers.append(Neo4jTableKnowledgeReader(self._neo4j))
+        writer: KnowledgeSubgraphWriter
+        if self._neo4j is not None:
+            writer = Neo4jScopeSubgraph(self._neo4j)
+        else:
+            writer = EmptyKnowledgeSubgraphWriter()
+        builder: ScopeGraphBuilder = ScopeGraphBuilder(
+            proposer=self._scope_proposer,
+            writer=writer,
+            relationships=LlmRelationshipStore(self._session),
+            publisher=self.graph,
+        )
+        factory: ScopeAgentFactory = build_scope_agent_factory(
+            PostgresScopeCatalogContextProvider(
+                RegistryRepository(self._session),
+                MergedTableKnowledgeReader(readers),
+                ScopeKnowledgeContextStore(self._session),
+            ),
+            builder,
+        )
+        agent: ScopeAgent = factory.create(scope_id)
+        built: ScopeAnalysisContext = agent.build_context(options)
+        ScopeKnowledgeContextStore(self._session).save(built)
+        logger.info(
+            "build scope context done scope_id=%s links=%s missing=%s",
+            scope_id,
+            len(built.table_links),
+            len(built.tables_without_context),
+        )
+        return built
+
+    def read_scope_context(self, scope_id: UUID) -> ScopeAnalysisContext:
+        """Return the last context saved for this scope."""
+        saved: ScopeAnalysisContext | None = ScopeKnowledgeContextStore(self._session).get(scope_id)
+        if saved is None:
+            raise EntityNotFoundError("knowledge context", str(scope_id))
         return saved
 
 

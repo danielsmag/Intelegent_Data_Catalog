@@ -57,6 +57,7 @@ class RelationshipOrigin(StrEnum):
     DATABASE_CONSTRAINT = "DATABASE_CONSTRAINT"
     MANUAL = "MANUAL"
     IMPORT = "IMPORT"
+    LLM = "LLM"
 
 
 class RelationshipStatus(StrEnum):

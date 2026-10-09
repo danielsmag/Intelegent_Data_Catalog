@@ -1,38 +1,22 @@
 """Cypher for one table's column subgraph. Catalog projection nodes are separate."""
 
-from typing import Literal
+from typing import Literal, LiteralString
 
 from pydantic import BaseModel, ConfigDict
 
 from intelegent_data_catalog.exceptions import GraphUnavailableError
 from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView, edge_style
 
-_EDGE_QUERY: dict[str, str] = {
-    "HAS_COLUMN": (
-        "MATCH (source {node_id: $source, owner_table_id: $owner}), "
-        "(target {node_id: $target, owner_table_id: $owner}) "
-        "CREATE (source)-[:HAS_COLUMN {reason: $reason, origin: 'llm'}]->(target)"
-    ),
-    "REFERENCES": (
-        "MATCH (source {node_id: $source, owner_table_id: $owner}), "
-        "(target {node_id: $target, owner_table_id: $owner}) "
-        "CREATE (source)-[:REFERENCES {reason: $reason, origin: 'llm'}]->(target)"
-    ),
-    "JOINS_ON": (
-        "MATCH (source {node_id: $source, owner_table_id: $owner}), "
-        "(target {node_id: $target, owner_table_id: $owner}) "
-        "CREATE (source)-[:JOINS_ON {reason: $reason, origin: 'llm'}]->(target)"
-    ),
-    "DERIVED_FROM": (
-        "MATCH (source {node_id: $source, owner_table_id: $owner}), "
-        "(target {node_id: $target, owner_table_id: $owner}) "
-        "CREATE (source)-[:DERIVED_FROM {reason: $reason, origin: 'llm'}]->(target)"
-    ),
-    "SAME_MEANING": (
-        "MATCH (source {node_id: $source, owner_table_id: $owner}), "
-        "(target {node_id: $target, owner_table_id: $owner}) "
-        "CREATE (source)-[:SAME_MEANING {reason: $reason, origin: 'llm'}]->(target)"
-    ),
+_KNOWLEDGE_EDGE_TYPES: dict[str, LiteralString] = {
+    "HAS_COLUMN": "HAS_COLUMN",
+    "REFERENCES": "REFERENCES",
+    "JOINS_ON": "JOINS_ON",
+    "DERIVED_FROM": "DERIVED_FROM",
+    "SAME_MEANING": "SAME_MEANING",
+}
+_OWNER_PROPERTIES: dict[Literal["table", "scope"], LiteralString] = {
+    "table": "owner_table_id",
+    "scope": "owner_scope_id",
 }
 
 
@@ -58,11 +42,16 @@ class KnowledgeEdgeWrite(BaseModel):
 
 
 class KnowledgeSubgraphWrite(BaseModel):
-    """Replacement payload for the subgraph owned by one catalog table."""
+    """Replacement payload for one knowledge subgraph.
+
+    ``owner_table_id`` is the catalog id of the owner. A scope subgraph stores the
+    scope id there and sets ``owner_kind`` to ``scope``, which writes ``owner_scope_id``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     owner_table_id: str
+    owner_kind: Literal["table", "scope"] = "table"
     tables: list[KnowledgeNodeWrite]
     columns: list[KnowledgeNodeWrite]
     edges: list[KnowledgeEdgeWrite]
@@ -70,38 +59,39 @@ class KnowledgeSubgraphWrite(BaseModel):
 
 def knowledge_statements(
     document: KnowledgeSubgraphWrite,
-) -> list[tuple[str, dict[str, object]]]:
+) -> list[tuple[LiteralString, dict[str, object]]]:
     """Return the Cypher that deletes and recreates one knowledge subgraph."""
     owner: str = document.owner_table_id
-    statements: list[tuple[str, dict[str, object]]] = [
+    owner_property: LiteralString = _owner_property(document.owner_kind)
+    statements: list[tuple[LiteralString, dict[str, object]]] = [
         (
-            "MATCH (n) WHERE n.projection = 'knowledge' AND n.owner_table_id = $owner "
-            "DETACH DELETE n",
+            "MATCH (n) WHERE n.projection = 'knowledge' AND n."
+            + owner_property
+            + " = $owner DETACH DELETE n",
             {"owner": owner},
         ),
         (
             "UNWIND $tables AS node "
             "CREATE (n:Table {node_id: node.node_id, catalog_id: node.catalog_id, "
             "name: node.name, resolved: true, projection: 'knowledge', "
-            "owner_table_id: $owner})",
+            + owner_property
+            + ": $owner})",
             {"owner": owner, "tables": [_node_row(node) for node in document.tables]},
         ),
         (
             "UNWIND $columns AS node "
             "CREATE (n:Column {node_id: node.node_id, catalog_id: node.catalog_id, "
             "name: node.name, resolved: true, projection: 'knowledge', "
-            "owner_table_id: $owner})",
+            + owner_property
+            + ": $owner})",
             {"owner": owner, "columns": [_node_row(node) for node in document.columns]},
         ),
     ]
     edge: KnowledgeEdgeWrite
     for edge in document.edges:
-        query: str | None = _EDGE_QUERY.get(edge.kind)
-        if query is None:
-            raise GraphUnavailableError("unknown graph relationship")
         statements.append(
             (
-                query,
+                _edge_query(edge.kind, owner_property),
                 {
                     "owner": owner,
                     "source": edge.source,
@@ -111,6 +101,25 @@ def knowledge_statements(
             )
         )
     return statements
+
+
+def _owner_property(kind: Literal["table", "scope"]) -> LiteralString:
+    return _OWNER_PROPERTIES[kind]
+
+
+def _edge_query(kind: str, owner_property: LiteralString) -> LiteralString:
+    relationship: LiteralString | None = _KNOWLEDGE_EDGE_TYPES.get(kind)
+    if relationship is None:
+        raise GraphUnavailableError("unknown graph relationship")
+    return (
+        "MATCH (source {node_id: $source, "
+        + owner_property
+        + ": $owner}), (target {node_id: $target, "
+        + owner_property
+        + ": $owner}) CREATE (source)-[:"
+        + relationship
+        + " {reason: $reason, origin: 'llm'}]->(target)"
+    )
 
 
 def _node_row(node: KnowledgeNodeWrite) -> dict[str, str]:

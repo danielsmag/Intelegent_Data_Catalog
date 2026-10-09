@@ -18,3 +18,15 @@ class KnowledgeBuildJobRead(BaseModel):
     table_name: str
     status: KnowledgeBuildState
     error: str | None = None
+
+
+class ScopeBuildJobRead(BaseModel):
+    """One background scope build. The saved context is a separate read."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    scope_id: UUID
+    scope_name: str
+    status: KnowledgeBuildState
+    error: str | None = None

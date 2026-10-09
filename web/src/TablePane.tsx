@@ -3,6 +3,9 @@ import { Link } from "react-router-dom"
 import { errorMessage, fetchExplorerSample, formatTimestamp, isAbortError, queryPagePath } from "./api"
 import { ResultGrid } from "./ResultGrid"
 import type { ColumnDetail, DetailTab, QueryResult, TableDetail } from "./types"
+import { useTabParam } from "./useTabParam"
+
+const DETAIL_TABS: readonly DetailTab[] = ["overview", "columns", "sample"]
 
 type TablePaneProps = {
   source: string | undefined
@@ -16,7 +19,7 @@ type TablePaneProps = {
 }
 
 export function TablePane(props: TablePaneProps): ReactElement {
-  const [tab, setTab] = useState<DetailTab>("overview")
+  const [tab, selectTab] = useTabParam<DetailTab>(DETAIL_TABS, "overview")
   const [sample, setSample] = useState<QueryResult | null>(null)
   const [sampleError, setSampleError] = useState<string | null>(null)
   const [sampleLoading, setSampleLoading] = useState<boolean>(false)
@@ -91,9 +94,9 @@ export function TablePane(props: TablePaneProps): ReactElement {
           </Link>
         </div>
         <div className="tabs" role="tablist" aria-label="Table sections">
-          <TabButton id="overview" current={tab} onSelect={setTab} label="Overview" />
-          <TabButton id="columns" current={tab} onSelect={setTab} label="Columns" />
-          <TabButton id="sample" current={tab} onSelect={setTab} label="Sample Data" />
+          <TabButton id="overview" current={tab} onSelect={selectTab} label="Overview" />
+          <TabButton id="columns" current={tab} onSelect={selectTab} label="Columns" />
+          <TabButton id="sample" current={tab} onSelect={selectTab} label="Sample Data" />
         </div>
         {props.loading ? <p className="note">Loading table…</p> : null}
         {props.error !== null ? <p className="error-text">{props.error}</p> : null}

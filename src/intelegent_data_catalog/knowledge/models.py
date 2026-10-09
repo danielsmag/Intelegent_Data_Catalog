@@ -1,5 +1,6 @@
-"""Context objects for one catalog table. Identifiers are catalog ids."""
+"""Context objects for one catalog table or scope. Identifiers are catalog ids."""
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -330,6 +331,116 @@ class TableAnalysisContext(BaseModel):
     graph_neighbors: list[GraphNeighbor]
     lineage: LineageContext | None = None
     column_relations: list[ColumnRelation] = Field(default_factory=list)
+
+
+class TableLinkKind(StrEnum):
+    """Why two tables are linked by the scope agent."""
+
+    REFERENCES = "REFERENCES"
+    JOINS_ON = "JOINS_ON"
+
+
+class TableLink(BaseModel):
+    """Important link between two tables in one scope. One column pair."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_table_id: UUID
+    target_table_id: UUID
+    source_column_id: UUID
+    target_column_id: UUID
+    kind: TableLinkKind
+    reason: str = Field(min_length=1, max_length=280)
+
+    @field_validator("reason")
+    @classmethod
+    def _clean_reason(cls, value: str) -> str:
+        cleaned: str = value.strip()
+        if cleaned == "":
+            raise ValueError("reason is empty")
+        return cleaned
+
+
+class ScopeTableSummary(BaseModel):
+    """One table inside a scope, with the columns the scope agent may link."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    name: str
+    display_name: str | None
+    description: str | None
+    status: TableStatus
+    row_count: int | None
+    columns: list[ColumnMetadata]
+
+
+class TableKnowledgeInput(BaseModel):
+    """Column relations the table agent already stored for one table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table_id: UUID
+    column_relations: list[ColumnRelation]
+    source: Literal["postgres", "neo4j", "both"]
+
+
+class PreviousScopeFindings(BaseModel):
+    """Summary and links from the last scope build. The model may revise them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str | None
+    links: list[TableLink]
+    built_at: datetime | None
+
+
+class ScopeCatalogContext(BaseModel):
+    """Everything known about one scope before the scope agent proposes links."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ScopeSummary
+    space: SpaceSummary
+    tables: list[ScopeTableSummary]
+    relationships: list[TableRelation]
+    table_knowledge: list[TableKnowledgeInput]
+    tables_without_context: list[UUID]
+    previous: PreviousScopeFindings | None
+
+
+class ScopeContextOptions(BaseModel):
+    """Which parts of scope context to load."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_table_knowledge: bool = True
+    include_previous: bool = True
+    include_summary: bool = True
+
+
+class ScopeProposal(BaseModel):
+    """Links and summary the scope model selected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(default="", max_length=1200)
+    links: list[TableLink] = Field(default_factory=list, max_length=60)
+
+
+class ScopeAnalysisContext(BaseModel):
+    """Scope metadata, catalog relationships, accepted links, and the written summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ScopeSummary
+    space: SpaceSummary
+    tables: list[ScopeTableSummary]
+    existing_relationships: list[TableRelation]
+    table_links: list[TableLink] = Field(default_factory=list)
+    summary: str | None = None
+    tables_without_context: list[UUID] = Field(default_factory=list)
+    previous_links_kept: int = Field(default=0, ge=0)
 
 
 class GraphPublishResult(BaseModel):

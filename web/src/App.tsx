@@ -1,12 +1,14 @@
 import type { ReactElement } from "react"
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 import { Explorer } from "./Explorer"
+import { PageAlertStack } from "./pageAlertStack"
 import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
 import { QueryPage } from "./QueryPage"
 
 export function App(): ReactElement {
   return (
     <BrowserRouter>
+      <PageAlertStack />
       <Routes>
         <Route path="/" element={<SpacesPage />} />
         <Route path="/catalog" element={<Explorer />} />

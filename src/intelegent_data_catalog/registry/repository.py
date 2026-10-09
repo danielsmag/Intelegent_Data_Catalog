@@ -288,6 +288,16 @@ class RegistryRepository:
         """Return one relationship or none."""
         return self._session.get(RelationshipRow, relationship_id)
 
+    def list_relationships_between(self, table_ids: set[uuid.UUID]) -> list[RelationshipRow]:
+        """Return relationships whose two tables are both in ``table_ids``."""
+        if len(table_ids) == 0:
+            return []
+        statement: Select[tuple[RelationshipRow]] = select(RelationshipRow).where(
+            RelationshipRow.source_table_id.in_(table_ids),
+            RelationshipRow.target_table_id.in_(table_ids),
+        )
+        return list[RelationshipRow](self._session.scalars(statement))
+
     def list_relationships_for_table(self, table_id: uuid.UUID) -> list[RelationshipRow]:
         """Return relationships that touch a table."""
         statement: Select[tuple[RelationshipRow]] = (

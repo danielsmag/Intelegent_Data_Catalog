@@ -541,13 +541,18 @@ a.tree-row {
 .main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   background: var(--bg);
   display: flex;
   flex-direction: column;
 }
 
 .main-scroll {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
   padding: 20px 24px 40px;
 }
 
@@ -873,6 +878,19 @@ a.tree-row {
 
 .catalog-page {
   max-width: 1080px;
+}
+
+.catalog-page-graph,
+.section-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.catalog-page-graph {
+  max-width: none;
 }
 
 .catalog-hero {
@@ -1203,6 +1221,16 @@ a.tree-row {
   color: var(--text-strong);
 }
 
+.scope-links li {
+  flex-wrap: wrap;
+}
+
+.subgraph-open {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--accent);
+}
+
 .search-form {
   display: flex;
   gap: 8px;
@@ -1228,12 +1256,23 @@ a.tree-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 12px;
-  min-height: 560px;
+  flex: 1;
+  min-height: 420px;
 }
 
 .subgraph-stage {
   min-width: 0;
+  min-height: 420px;
+  height: 100%;
   position: relative;
+}
+
+.subgraph-stage > .comment {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  z-index: 1;
+  margin: 0;
 }
 
 .subgraph-legend {
@@ -1279,8 +1318,10 @@ a.tree-row {
 }
 
 .subgraph-svg {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 560px;
+  height: 100%;
   display: block;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1350,6 +1391,8 @@ a.tree-row {
   padding: 12px;
   background: #10141c;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .subgraph-details h2,
@@ -1374,6 +1417,78 @@ a.tree-row {
 .badge-column {
   background: #f0a3ad;
   color: #1c140f;
+}
+
+.page-alerts {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.page-alerts:empty {
+  display: none;
+}
+
+.page-alert {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 8px 10px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 12px;
+  background: #1a2230;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.page-alert-success {
+  border-left-color: var(--type);
+}
+
+.page-alert-error {
+  border-left-color: #ff6d5a;
+}
+
+.page-alert-info {
+  border-left-color: var(--accent);
+}
+
+.page-alert-message {
+  flex: 1;
+  margin: 0;
+  padding-top: 2px;
+  line-height: 1.4;
+}
+
+.page-alert-dismiss {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.page-alert-dismiss:hover {
+  background: var(--hover);
+  color: var(--text-strong);
 }
 
 @media (max-width: 900px) {
