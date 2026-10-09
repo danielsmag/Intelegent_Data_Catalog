@@ -52,3 +52,13 @@ timeout_seconds = 60
 max_tokens = 2048
 temperature = 0.0
 max_tool_steps = 6
+
+# OpenObserve export. Compose sets CATALOG_OBSERVABILITY__ENABLED=true.
+# A host run stays off until that variable is set.
+[observability]
+enabled = false
+endpoint = "http://127.0.0.1:5080/api/default"
+service_name = "intelegent-data-catalog"
+username = "root@example.com"
+password = ""
+include_content = true

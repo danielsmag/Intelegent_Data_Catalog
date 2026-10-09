@@ -26,7 +26,7 @@ docker compose up -d
 docker compose logs -f spark-lineage
 ```
 
-`docker compose up -d` starts Neo4j, the Apache Polaris Iceberg catalog, Polaris Console, Marquez (the OpenLineage backend), the catalog API, and the catalog UI. The first start pulls images, builds Polaris Console from `apache/polaris-tools`, builds the catalog API and UI images, and downloads Maven packages for Spark. `spark-lineage` exits after it loads the sample tables and Marquez has the `customer_spend` job.
+`docker compose up -d` starts Neo4j, the Apache Polaris Iceberg catalog, Polaris Console, Marquez (the OpenLineage backend), OpenObserve, the catalog API, and the catalog UI. The first start pulls images, builds Polaris Console from `apache/polaris-tools`, builds the catalog API and UI images, and downloads Maven packages for Spark. `spark-lineage` exits after it loads the sample tables and Marquez has the `customer_spend` job.
 
 | Surface | Address |
 | --- | --- |
@@ -42,6 +42,7 @@ docker compose logs -f spark-lineage
 | Marquez lineage UI | http://localhost:3000 |
 | Catalog API | http://localhost:8090 |
 | Catalog UI | http://localhost:5173 |
+| OpenObserve | http://localhost:5080 |
 
 MinIO is the S3 warehouse (`warehouse` bucket). Official `minio/minio` images are not anonymously pullable, so Compose pins `elestio/minio` at a digest. Spark in Compose talks to `http://minio:9000`; host clients use `http://localhost:9000`.
 
@@ -57,7 +58,9 @@ The seed job writes `sales.customers` and `sales.orders`, then builds `sales.cus
 SEED_FORCE=true docker compose up -d --force-recreate spark-lineage
 ```
 
-`docker compose down` keeps volumes. `docker compose down -v` deletes Neo4j, Polaris, MinIO, Marquez, and the Spark package cache.
+OpenObserve at http://localhost:5080 takes the catalog API logs and pydantic-ai spans. Sign in with `OPENOBSERVE_USER` and `OPENOBSERVE_PASSWORD` from `.env` (defaults `root@example.com` / `Local-observe-1`). Spans include prompts and tool arguments. A host `uv run` does not export until `CATALOG_OBSERVABILITY__ENABLED=true`.
+
+`docker compose down` keeps volumes. `docker compose down -v` deletes Neo4j, Polaris, MinIO, Marquez, OpenObserve, and the Spark package cache.
 
 ## Catalog UI
 

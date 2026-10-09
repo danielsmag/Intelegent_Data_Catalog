@@ -190,6 +190,29 @@ class PolarisSettings(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0)
 
 
+class ObservabilitySettings(BaseModel):
+    """OTLP export of catalog logs and agent spans. Disabled until configured."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    endpoint: str = Field(default="http://127.0.0.1:5080/api/default", min_length=1)
+    service_name: str = Field(default="intelegent-data-catalog", min_length=1)
+    username: str = Field(default="root@example.com", min_length=1)
+    password: SecretStr = Field(default=SecretStr(""))
+    include_content: bool = True
+
+    @model_validator(mode="after")
+    def _require_password_when_enabled(self) -> ObservabilitySettings:
+        if self.enabled and self.password.get_secret_value().strip() == "":
+            raise ValueError("observability password is required when observability is enabled")
+        trimmed: str = self.endpoint.strip().rstrip("/")
+        if trimmed == "":
+            raise ValueError("observability endpoint is required")
+        self.endpoint = trimmed
+        return self
+
+
 class AppSettings(BaseSettings):
     """Settings from settings.toml, overridden by CATALOG_ environment variables."""
 
@@ -211,6 +234,7 @@ class AppSettings(BaseSettings):
     marquez: MarquezSettings = Field(default_factory=MarquezSettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 
     @classmethod
     def settings_customise_sources(

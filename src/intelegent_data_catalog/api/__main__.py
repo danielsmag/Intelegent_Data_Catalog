@@ -10,6 +10,7 @@ from intelegent_data_catalog.api.access_log import uvicorn_log_config
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AppSettings
+from intelegent_data_catalog.core.telemetry import CatalogTelemetry
 from intelegent_data_catalog.exceptions import CatalogError, PersistenceUnavailableError
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.migrate import upgrade_database
@@ -26,6 +27,7 @@ def main() -> None:
         if settings.database.auto_migrate:
             upgrade_database(settings.database.url)
         logger: logging.Logger = container.logger()
+        CatalogTelemetry(settings.observability).start()
         database: CatalogDatabase = container.database()
         _project_seed_lake(settings, database, logger)
         app: FastAPI = create_app(container)

@@ -225,6 +225,30 @@ services:
       retries: 30
       start_period: 60s
 
+  openobserve:
+    image: openobserve/openobserve:v1.0.4-debug
+    container_name: intelegent-data-catalog-openobserve
+    restart: unless-stopped
+    mem_limit: 1g
+    ports:
+      - "${OPENOBSERVE_PORT:-5080}:5080"
+    environment:
+      ZO_DATA_DIR: /data
+      ZO_ROOT_USER_EMAIL: ${OPENOBSERVE_USER:-root@example.com}
+      ZO_ROOT_USER_PASSWORD: ${OPENOBSERVE_PASSWORD:-Local-observe-1}
+      ZO_MAX_FILE_SIZE_IN_MEMORY: "128"
+      ZO_MEMORY_CACHE_MAX_SIZE: "128"
+      ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE: "256"
+      ZO_COMPACT_MAX_FILE_SIZE: "128"
+    volumes:
+      - openobserve_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:5080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
   catalog-api:
     build:
       context: .
@@ -242,6 +266,8 @@ services:
       neo4j:
         condition: service_healthy
       marquez:
+        condition: service_healthy
+      openobserve:
         condition: service_healthy
     ports:
       - "${CATALOG_API_PORT:-8090}:8090"
@@ -269,6 +295,10 @@ services:
       CATALOG_LLM__MODEL: ${CATALOG_OLLAMA_MODEL:-qwen3:4b}
       CATALOG_MARQUEZ__ENABLED: "true"
       CATALOG_MARQUEZ__URL: http://marquez:5000
+      CATALOG_OBSERVABILITY__ENABLED: "true"
+      CATALOG_OBSERVABILITY__ENDPOINT: http://openobserve:5080/api/default
+      CATALOG_OBSERVABILITY__USERNAME: ${OPENOBSERVE_USER:-root@example.com}
+      CATALOG_OBSERVABILITY__PASSWORD: ${OPENOBSERVE_PASSWORD:-Local-observe-1}
     healthcheck:
       test:
         [
@@ -418,3 +448,4 @@ volumes:
   minio_data:
   postgres_data:
   spark_ivy:
+  openobserve_data:
