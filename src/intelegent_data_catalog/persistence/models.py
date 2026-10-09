@@ -28,6 +28,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from intelegent_data_catalog.persistence.enums import (
     BindingRole,
     BindingState,
+    ContextOrigin,
     DataSourceType,
     EngineConnectionStatus,
     EngineType,
@@ -68,8 +69,13 @@ class ScopeRow(Base):
     """Business scope inside one space."""
 
     __tablename__: str = "scopes"
-    __table_args__: tuple[UniqueConstraint] = (
+    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
         UniqueConstraint("space_id", "slug", name="uq_scopes_space_slug"),
+        _enum_check(
+            "context_origin",
+            tuple(item.value for item in ContextOrigin),
+            "ck_scopes_context_origin",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -81,6 +87,8 @@ class ScopeRow(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -123,6 +131,11 @@ class CatalogTableRow(Base):
             "row_count IS NULL OR row_count >= 0",
             name="ck_catalog_tables_row_count",
         ),
+        _enum_check(
+            "context_origin",
+            tuple(item.value for item in ContextOrigin),
+            "ck_catalog_tables_context_origin",
+        ),
         Index(
             "uq_catalog_tables_native_id",
             "data_source_id",
@@ -157,6 +170,8 @@ class CatalogTableRow(Base):
     source_native_id: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     table_format: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     row_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -176,6 +191,11 @@ class ColumnRow(Base):
             "ck_columns_metadata_origin",
         ),
         CheckConstraint("ordinal_position >= 0", name="ck_columns_ordinal"),
+        _enum_check(
+            "context_origin",
+            tuple(item.value for item in ContextOrigin),
+            "ck_columns_context_origin",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -191,6 +211,8 @@ class ColumnRow(Base):
     discovered_data_type: Mapped[str | None] = mapped_column(String(512), nullable=True)
     metadata_origin: Mapped[str] = mapped_column(String(32), nullable=False)
     source_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     nullable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ordinal_position: Mapped[int] = mapped_column(Integer, nullable=False)
     is_primary_key: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

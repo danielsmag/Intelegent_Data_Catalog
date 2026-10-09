@@ -35,6 +35,13 @@ class TagOrigin(StrEnum):
     IMPORT = "IMPORT"
 
 
+class ContextOrigin(StrEnum):
+    """Who wrote the business context. ``USER`` wins until the next manual edit."""
+
+    USER = "USER"
+    LLM = "LLM"
+
+
 class MetadataOrigin(StrEnum):
     """Where a column annotation was last recorded from."""
 

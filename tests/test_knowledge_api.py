@@ -6,10 +6,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
 
 from intelegent_data_catalog.api.container import AppContainer
+from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.migrate import upgrade_database
@@ -147,6 +149,52 @@ def test_build_context_refuses_physical_profile_without_a_profiler(tmp_path: Pat
         database.dispose()
 
 
+def test_generate_table_context_returns_a_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The generate route starts a job. An unknown table is not found."""
+
+    def _skip(
+        self: RequestPlatform,
+        subject_id: object,
+        options: object,
+    ) -> None:
+        del self, subject_id, options
+
+    monkeypatch.setattr(RequestPlatform, "generate_context", _skip)
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        table_id: str = _table(app)
+        missing: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/tables/{uuid4()}/context/generate",
+        )
+        assert missing.status_code == 404
+        started: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/tables/{table_id}/context/generate",
+        )
+        assert started.status_code == 202
+        job_id: str = _text(_object(started), "id")
+        finished: dict[str, object] = _wait_for_generation(app, job_id)
+        assert finished["status"] == "succeeded"
+        assert finished["subject_kind"] == "table"
+        latest: httpx.Response = _send(
+            app,
+            "GET",
+            f"/api/v1/tables/{table_id}/context/generation?lane=table",
+        )
+        assert latest.status_code == 200
+        assert _text(_object(latest), "id") == job_id
+    finally:
+        database.dispose()
+
+
 def _table(app: FastAPI) -> str:
     space: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
     assert space.status_code == 201
@@ -227,6 +275,20 @@ def _wait_for_build(app: FastAPI, job_id: str) -> dict[str, object]:
             return body
         time.sleep(0.05)
     raise AssertionError("knowledge build did not finish")
+
+
+def _wait_for_generation(app: FastAPI, job_id: str) -> dict[str, object]:
+    """Poll until the background context generation leaves the running state."""
+    attempt: int
+    for attempt in range(50):
+        del attempt
+        current: httpx.Response = _send(app, "GET", f"/api/v1/context-generations/{job_id}")
+        assert current.status_code == 200
+        body: dict[str, object] = _object(current)
+        if body["status"] != "running":
+            return body
+        time.sleep(0.05)
+    raise AssertionError("context generation did not finish")
 
 
 def _text(body: dict[str, object], key: str) -> str:

@@ -8,11 +8,19 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.exceptions import ConflictError, PersistenceUnavailableError
+from intelegent_data_catalog.exceptions import (
+    ConflictError,
+    EntityNotFoundError,
+    PersistenceUnavailableError,
+)
 from intelegent_data_catalog.knowledge.models import ScopeAnalysisContext, TableAnalysisContext
 from intelegent_data_catalog.persistence.clock import utc_now
+from intelegent_data_catalog.persistence.enums import ContextOrigin
 from intelegent_data_catalog.persistence.models import (
+    CatalogTableRow,
+    ColumnRow,
     ScopeKnowledgeContextRow,
+    ScopeRow,
     TableKnowledgeContextRow,
 )
 from intelegent_data_catalog.registry.reads import dump_model
@@ -142,6 +150,52 @@ class ScopeKnowledgeContextStore:
         if context.scope.id != scope_id:
             raise PersistenceUnavailableError(_INVALID_SCOPE)
         return context
+
+    def _commit(self) -> None:
+        try:
+            self._session.commit()
+        except IntegrityError as err:
+            self._session.rollback()
+            raise ConflictError(_CONFLICT) from err
+
+
+class SemanticContextStore:
+    """Writes business context onto a scope, table, or column row."""
+
+    def __init__(self, session: Session) -> None:
+        self._session: Session = session
+
+    def save_scope(self, scope_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the scope context. The row must already exist."""
+        row: ScopeRow | None = self._session.get(ScopeRow, scope_id)
+        if row is None:
+            raise EntityNotFoundError("scope", str(scope_id))
+        self._write(row, text, origin)
+
+    def save_table(self, table_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the table context. The row must already exist."""
+        row: CatalogTableRow | None = self._session.get(CatalogTableRow, table_id)
+        if row is None:
+            raise EntityNotFoundError("table", str(table_id))
+        self._write(row, text, origin)
+
+    def save_column(self, column_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the column context. The row must already exist."""
+        row: ColumnRow | None = self._session.get(ColumnRow, column_id)
+        if row is None:
+            raise EntityNotFoundError("column", str(column_id))
+        self._write(row, text, origin)
+
+    def _write(
+        self,
+        row: ScopeRow | CatalogTableRow | ColumnRow,
+        text: str,
+        origin: ContextOrigin,
+    ) -> None:
+        row.context = text
+        row.context_origin = origin.value
+        row.updated_at = utc_now()
+        self._commit()
 
     def _commit(self) -> None:
         try:

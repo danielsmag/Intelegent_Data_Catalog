@@ -83,6 +83,7 @@ class PostgresCatalogContextProvider:
                 physical_table=table.physical_table,
                 source_key=table.source_key,
                 row_count=table.row_count,
+                context=table.context,
                 scope=_scope_summary(scope),
                 space=_space_summary(space),
                 tags=_tags(self._repository, table_id),
@@ -143,6 +144,7 @@ def _column(row: ColumnRow, foreign_keys: set[UUID]) -> ColumnMetadata:
         is_primary_key=row.is_primary_key,
         is_unique=row.is_unique,
         is_foreign_key=row.id in foreign_keys,
+        context=row.context,
     )
 
 
@@ -153,6 +155,7 @@ def _scope_summary(scope: ScopeRow) -> ScopeSummary:
         name=scope.name,
         slug=scope.slug,
         description=scope.description,
+        context=scope.context,
     )
 
 

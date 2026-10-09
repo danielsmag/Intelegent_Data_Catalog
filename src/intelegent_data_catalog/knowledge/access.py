@@ -7,7 +7,9 @@ from pydantic import JsonValue
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.models import (
     ColumnComparisonProfile,
+    ColumnContextItem,
     ColumnDataProfile,
+    ColumnMetadata,
     DataAccessMode,
     DataProfileOptions,
     KnowledgeDefaults,
@@ -100,6 +102,54 @@ def accept_comparison(
     if profile.source_column_id != source_column_id or profile.target_column_id != target_column_id:
         raise ValidationAppError("profiler returned a different column pair", field="column_id")
     return profile
+
+
+def accept_column_contexts(
+    columns: list[ColumnMetadata],
+    proposed: list[ColumnContextItem],
+) -> list[ColumnContextItem]:
+    """Reject a column id outside the batch, a duplicate, or a column left out."""
+    allowed: set[UUID] = {column.id for column in columns}
+    seen: set[UUID] = set()
+    item: ColumnContextItem
+    for item in proposed:
+        if item.column_id not in allowed:
+            raise ValidationAppError("column is not on this table", field="column_id")
+        if item.column_id in seen:
+            raise ValidationAppError("column context is duplicated", field="column_id")
+        seen.add(item.column_id)
+    if allowed - seen:
+        raise ValidationAppError("context is missing for a column", field="column_id")
+    return proposed
+
+
+def accept_named_column_contexts(
+    columns: list[ColumnMetadata],
+    proposed: list[tuple[str, str]],
+) -> list[ColumnContextItem]:
+    """Map column names to ids. Reject an unknown name, a duplicate, or a column left out."""
+    by_name: dict[str, UUID] = {column.name: column.id for column in columns}
+    seen: set[str] = set()
+    items: list[ColumnContextItem] = []
+    pair: tuple[str, str]
+    for pair in proposed:
+        name: str = pair[0]
+        text: str = pair[1]
+        if name not in by_name:
+            expected: str = ", ".join(column.name for column in columns)
+            raise ValidationAppError(
+                f"column {name} is not in this batch. Use: {expected}",
+                field="name",
+            )
+        if name in seen:
+            raise ValidationAppError("column context is duplicated", field="name")
+        seen.add(name)
+        items.append(ColumnContextItem(column_id=by_name[name], context=text))
+    missing: set[str] = set(by_name) - seen
+    if missing:
+        left: str = ", ".join(sorted(missing))
+        raise ValidationAppError(f"context is missing for: {left}", field="name")
+    return items
 
 
 def redact_column_profile(

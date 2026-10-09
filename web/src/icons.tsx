@@ -114,6 +114,22 @@ export function SchemaIcon(): ReactElement {
   )
 }
 
+export function ScopeIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="8" cy="8" r="4.7" fill="none" stroke="currentColor" strokeWidth="1" />
+      <path
+        d="M8 1.7v2.2M8 12.1v2.2M1.7 8h2.2M12.1 8h2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+      />
+      <circle cx="8" cy="8" r="1.15" fill="currentColor" />
+    </Icon>
+  )
+}
+
 export function TableIcon(): ReactElement {
   return (
     <Icon>
@@ -135,6 +151,16 @@ export function PanelChevron(props: { direction: "left" | "right" }): ReactEleme
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </Icon>
+  )
+}
+
+export function MoreIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="8" cy="3.2" r="1.15" fill="currentColor" />
+      <circle cx="8" cy="8" r="1.15" fill="currentColor" />
+      <circle cx="8" cy="12.8" r="1.15" fill="currentColor" />
     </Icon>
   )
 }

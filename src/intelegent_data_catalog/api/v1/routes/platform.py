@@ -1,17 +1,28 @@
 """Discovery, graph, search, tags, and Spark-from-catalog routes."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
 
-from intelegent_data_catalog.api.dependencies import KnowledgeBuildDep, PlatformDep, ScopeBuildDep
+from intelegent_data_catalog.api.dependencies import (
+    ContextGenerationDep,
+    KnowledgeBuildDep,
+    PlatformDep,
+    ScopeBuildDep,
+)
 from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
 from intelegent_data_catalog.graph.document import GraphView
-from intelegent_data_catalog.jobs.models import KnowledgeBuildJobRead, ScopeBuildJobRead
+from intelegent_data_catalog.jobs.models import (
+    ContextGenerationJobRead,
+    KnowledgeBuildJobRead,
+    ScopeBuildJobRead,
+)
 from intelegent_data_catalog.knowledge.models import (
+    ContextGenerationOptions,
+    ContextSubjectKind,
     ScopeAnalysisContext,
     ScopeContextOptions,
     TableAnalysisContext,
@@ -290,6 +301,128 @@ def read_latest_scope_build(scope_id: UUID, builds: ScopeBuildDep) -> ScopeBuild
     job: ScopeBuildJobRead | None = builds.latest(scope_id)
     if job is None:
         raise EntityNotFoundError("scope build", str(scope_id))
+    return job
+
+
+@router.post(
+    "/scopes/{scope_id}/context/generate",
+    response_model=ContextGenerationJobRead,
+    status_code=202,
+)
+def generate_scope_context(
+    scope_id: UUID,
+    platform: PlatformDep,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Start a scope context write and return before the model finishes."""
+    scope_name: str = platform.registry.get_scope(scope_id).name
+    return _start_context(builds, scope_id, scope_name, "scope")
+
+
+@router.post(
+    "/tables/{table_id}/context/generate",
+    response_model=ContextGenerationJobRead,
+    status_code=202,
+)
+def generate_table_context(
+    table_id: UUID,
+    platform: PlatformDep,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Start a table context write and return before the model finishes."""
+    table_name: str = platform.registry.get_table(table_id).name
+    return _start_context(builds, table_id, table_name, "table")
+
+
+@router.post(
+    "/tables/{table_id}/columns/context/generate",
+    response_model=ContextGenerationJobRead,
+    status_code=202,
+)
+def generate_table_column_contexts(
+    table_id: UUID,
+    platform: PlatformDep,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Start context writes for every column on the table."""
+    table_name: str = platform.registry.get_table(table_id).name
+    return _start_context(builds, table_id, f"{table_name} columns", "table_columns")
+
+
+@router.post(
+    "/columns/{column_id}/context/generate",
+    response_model=ContextGenerationJobRead,
+    status_code=202,
+)
+def generate_column_context(
+    column_id: UUID,
+    platform: PlatformDep,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Start a column context write and return before the model finishes."""
+    column_name: str = platform.registry.get_column(column_id).name
+    return _start_context(builds, column_id, column_name, "column")
+
+
+@router.get("/context-generations/{job_id}", response_model=ContextGenerationJobRead)
+def read_context_generation(job_id: UUID, builds: ContextGenerationDep) -> ContextGenerationJobRead:
+    """Return one background context generation."""
+    job: ContextGenerationJobRead | None = builds.get(job_id)
+    if job is None:
+        raise EntityNotFoundError("context generation", str(job_id))
+    return job
+
+
+@router.get("/scopes/{scope_id}/context/generation", response_model=ContextGenerationJobRead)
+def read_latest_scope_context_generation(
+    scope_id: UUID,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Return the newest scope context generation."""
+    return _latest_context(builds, scope_id, "scope")
+
+
+@router.get("/tables/{table_id}/context/generation", response_model=ContextGenerationJobRead)
+def read_latest_table_context_generation(
+    table_id: UUID,
+    builds: ContextGenerationDep,
+    lane: Annotated[Literal["table", "table_columns"], Query()],
+) -> ContextGenerationJobRead:
+    """Return the newest table or all-columns context generation."""
+    return _latest_context(builds, table_id, lane)
+
+
+@router.get("/columns/{column_id}/context/generation", response_model=ContextGenerationJobRead)
+def read_latest_column_context_generation(
+    column_id: UUID,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Return the newest column context generation."""
+    return _latest_context(builds, column_id, "column")
+
+
+def _start_context(
+    builds: ContextGenerationDep,
+    subject_id: UUID,
+    subject_name: str,
+    kind: ContextSubjectKind,
+) -> ContextGenerationJobRead:
+    return builds.start(
+        subject_id,
+        subject_name,
+        ContextGenerationOptions(kind=kind),
+        lane=kind,
+    )
+
+
+def _latest_context(
+    builds: ContextGenerationDep,
+    subject_id: UUID,
+    lane: ContextSubjectKind,
+) -> ContextGenerationJobRead:
+    job: ContextGenerationJobRead | None = builds.latest(subject_id, lane=lane)
+    if job is None:
+        raise EntityNotFoundError("context generation", str(subject_id))
     return job
 
 

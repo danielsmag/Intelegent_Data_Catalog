@@ -10,6 +10,7 @@ from intelegent_data_catalog.exceptions import PersistenceUnavailableError
 from intelegent_data_catalog.persistence.enums import (
     BindingRole,
     BindingState,
+    ContextOrigin,
     DataSourceType,
     EngineConnectionStatus,
     EngineType,
@@ -100,6 +101,8 @@ def scope_read(row: ScopeRow) -> ScopeRead:
         name=row.name,
         slug=row.slug,
         description=row.description,
+        context=row.context,
+        context_origin=_context_origin(row.context_origin),
         created_at=_aware(row.created_at),
         updated_at=_aware(row.updated_at),
     )
@@ -127,6 +130,8 @@ def table_read(row: CatalogTableRow) -> CatalogTableRead:
         name=row.name,
         display_name=row.display_name,
         description=row.description,
+        context=row.context,
+        context_origin=_context_origin(row.context_origin),
         table_type=TableKind(row.table_type),
         status=TableStatus(row.status),
         physical_catalog=row.physical_catalog,
@@ -152,6 +157,8 @@ def column_read(row: ColumnRow) -> ColumnRead:
         table_id=row.table_id,
         name=row.name,
         description=row.description,
+        context=row.context,
+        context_origin=_context_origin(row.context_origin),
         data_type=row.data_type,
         native_data_type=row.native_data_type,
         discovered_data_type=row.discovered_data_type,
@@ -263,6 +270,12 @@ def sync_run_read(row: MetadataSyncRunRow) -> SyncRunRead:
         sanitized_error=row.sanitized_error,
         checkpoint=_checkpoint(row.checkpoint),
     )
+
+
+def _context_origin(value: str | None) -> ContextOrigin | None:
+    if value is None:
+        return None
+    return ContextOrigin(value)
 
 
 def _aware(value: datetime) -> datetime:

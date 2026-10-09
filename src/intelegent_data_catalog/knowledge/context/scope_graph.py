@@ -11,7 +11,10 @@ from intelegent_data_catalog.graph.knowledge_subgraph import (
     KnowledgeNodeWrite,
     KnowledgeSubgraphWrite,
 )
-from intelegent_data_catalog.knowledge.context.column_graph import KnowledgeSubgraphWriter
+from intelegent_data_catalog.knowledge.context.column_graph import (
+    GraphBuilder,
+    KnowledgeSubgraphWriter,
+)
 from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
@@ -61,7 +64,20 @@ class EmptyKnowledgeSubgraphWriter:
         del document
 
 
-class ScopeGraphBuilder:
+class ScopeGraphAppender(GraphBuilder[ScopeCatalogContext, ScopeAnalysisContext], Protocol):
+    """Accepts scope links, stores them, and writes the scope subgraph."""
+
+    def apply(
+        self,
+        context: ScopeCatalogContext,
+        *,
+        include_summary: bool = True,
+    ) -> ScopeAnalysisContext:
+        """Propose links, store them, and return the scope context."""
+        ...
+
+
+class ScopeGraphBuilder(ScopeGraphAppender):
     """Accept model links, store them, and write the scope subgraph."""
 
     def __init__(

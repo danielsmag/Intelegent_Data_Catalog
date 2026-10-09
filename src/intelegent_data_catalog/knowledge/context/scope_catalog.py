@@ -339,7 +339,12 @@ def _columns(
             break
         column: ColumnMetadata = _column(row, foreign_keys)
         chosen.append(
-            column.model_copy(update={"description": _short_text(column.description)})
+            column.model_copy(
+                update={
+                    "description": _short_text(column.description),
+                    "context": _short_text(column.context),
+                }
+            )
         )
         left -= 1
     return chosen, left
@@ -354,6 +359,7 @@ def _table_summary(row: CatalogTableRow, columns: list[ColumnMetadata]) -> Scope
         description=description,
         status=TableStatus(row.status),
         row_count=row.row_count,
+        context=_short_text(row.context),
         columns=columns,
     )
 

@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from intelegent_data_catalog.knowledge.models import ContextSubjectKind
+
 KnowledgeBuildState = Literal["running", "succeeded", "failed"]
 
 
@@ -28,5 +30,18 @@ class ScopeBuildJobRead(BaseModel):
     id: UUID
     scope_id: UUID
     scope_name: str
+    status: KnowledgeBuildState
+    error: str | None = None
+
+
+class ContextGenerationJobRead(BaseModel):
+    """One background context write. The catalog row is a separate read."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    subject_kind: ContextSubjectKind
+    subject_id: UUID
+    subject_name: str
     status: KnowledgeBuildState
     error: str | None = None

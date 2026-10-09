@@ -1,15 +1,27 @@
 """Logical manager for one catalog scope. Holds no chat history."""
 
+from typing import Protocol
 from uuid import UUID
 
-from intelegent_data_catalog.exceptions import ValidationAppError
+from intelegent_data_catalog.exceptions import LlmUnavailableError, ValidationAppError
 from intelegent_data_catalog.knowledge.context.scope_catalog import ScopeCatalogContextProvider
-from intelegent_data_catalog.knowledge.context.scope_graph import ScopeGraphBuilder
+from intelegent_data_catalog.knowledge.context.scope_graph import ScopeGraphAppender
 from intelegent_data_catalog.knowledge.models import (
     ScopeAnalysisContext,
     ScopeCatalogContext,
     ScopeContextOptions,
+    ScopeContextProposal,
 )
+from intelegent_data_catalog.llm.agent import ProposalAgent
+from intelegent_data_catalog.persistence.enums import ContextOrigin
+
+
+class ScopeContextWriter(Protocol):
+    """Stores business context on a scope row."""
+
+    def save_scope(self, scope_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the scope context."""
+        ...
 
 
 class ScopeAgent:
@@ -17,17 +29,22 @@ class ScopeAgent:
 
     Create it through ``ScopeAgentFactory`` and drop it when the call finishes.
     PostgreSQL keeps the catalog. A missing graph builder stores metadata only.
+    ``describe`` asks the model for business context and stores it as ``LLM``.
     """
 
     def __init__(
         self,
         scope_id: UUID,
         catalog: ScopeCatalogContextProvider,
-        graph_builder: ScopeGraphBuilder | None = None,
+        graph_builder: ScopeGraphAppender | None = None,
+        describer: ProposalAgent[ScopeCatalogContext, ScopeContextProposal] | None = None,
+        context_writer: ScopeContextWriter | None = None,
     ) -> None:
         self._scope_id: UUID = scope_id
         self._catalog: ScopeCatalogContextProvider = catalog
-        self._graph_builder: ScopeGraphBuilder | None = graph_builder
+        self._graph_builder: ScopeGraphAppender | None = graph_builder
+        self._describer: ProposalAgent[ScopeCatalogContext, ScopeContextProposal] | None = describer
+        self._context_writer: ScopeContextWriter | None = context_writer
 
     @property
     def scope_id(self) -> UUID:
@@ -66,6 +83,21 @@ class ScopeAgent:
         if written.scope.id != self._scope_id:
             raise ValidationAppError("catalog context is for a different scope", field="scope_id")
         return written
+
+    def describe(self) -> str:
+        """Ask the model for the scope's business context and store it."""
+        if self._describer is None or self._context_writer is None:
+            raise LlmUnavailableError("context generation is not configured")
+        loaded: ScopeCatalogContext = self._context(
+            ScopeContextOptions(
+                include_table_knowledge=False,
+                include_previous=True,
+                include_summary=False,
+            )
+        )
+        proposed: ScopeContextProposal = self._describer.propose(loaded)
+        self._context_writer.save_scope(self._scope_id, proposed.context, ContextOrigin.LLM)
+        return proposed.context
 
     def _context(self, options: ScopeContextOptions) -> ScopeCatalogContext:
         loaded: ScopeCatalogContext = self._catalog.get_scope_context(self._scope_id, options)

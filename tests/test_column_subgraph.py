@@ -29,6 +29,7 @@ from intelegent_data_catalog.graph.knowledge_subgraph import (
 )
 from intelegent_data_catalog.knowledge.context import column_graph as column_graph_module
 from intelegent_data_catalog.knowledge.context.column_graph import (
+    ColumnProposalContext,
     ColumnSubgraphBuilder,
     ScopeColumnCatalog,
     accept_column_relations,
@@ -249,13 +250,9 @@ def test_builder_writes_model_relations_for_focus_columns(
             return columns
 
     class _Proposer:
-        def propose(
-            self,
-            proposed_context: TableAnalysisContext,
-            proposed_columns: list[ColumnCandidate],
-        ) -> list[ColumnRelation]:
-            assert proposed_context.table.id == focus_table
-            seen.extend(proposed_columns)
+        def propose(self, context: ColumnProposalContext) -> list[ColumnRelation]:
+            assert context.analysis.table.id == focus_table
+            seen.extend(context.columns)
             return [_relation(source, target, ColumnRelationKind.REFERENCES)]
 
     class _Writer:
@@ -294,12 +291,8 @@ def test_builder_rejects_invented_columns_before_write() -> None:
             return [_candidate(source, focus_table, "orders", "customer_id", on_focus=True)]
 
     class _Proposer:
-        def propose(
-            self,
-            proposed_context: TableAnalysisContext,
-            proposed_columns: list[ColumnCandidate],
-        ) -> list[ColumnRelation]:
-            del proposed_context, proposed_columns
+        def propose(self, context: ColumnProposalContext) -> list[ColumnRelation]:
+            del context
             return [_relation(source, uuid4(), ColumnRelationKind.REFERENCES)]
 
     class _Writer:
@@ -319,6 +312,7 @@ def test_model_retries_an_invented_column_then_returns_the_link() -> None:
     context: TableAnalysisContext = _analysis(focus_table, source)
     context = context.model_copy(
         update={
+            "table": context.table.model_copy(update={"context": "Orders placed by customers."}),
             "data_profile": TableDataProfile(
                 table_id=focus_table,
                 access_mode=DataAccessMode.PROFILE_ONLY,
@@ -349,7 +343,9 @@ def test_model_retries_an_invented_column_then_returns_the_link() -> None:
         }
     )
     columns: list[ColumnCandidate] = [
-        _candidate(source, focus_table, "orders", "customer_id", on_focus=True),
+        _candidate(source, focus_table, "orders", "customer_id", on_focus=True).model_copy(
+            update={"context": "Customer who placed the order."}
+        ),
         _candidate(target, uuid4(), "customers", "id", on_focus=False),
     ]
     prompts: list[str] = []
@@ -402,13 +398,16 @@ def test_model_retries_an_invented_column_then_returns_the_link() -> None:
         max_tokens=256,
         timeout_seconds=5.0,
     )
-    selected: list[ColumnRelation] = agent.propose(context, columns)
+    selected: list[ColumnRelation] = agent.propose(ColumnProposalContext(context, columns))
     assert selected[0].source_column_id == source
     assert selected[0].target_column_id == target
     assert selected[0].kind == ColumnRelationKind.REFERENCES
     assert "customer_id" in prompts[0]
     assert "customers" in prompts[0]
     assert "0.2" in prompts[0]
+    assert "focus_table_context" in prompts[0]
+    assert "Orders placed by customers." in prompts[0]
+    assert "Customer who placed the order." in prompts[0]
 
 
 def test_scope_catalog_prefers_focus_and_relationship_columns(

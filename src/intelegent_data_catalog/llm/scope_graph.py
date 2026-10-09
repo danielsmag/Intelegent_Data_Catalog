@@ -1,24 +1,12 @@
 """Structured model call that selects cross-table links and a scope summary."""
 
-import asyncio
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.exceptions import (
-    ModelAPIError,
-    ModelHTTPError,
-    ToolRetryError,
-    UnexpectedModelBehavior,
-    UsageLimitExceeded,
-    UserError,
-)
 from pydantic_ai.models import Model
-from pydantic_ai.run import AgentRunResult
-from pydantic_ai.settings import ModelSettings
-from pydantic_ai.usage import UsageLimits
 
-from intelegent_data_catalog.exceptions import LlmError, LlmUnavailableError, ValidationAppError
+from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.scope_graph import accept_table_links
 from intelegent_data_catalog.knowledge.models import (
     ColumnMetadata,
@@ -30,7 +18,8 @@ from intelegent_data_catalog.knowledge.models import (
     TableLink,
     TableRelation,
 )
-from intelegent_data_catalog.llm.trace import AgentTrace
+from intelegent_data_catalog.llm.agent import ProposalAgent
+from intelegent_data_catalog.llm.run import ModelCall
 
 _INSTRUCTIONS: str = (
     "You build a scope overview for one business scope. "
@@ -43,6 +32,8 @@ _INSTRUCTIONS: str = (
     "JOINS_ON means the columns are a join key and not a declared foreign key. "
     "Prefer keys, foreign keys, shared identifiers, and findings that cross tables. "
     "Ignore weak name matches. "
+    "context fields hold the business meaning written for the scope, tables, and columns. "
+    "Use them to judge which links matter. "
     "Do not repeat a column pair that is already an existing catalog relationship. "
     "Treat previous_findings as a draft: keep a justified link, drop the rest, or add one. "
     "summary is two to four sentences on what this scope describes and how the tables join. "
@@ -65,6 +56,7 @@ class _PromptColumn(BaseModel):
     is_unique: bool | None
     is_foreign_key: bool
     description: str | None = None
+    context: str | None = None
 
 
 class _PromptTable(BaseModel):
@@ -75,6 +67,7 @@ class _PromptTable(BaseModel):
     table_id: UUID
     name: str
     description: str | None
+    context: str | None
     row_count: int | None
     has_table_context: bool
     columns: list[_PromptColumn]
@@ -153,6 +146,7 @@ class _ScopeGraphPrompt(BaseModel):
     scope_id: UUID
     scope_name: str
     scope_description: str | None
+    scope_context: str | None
     space_name: str
     tables: list[_PromptTable]
     existing_relationships: list[_PromptRelationship]
@@ -160,7 +154,7 @@ class _ScopeGraphPrompt(BaseModel):
     previous_findings: _PromptPrevious | None
 
 
-class ScopeSubgraphAgent:
+class ScopeSubgraphAgent(ProposalAgent[ScopeCatalogContext, ScopeProposal]):
     """Asks the model which table links and summary belong on the scope."""
 
     def __init__(
@@ -172,44 +166,20 @@ class ScopeSubgraphAgent:
         max_tokens: int,
         timeout_seconds: float,
     ) -> None:
-        self._max_requests: int = max_requests
-        self._settings: ModelSettings = {
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "timeout": timeout_seconds,
-            "thinking": False,
-        }
-        self._agent: Agent[ScopeCatalogContext, ScopeProposal] = _scope_agent(model)
+        self._call: ModelCall[ScopeCatalogContext, ScopeProposal] = ModelCall(
+            _scope_agent(model),
+            name="scope-subgraph",
+            max_requests=max_requests,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            thinking=False,
+        )
 
     def propose(self, context: ScopeCatalogContext) -> ScopeProposal:
         """Return the summary and links the model selected."""
-        return asyncio.run(self._propose(context))
-
-    async def _propose(self, context: ScopeCatalogContext) -> ScopeProposal:
         prompt: str = _prompt(context)
-        trace: AgentTrace = AgentTrace("scope-subgraph")
-        trace.start(prompt)
-        try:
-            result: AgentRunResult[ScopeProposal] = await self._agent.run(
-                prompt,
-                deps=context,
-                model_settings=self._settings,
-                usage_limits=UsageLimits(request_limit=self._max_requests),
-            )
-        except UsageLimitExceeded as err:
-            raise LlmError("language model exceeded the tool step limit") from err
-        except ModelHTTPError as err:
-            raise LlmError(f"language model returned {err.status_code}") from err
-        except ModelAPIError as err:
-            raise LlmError("language model is unavailable") from err
-        except UnexpectedModelBehavior as err:
-            raise LlmError("language model returned an unexpected response") from err
-        except ToolRetryError as err:
-            raise LlmError("language model returned an unexpected response") from err
-        except UserError as err:
-            raise LlmUnavailableError("language model is not configured") from err
-        trace.finish(result)
-        selected: ScopeProposal = result.output
+        selected: ScopeProposal = self._call.run(prompt, context)
         return selected
 
 
@@ -250,6 +220,7 @@ def _prompt(context: ScopeCatalogContext) -> str:
                     is_unique=column.is_unique,
                     is_foreign_key=column.is_foreign_key,
                     description=column.description,
+                    context=column.context,
                 )
             )
         tables.append(
@@ -257,6 +228,7 @@ def _prompt(context: ScopeCatalogContext) -> str:
                 table_id=table.id,
                 name=table.name,
                 description=table.description,
+                context=table.context,
                 row_count=table.row_count,
                 has_table_context=table.id not in missing,
                 columns=columns,
@@ -303,6 +275,7 @@ def _prompt(context: ScopeCatalogContext) -> str:
         scope_id=context.scope.id,
         scope_name=context.scope.name,
         scope_description=context.scope.description,
+        scope_context=context.scope.context,
         space_name=context.space.name,
         tables=tables,
         existing_relationships=relationships,

@@ -6,13 +6,17 @@ import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
+import { ContextEditor } from "./ContextEditor"
 import { ScopeContextPanel } from "./ScopeContextPanel"
 import { SubgraphView } from "./SubgraphView"
 import {
+  followContextGeneration,
   followKnowledgeBuild,
   followScopeBuild,
+  onContextGenerationFinished,
   onKnowledgeBuildFinished,
   onScopeBuildFinished,
+  requestContextGeneration,
   requestKnowledgeBuild,
   requestScopeBuild,
 } from "./knowledgeBuild"
@@ -24,6 +28,7 @@ import {
   fetchKnowledgeContext,
   fetchLatestKnowledgeBuild,
   fetchLatestScopeBuild,
+  fetchLatestContextGeneration,
   fetchScopeGraph,
   fetchScopeKnowledgeContext,
   createScope,
@@ -47,6 +52,7 @@ import {
   type AssetBindingRecord,
   type CatalogColumnRecord,
   type CatalogTableRecord,
+  type ContextGenerationJob,
   type DataSourceRecord,
   type GraphViewRecord,
   type KnowledgeBuildJob,
@@ -593,11 +599,34 @@ export function ScopePage(): ReactElement {
           ))}
         </div>
         {tab === "overview" ? (
-          knowledge !== null ? (
-            <ScopeContextPanel context={knowledge} />
-          ) : (
-            <p className="note">Build scope context to get a summary and cross-table links.</p>
-          )
+          <>
+            {scope !== null ? (
+              <ContextEditor
+                kind="scope"
+                id={scope.id}
+                name={scope.name}
+                context={scope.context}
+                origin={scope.context_origin}
+                onChanged={() => {
+                  const controller: AbortController = new AbortController()
+                  void fetchScope(scopeId, controller.signal)
+                    .then((loaded: ScopeRecord) => {
+                      setScope(loaded)
+                    })
+                    .catch((err: unknown) => {
+                      if (!isAbortError(err)) {
+                        setError(errorMessage(err))
+                      }
+                    })
+                }}
+              />
+            ) : null}
+            {knowledge !== null ? (
+              <ScopeContextPanel context={knowledge} />
+            ) : (
+              <p className="note">Build scope context to get a summary and cross-table links.</p>
+            )}
+          </>
         ) : null}
         {tab === "tables" ? (
           <>
@@ -658,11 +687,13 @@ export function RegistryTablePage(): ReactElement {
   const [knowledge, setKnowledge] = useState<KnowledgeContext | null>(null)
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
+  const [columnsBuilding, setColumnsBuilding] = useState<boolean>(false)
   const loadAbort = useRef<AbortController | null>(null)
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setError(null)
     setBuilding(false)
+    setColumnsBuilding(false)
     void Promise.all([
       fetchCatalogTable(tableId, controller.signal),
       fetchCatalogColumns(tableId, controller.signal),
@@ -741,6 +772,19 @@ export function RegistryTablePage(): ReactElement {
           setKnowledgeError(errorMessage(err))
         }
       })
+    void fetchLatestContextGeneration("table_columns", tableId, controller.signal)
+      .then((job: ContextGenerationJob | null) => {
+        if (controller.signal.aborted || job === null || job.status !== "running") {
+          return
+        }
+        setColumnsBuilding(true)
+        followContextGeneration(job)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledgeError(errorMessage(err))
+        }
+      })
     return () => {
       controller.abort()
       knowledgeController.abort()
@@ -779,6 +823,51 @@ export function RegistryTablePage(): ReactElement {
         })
     })
   }, [tableId])
+  useEffect(() => {
+    return onContextGenerationFinished((job: ContextGenerationJob) => {
+      if (job.subject_kind !== "table_columns" || job.subject_id !== tableId) {
+        return
+      }
+      setColumnsBuilding(false)
+      if (job.status !== "succeeded") {
+        return
+      }
+      const controller: AbortController = new AbortController()
+      void fetchCatalogColumns(tableId, controller.signal)
+        .then((loaded: CatalogColumnRecord[]) => {
+          setColumns(loaded)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setError(errorMessage(err))
+          }
+        })
+    })
+  }, [tableId])
+  function reloadTable(): void {
+    const controller: AbortController = new AbortController()
+    void fetchCatalogTable(tableId, controller.signal)
+      .then((loaded: CatalogTableRecord) => {
+        setTable(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setError(errorMessage(err))
+        }
+      })
+  }
+  function reloadColumns(): void {
+    const controller: AbortController = new AbortController()
+    void fetchCatalogColumns(tableId, controller.signal)
+      .then((loaded: CatalogColumnRecord[]) => {
+        setColumns(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setError(errorMessage(err))
+        }
+      })
+  }
   function runBuildContext(): void {
     setBuilding(true)
     setKnowledgeError(null)
@@ -789,6 +878,21 @@ export function RegistryTablePage(): ReactElement {
       .catch((err: unknown) => {
         setBuilding(false)
         setKnowledgeError(errorMessage(err))
+      })
+  }
+  function runColumnContexts(): void {
+    setColumnsBuilding(true)
+    setError(null)
+    void requestContextGeneration("table_columns", tableId)
+      .then((job: ContextGenerationJob) => {
+        setColumnsBuilding(job.status === "running")
+        if (job.status === "succeeded") {
+          reloadColumns()
+        }
+      })
+      .catch((err: unknown) => {
+        setColumnsBuilding(false)
+        setError(errorMessage(err))
       })
   }
   const qualified: string = table?.source_key ?? "Table"
@@ -845,6 +949,24 @@ export function RegistryTablePage(): ReactElement {
         </div>
         {tab === "overview" ? (
           <div>
+            {table !== null ? (
+              <ContextEditor
+                kind="table"
+                id={table.id}
+                name={table.display_name ?? table.name}
+                context={table.context}
+                origin={table.context_origin}
+                onChanged={reloadTable}
+              />
+            ) : null}
+            <button
+              className="button secondary"
+              type="button"
+              disabled={table === null || columnsBuilding}
+              onClick={runColumnContexts}
+            >
+              {columnsBuilding ? "Generating column contexts…" : "Generate all column contexts"}
+            </button>
             {knowledge !== null ? <KnowledgeContextPanel context={knowledge} /> : null}
             {table !== null ? (
               <>
@@ -858,7 +980,9 @@ export function RegistryTablePage(): ReactElement {
             ) : null}
           </div>
         ) : null}
-        {tab === "columns" ? <ColumnTable columns={columns} /> : null}
+        {tab === "columns" ? (
+          <ColumnTable columns={columns} onContextChanged={reloadColumns} />
+        ) : null}
         {tab === "relationships" && relationships !== null ? (
           <RelationshipLists relationships={relationships} graph={relationGraph} />
         ) : null}
@@ -954,7 +1078,10 @@ export function DataSourcesPage(): ReactElement {
   )
 }
 
-function ColumnTable(props: { columns: CatalogColumnRecord[] }): ReactElement {
+function ColumnTable(props: {
+  columns: CatalogColumnRecord[]
+  onContextChanged: () => void
+}): ReactElement {
   if (props.columns.length === 0) {
     return <p className="note">No columns.</p>
   }
@@ -966,6 +1093,7 @@ function ColumnTable(props: { columns: CatalogColumnRecord[] }): ReactElement {
           <th>Type</th>
           <th>Nullable</th>
           <th>PK</th>
+          <th>Context</th>
         </tr>
       </thead>
       <tbody>
@@ -975,6 +1103,17 @@ function ColumnTable(props: { columns: CatalogColumnRecord[] }): ReactElement {
             <td>{column.data_type ?? column.discovered_data_type ?? "Unknown"}</td>
             <td>{column.nullable === null ? "Unknown" : column.nullable ? "Yes" : "No"}</td>
             <td>{column.is_primary_key === null ? "Unknown" : column.is_primary_key ? "Yes" : "No"}</td>
+            <td>
+              <ContextEditor
+                kind="column"
+                id={column.id}
+                name={column.name}
+                context={column.context}
+                origin={column.context_origin}
+                onChanged={props.onContextChanged}
+                compact
+              />
+            </td>
           </tr>
         ))}
       </tbody>

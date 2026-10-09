@@ -1,6 +1,7 @@
 """Ask for important column links and write them as a Neo4j subgraph."""
 
 import logging
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
@@ -43,15 +44,19 @@ class ColumnCandidateSource(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class ColumnProposalContext:
+    """Analysis context plus the columns the model may link."""
+
+    analysis: TableAnalysisContext
+    columns: list[ColumnCandidate]
+
+
 class ColumnRelationProposer(Protocol):
     """Selects important column relations. Implementations may call a model."""
 
-    def propose(
-        self,
-        context: TableAnalysisContext,
-        columns: list[ColumnCandidate],
-    ) -> list[ColumnRelation]:
-        """Return relations whose column ids come from ``columns``."""
+    def propose(self, context: ColumnProposalContext) -> list[ColumnRelation]:
+        """Return relations whose column ids come from ``context``."""
         ...
 
 
@@ -63,7 +68,15 @@ class KnowledgeSubgraphWriter(Protocol):
         ...
 
 
-class ColumnGraphAppender(Protocol):
+class GraphBuilder[ContextT, AnalysisT](Protocol):
+    """Turns one catalog context into the analysis that was written."""
+
+    def apply(self, context: ContextT) -> AnalysisT:
+        """Return the analysis that names what was written."""
+        ...
+
+
+class ColumnGraphAppender(GraphBuilder[TableAnalysisContext, TableAnalysisContext], Protocol):
     """Adds column relations to a built context and writes the subgraph."""
 
     def apply(self, context: TableAnalysisContext) -> TableAnalysisContext:
@@ -145,7 +158,7 @@ class ScopeColumnCatalog:
         chosen.append(_candidate(row, table.name, table.id == focus_table_id))
 
 
-class ColumnSubgraphBuilder:
+class ColumnSubgraphBuilder(ColumnGraphAppender):
     """Turn one analysis context into a column subgraph and attach the relations."""
 
     def __init__(
@@ -174,7 +187,8 @@ class ColumnSubgraphBuilder:
         proposed: list[ColumnRelation] = []
         has_focus_column: bool = any(column.on_focus_table for column in columns)
         if has_focus_column:
-            proposed = self._proposer.propose(context, columns)
+            request: ColumnProposalContext = ColumnProposalContext(context, columns)
+            proposed = self._proposer.propose(request)
         accepted: list[ColumnRelation] = accept_column_relations(
             context.table.id,
             columns,
@@ -382,6 +396,7 @@ def _candidate(row: ColumnRow, table_name: str, on_focus_table: bool) -> ColumnC
         is_foreign_key=False,
         on_focus_table=on_focus_table,
         description=_short_text(row.description or row.source_description),
+        context=_short_text(row.context),
     )
 
 

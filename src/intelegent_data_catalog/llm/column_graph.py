@@ -1,25 +1,16 @@
 """Structured model call that selects important column relations."""
 
-import asyncio
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.exceptions import (
-    ModelAPIError,
-    ModelHTTPError,
-    ToolRetryError,
-    UnexpectedModelBehavior,
-    UsageLimitExceeded,
-    UserError,
-)
 from pydantic_ai.models import Model
-from pydantic_ai.run import AgentRunResult
-from pydantic_ai.settings import ModelSettings
-from pydantic_ai.usage import UsageLimits
 
-from intelegent_data_catalog.exceptions import LlmError, LlmUnavailableError, ValidationAppError
-from intelegent_data_catalog.knowledge.context.column_graph import accept_column_relations
+from intelegent_data_catalog.exceptions import ValidationAppError
+from intelegent_data_catalog.knowledge.context.column_graph import (
+    ColumnProposalContext,
+    accept_column_relations,
+)
 from intelegent_data_catalog.knowledge.models import (
     ColumnCandidate,
     ColumnDataProfile,
@@ -28,7 +19,8 @@ from intelegent_data_catalog.knowledge.models import (
     TableAnalysisContext,
     TableRelation,
 )
-from intelegent_data_catalog.llm.trace import AgentTrace
+from intelegent_data_catalog.llm.agent import ProposalAgent
+from intelegent_data_catalog.llm.run import ModelCall
 
 _INSTRUCTIONS: str = (
     "You build a column subgraph for one catalog table. "
@@ -43,7 +35,9 @@ _INSTRUCTIONS: str = (
     "SAME_MEANING means the columns name the same business fact and are not a join. "
     "Prefer keys, foreign keys, shared identifiers, and clear derivations. "
     "Ignore weak name matches. "
-    "reason is one short sentence grounded in the names, types, keys, or statistics. "
+    "context fields hold the business meaning written for the table and columns. "
+    "Use them to judge joins and derivations. "
+    "reason is one short sentence grounded in the names, types, keys, statistics, or context. "
     "Return no relations when nothing is important. "
     "Do not invent column ids."
 )
@@ -80,6 +74,7 @@ class _PromptColumn(BaseModel):
     is_foreign_key: bool
     on_focus_table: bool
     description: str | None = None
+    context: str | None = None
     null_ratio: float | None = None
     uniqueness_ratio: float | None = None
     distinct_count: int | None = None
@@ -114,13 +109,14 @@ class _ColumnGraphPrompt(BaseModel):
 
     focus_table_id: UUID
     focus_table_name: str
+    focus_table_context: str | None
     columns: list[_PromptColumn]
     existing_relationships: list[_PromptRelationship]
     upstream_tables: list[str]
     downstream_tables: list[str]
 
 
-class ColumnSubgraphAgent:
+class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelation]]):
     """Asks the model which column relations belong in the knowledge subgraph."""
 
     def __init__(
@@ -132,53 +128,21 @@ class ColumnSubgraphAgent:
         max_tokens: int,
         timeout_seconds: float,
     ) -> None:
-        self._max_requests: int = max_requests
-        self._settings: ModelSettings = {
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "timeout": timeout_seconds,
-            "thinking": False,
-        }
-        self._agent: Agent[ColumnGraphDeps, ColumnRelationSet] = _column_agent(model)
+        self._call: ModelCall[ColumnGraphDeps, ColumnRelationSet] = ModelCall(
+            _column_agent(model),
+            name="column-subgraph",
+            max_requests=max_requests,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            thinking=False,
+        )
 
-    def propose(
-        self,
-        context: TableAnalysisContext,
-        columns: list[ColumnCandidate],
-    ) -> list[ColumnRelation]:
-        """Return relations the model selected from ``columns``."""
-        return asyncio.run(self._propose(context, columns))
-
-    async def _propose(
-        self,
-        context: TableAnalysisContext,
-        columns: list[ColumnCandidate],
-    ) -> list[ColumnRelation]:
-        deps: ColumnGraphDeps = ColumnGraphDeps(context.table.id, columns)
-        prompt: str = _prompt(context, columns)
-        trace: AgentTrace = AgentTrace("column-subgraph")
-        trace.start(prompt)
-        try:
-            result: AgentRunResult[ColumnRelationSet] = await self._agent.run(
-                prompt,
-                deps=deps,
-                model_settings=self._settings,
-                usage_limits=UsageLimits(request_limit=self._max_requests),
-            )
-        except UsageLimitExceeded as err:
-            raise LlmError("language model exceeded the tool step limit") from err
-        except ModelHTTPError as err:
-            raise LlmError(f"language model returned {err.status_code}") from err
-        except ModelAPIError as err:
-            raise LlmError("language model is unavailable") from err
-        except UnexpectedModelBehavior as err:
-            raise LlmError("language model returned an unexpected response") from err
-        except ToolRetryError as err:
-            raise LlmError("language model returned an unexpected response") from err
-        except UserError as err:
-            raise LlmUnavailableError("language model is not configured") from err
-        trace.finish(result)
-        selected: ColumnRelationSet = result.output
+    def propose(self, context: ColumnProposalContext) -> list[ColumnRelation]:
+        """Return relations the model selected from ``context``."""
+        deps: ColumnGraphDeps = ColumnGraphDeps(context.analysis.table.id, context.columns)
+        prompt: str = _prompt(context.analysis, context.columns)
+        selected: ColumnRelationSet = self._call.run(prompt, deps)
         return selected.relations
 
 
@@ -227,6 +191,7 @@ def _prompt(context: TableAnalysisContext, columns: list[ColumnCandidate]) -> st
                 is_foreign_key=column.is_foreign_key,
                 on_focus_table=column.on_focus_table,
                 description=column.description,
+                context=column.context,
                 null_ratio=None if stat is None else stat.null_ratio,
                 uniqueness_ratio=None if stat is None else stat.uniqueness_ratio,
                 distinct_count=None if stat is None else stat.distinct_count,
@@ -262,6 +227,7 @@ def _prompt(context: TableAnalysisContext, columns: list[ColumnCandidate]) -> st
     payload: _ColumnGraphPrompt = _ColumnGraphPrompt(
         focus_table_id=context.table.id,
         focus_table_name=context.table.name,
+        focus_table_context=context.table.context,
         columns=prompt_columns,
         existing_relationships=links,
         upstream_tables=upstream,

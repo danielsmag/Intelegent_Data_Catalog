@@ -14,13 +14,16 @@ from intelegent_data_catalog.llm.catalog import TableOperationAgent
 
 
 def build_table_operation_agent(settings: LlmSettings) -> TableOperationAgent:
-    """Return an agent for ``settings.provider``. Ollama is the local default."""
+    """Return an agent for ``settings.provider``. Ollama is the local default.
+
+    Context writes share this agent, so the timeout matches the other structured calls.
+    """
     return TableOperationAgent(
         build_model(settings),
         max_requests=settings.max_tool_steps,
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
-        timeout_seconds=settings.timeout_seconds,
+        timeout_seconds=max(settings.timeout_seconds, 600.0),
     )
 
 

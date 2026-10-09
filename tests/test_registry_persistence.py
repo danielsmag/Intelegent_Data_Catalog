@@ -17,6 +17,7 @@ from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
     BindingRole,
     BindingState,
+    ContextOrigin,
     DataSourceType,
     EngineType,
     RelationshipOrigin,
@@ -36,12 +37,14 @@ from intelegent_data_catalog.registry.schemas import (
     ColumnCreate,
     ColumnMappingWrite,
     ColumnObservation,
+    ColumnUpdate,
     DataSourceCreate,
     EngineConnectionCreate,
     EngineRef,
     RelationshipCreate,
     RelationshipRead,
     ScopeCreate,
+    ScopeUpdate,
     SourceBindingCreate,
     SourceRef,
     SourceSnapshot,
@@ -249,6 +252,41 @@ def test_snapshot_preserves_user_description_scope_and_deprecated(tmp_path: Path
                 table.id,
                 SourceSnapshot(columns=[ColumnObservation(name="missing")]),
             )
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_manual_context_records_user_origin_and_clearing_resets_it(tmp_path: Path) -> None:
+    """A manual context edit is USER. Blank text clears the text and the origin."""
+    database: CatalogDatabase = _database(tmp_path)
+    session: Session = database.session()
+    service: RegistryService = RegistryService(session)
+    try:
+        scope_id: UUID = _scope(service)
+        written = service.update_scope(scope_id, ScopeUpdate(context="  Checkout scope.  "))
+        assert written.context == "Checkout scope."
+        assert written.context_origin is ContextOrigin.USER
+        cleared = service.update_scope(scope_id, ScopeUpdate(context="   "))
+        assert cleared.context is None
+        assert cleared.context_origin is None
+        source_id: UUID = service.create_data_source(
+            DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
+        ).id
+        table: CatalogTableRead = _table(service, scope_id, source_id, "polaris", "sales", "orders")
+        table_written = service.update_table(table.id, CatalogTableUpdate(context="Order facts."))
+        assert table_written.context == "Order facts."
+        assert table_written.context_origin is ContextOrigin.USER
+        column = service.create_column(
+            table.id,
+            ColumnCreate(name="customer_id", ordinal_position=0),
+        )
+        column_written = service.update_column(column.id, ColumnUpdate(context="Buyer id."))
+        assert column_written.context == "Buyer id."
+        assert column_written.context_origin is ContextOrigin.USER
+        column_cleared = service.update_column(column.id, ColumnUpdate(context=None))
+        assert column_cleared.context is None
+        assert column_cleared.context_origin is None
     finally:
         session.close()
         database.dispose()

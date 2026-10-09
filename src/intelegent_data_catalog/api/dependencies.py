@@ -16,7 +16,11 @@ from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.exceptions import PersistenceUnavailableError
-from intelegent_data_catalog.jobs.queue import KnowledgeBuildQueue, ScopeBuildQueue
+from intelegent_data_catalog.jobs.queue import (
+    ContextGenerationQueue,
+    KnowledgeBuildQueue,
+    ScopeBuildQueue,
+)
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.service import RegistryService
 
@@ -145,3 +149,14 @@ def get_scope_builds(request: Request) -> ScopeBuildQueue:
 
 
 ScopeBuildDep = Annotated[ScopeBuildQueue, Depends(get_scope_builds)]
+
+
+def get_context_generations(request: Request) -> ContextGenerationQueue:
+    """Return the process-wide context queue created with the application."""
+    queue: object = getattr(request.app.state, "context_generations", None)
+    if not isinstance(queue, ContextGenerationQueue):
+        raise RuntimeError("context generations are not configured")
+    return queue
+
+
+ContextGenerationDep = Annotated[ContextGenerationQueue, Depends(get_context_generations)]

@@ -71,6 +71,11 @@ def test_scope_agent_retries_until_the_link_is_in_scope() -> None:
     )
     context: ScopeCatalogContext = base.model_copy(
         update={
+            "scope": base.scope.model_copy(update={"context": "Ordering covers checkout."}),
+            "tables": [
+                orders.model_copy(update={"context": "One row per order."}),
+                customers,
+            ],
             "table_knowledge": [
                 TableKnowledgeInput(
                     table_id=orders.id,
@@ -141,6 +146,9 @@ def test_scope_agent_retries_until_the_link_is_in_scope() -> None:
     assert "table_knowledge" in prompts[0]
     assert "previous_findings" in prompts[0]
     assert "Old summary" in prompts[0]
+    assert "scope_context" in prompts[0]
+    assert "Ordering covers checkout." in prompts[0]
+    assert "One row per order." in prompts[0]
 
 
 def test_replace_keeps_non_llm_rows_and_rewrites_llm_rows(tmp_path: Path) -> None:

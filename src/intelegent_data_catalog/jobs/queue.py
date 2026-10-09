@@ -9,15 +9,24 @@ from uuid import UUID, uuid4
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.jobs.models import (
+    ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
     ScopeBuildJobRead,
 )
-from intelegent_data_catalog.knowledge.models import ScopeContextOptions, TableContextOptions
+from intelegent_data_catalog.knowledge.models import (
+    ContextGenerationOptions,
+    ContextSubjectKind,
+    ScopeContextOptions,
+    TableContextOptions,
+)
 
 _LOGGER: logging.Logger = logging.getLogger(LOGGER_NAME)
 
-type ReadJob[ReadT] = Callable[[UUID, UUID, str, KnowledgeBuildState, str | None], ReadT]
+type ReadJob[ReadT] = Callable[
+    [UUID, UUID, str, str, KnowledgeBuildState, str | None],
+    ReadT,
+]
 
 
 class BuildWork[OptionsT](Protocol):
@@ -52,11 +61,13 @@ class _StoredJob[ReadT]:
         job_id: UUID,
         subject_id: UUID,
         subject_name: str,
+        lane: str,
         read_job: ReadJob[ReadT],
     ) -> None:
         self.id: UUID = job_id
         self.subject_id: UUID = subject_id
         self.subject_name: str = subject_name
+        self.lane: str = lane
         self.status: KnowledgeBuildState = "running"
         self.error: str | None = None
         self._read_job: ReadJob[ReadT] = read_job
@@ -66,6 +77,7 @@ class _StoredJob[ReadT]:
             self.id,
             self.subject_id,
             self.subject_name,
+            self.lane,
             self.status,
             self.error,
         )
@@ -90,12 +102,20 @@ class BuildQueue[OptionsT, ReadT]:
         self._failure_message: str = failure_message
         self._lock: threading.Lock = threading.Lock()
         self._jobs: dict[UUID, _StoredJob[ReadT]] = {}
-        self._running: dict[UUID, UUID] = {}
+        self._running: dict[tuple[UUID, str], UUID] = {}
 
-    def start(self, subject_id: UUID, subject_name: str, options: OptionsT) -> ReadT:
+    def start(
+        self,
+        subject_id: UUID,
+        subject_name: str,
+        options: OptionsT,
+        *,
+        lane: str = "",
+    ) -> ReadT:
         """Return the running job, or start one and return it immediately."""
         with self._lock:
-            current_id: UUID | None = self._running.get(subject_id)
+            key: tuple[UUID, str] = (subject_id, lane)
+            current_id: UUID | None = self._running.get(key)
             if current_id is not None:
                 current: _StoredJob[ReadT] | None = self._jobs.get(current_id)
                 if current is not None and current.status == "running":
@@ -104,10 +124,11 @@ class BuildQueue[OptionsT, ReadT]:
                 uuid4(),
                 subject_id,
                 subject_name,
+                lane,
                 self._read_job,
             )
             self._jobs[created.id] = created
-            self._running[subject_id] = created.id
+            self._running[key] = created.id
             job_id: UUID = created.id
             snapshot: ReadT = created.read()
         worker: threading.Thread = threading.Thread(
@@ -127,12 +148,13 @@ class BuildQueue[OptionsT, ReadT]:
                 return None
             return job.read()
 
-    def latest(self, subject_id: UUID) -> ReadT | None:
-        """Return the newest job for a subject, including one that already finished."""
+    def latest(self, subject_id: UUID, *, lane: str = "") -> ReadT | None:
+        """Return the newest job for a subject and lane, including one that already finished."""
         with self._lock:
-            job_id: UUID | None = self._running.get(subject_id)
+            key: tuple[UUID, str] = (subject_id, lane)
+            job_id: UUID | None = self._running.get(key)
             if job_id is None:
-                job_id = self._latest_finished(subject_id)
+                job_id = self._latest_finished(subject_id, lane)
             if job_id is None:
                 return None
             job: _StoredJob[ReadT] | None = self._jobs.get(job_id)
@@ -140,11 +162,11 @@ class BuildQueue[OptionsT, ReadT]:
                 return None
             return job.read()
 
-    def _latest_finished(self, subject_id: UUID) -> UUID | None:
+    def _latest_finished(self, subject_id: UUID, lane: str) -> UUID | None:
         found: UUID | None = None
         job: _StoredJob[ReadT]
         for job in self._jobs.values():
-            if job.subject_id == subject_id:
+            if job.subject_id == subject_id and job.lane == lane:
                 found = job.id
         return found
 
@@ -166,18 +188,21 @@ class BuildQueue[OptionsT, ReadT]:
                 return
             job.status = status
             job.error = error
-            current: UUID | None = self._running.get(job.subject_id)
+            key: tuple[UUID, str] = (job.subject_id, job.lane)
+            current: UUID | None = self._running.get(key)
             if current == job_id:
-                self._running.pop(job.subject_id)
+                self._running.pop(key)
 
 
 def _read_table_job(
     job_id: UUID,
     subject_id: UUID,
     subject_name: str,
+    lane: str,
     status: KnowledgeBuildState,
     error: str | None,
 ) -> KnowledgeBuildJobRead:
+    del lane
     return KnowledgeBuildJobRead(
         id=job_id,
         table_id=subject_id,
@@ -191,9 +216,11 @@ def _read_scope_job(
     job_id: UUID,
     subject_id: UUID,
     subject_name: str,
+    lane: str,
     status: KnowledgeBuildState,
     error: str | None,
 ) -> ScopeBuildJobRead:
+    del lane
     return ScopeBuildJobRead(
         id=job_id,
         scope_id=subject_id,
@@ -201,6 +228,38 @@ def _read_scope_job(
         status=status,
         error=error,
     )
+
+
+def _read_context_job(
+    job_id: UUID,
+    subject_id: UUID,
+    subject_name: str,
+    lane: str,
+    status: KnowledgeBuildState,
+    error: str | None,
+) -> ContextGenerationJobRead:
+    return ContextGenerationJobRead(
+        id=job_id,
+        subject_kind=_subject_kind(lane),
+        subject_id=subject_id,
+        subject_name=subject_name,
+        status=status,
+        error=error,
+    )
+
+
+def _subject_kind(lane: str) -> ContextSubjectKind:
+    match lane:
+        case "scope":
+            return "scope"
+        case "table":
+            return "table"
+        case "table_columns":
+            return "table_columns"
+        case "column":
+            return "column"
+        case _:
+            raise ValueError(f"unknown context lane: {lane}")
 
 
 class KnowledgeBuildQueue(BuildQueue[TableContextOptions, KnowledgeBuildJobRead]):
@@ -226,4 +285,25 @@ class ScopeBuildQueue(BuildQueue[ScopeContextOptions, ScopeBuildJobRead]):
             thread_prefix="scope-build",
             failure_log="scope context build failed",
             failure_message="scope context build failed",
+        )
+
+
+class ContextGenerationWork(Protocol):
+    """Stores generated business context. The queue does not open a database session."""
+
+    def run(self, subject_id: UUID, options: ContextGenerationOptions) -> None:
+        """Generate and save context. Raise ``CatalogError`` for a domain failure."""
+        ...
+
+
+class ContextGenerationQueue(BuildQueue[ContextGenerationOptions, ContextGenerationJobRead]):
+    """Runs at most one context generation per subject and kind."""
+
+    def __init__(self, work: ContextGenerationWork) -> None:
+        super().__init__(
+            work,
+            _read_context_job,
+            thread_prefix="context-generation",
+            failure_log="context generation failed",
+            failure_message="context generation failed",
         )

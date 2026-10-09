@@ -1,5 +1,7 @@
 """Logical manager for one catalog table. Holds no profile cache and no chat history."""
 
+from contextlib import suppress
+from typing import Protocol
 from uuid import UUID
 
 from intelegent_data_catalog.exceptions import (
@@ -8,6 +10,7 @@ from intelegent_data_catalog.exceptions import (
     ValidationAppError,
 )
 from intelegent_data_catalog.knowledge.access import (
+    accept_column_contexts,
     accept_column_profile,
     accept_comparison,
     accept_table_profile,
@@ -21,8 +24,12 @@ from intelegent_data_catalog.knowledge.context.graph import GraphContextProvider
 from intelegent_data_catalog.knowledge.context.lineage import LineageContextProvider
 from intelegent_data_catalog.knowledge.models import (
     ColumnComparisonProfile,
+    ColumnContextInput,
+    ColumnContextItem,
+    ColumnContextProposal,
     ColumnDataProfile,
     ColumnMetadata,
+    ColumnRelation,
     DataProfileOptions,
     GraphNeighbor,
     GraphPublishResult,
@@ -31,11 +38,47 @@ from intelegent_data_catalog.knowledge.models import (
     ProfileOverrides,
     TableAnalysisContext,
     TableCatalogContext,
+    TableColumnsContextInput,
+    TableColumnsContextProposal,
+    TableContextInput,
     TableContextOptions,
+    TableContextProposal,
     TableDataProfile,
 )
 from intelegent_data_catalog.knowledge.profiling.profiler import DataProfiler
-from intelegent_data_catalog.llm.catalog import TableOperationAgent
+from intelegent_data_catalog.llm.agent import TableModelAgent
+from intelegent_data_catalog.persistence.enums import ContextOrigin
+
+_COLUMN_BATCH: int = 25
+_SUBGRAPH_LIMIT: int = 50
+
+
+class TableSubgraphReader(Protocol):
+    """Column links already stored for one table. Neo4j is one implementation."""
+
+    def read(self, table_id: UUID) -> list[ColumnRelation]:
+        """Return the knowledge subgraph. An empty list means nothing is stored."""
+        ...
+
+
+class SavedTableContextReader(Protocol):
+    """Reads the last table analysis snapshot."""
+
+    def get(self, table_id: UUID) -> TableAnalysisContext | None:
+        """Return the snapshot, or none when the table has never been built."""
+        ...
+
+
+class TableContextWriter(Protocol):
+    """Stores business context on table and column rows."""
+
+    def save_table(self, table_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the table context."""
+        ...
+
+    def save_column(self, column_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the column context."""
+        ...
 
 
 class TableAgent:
@@ -43,6 +86,7 @@ class TableAgent:
 
     Create it through ``TableAgentFactory`` and drop it when the call finishes.
     PostgreSQL keeps the catalog. ``run`` asks the model to carry out one operation.
+    ``describe_*`` ask the same model for business context and store it as ``LLM``.
     """
 
     def __init__(
@@ -55,8 +99,11 @@ class TableAgent:
         contexts: TableContextBuilder,
         defaults: KnowledgeDefaults | None = None,
         publisher: GraphPublisher | None = None,
-        operation_agent: TableOperationAgent | None = None,
+        operation_agent: TableModelAgent | None = None,
         column_graph: ColumnGraphAppender | None = None,
+        saved: SavedTableContextReader | None = None,
+        context_writer: TableContextWriter | None = None,
+        subgraph: TableSubgraphReader | None = None,
     ) -> None:
         self._table_id: UUID = table_id
         self._catalog: CatalogContextProvider = catalog
@@ -66,8 +113,11 @@ class TableAgent:
         self._contexts: TableContextBuilder = contexts
         self._defaults: KnowledgeDefaults = defaults or KnowledgeDefaults()
         self._publisher: GraphPublisher | None = publisher
-        self._operation_agent: TableOperationAgent | None = operation_agent
+        self._operation_agent: TableModelAgent | None = operation_agent
         self._column_graph: ColumnGraphAppender | None = column_graph
+        self._saved: SavedTableContextReader | None = saved
+        self._context_writer: TableContextWriter | None = context_writer
+        self._subgraph_reader: TableSubgraphReader | None = subgraph
 
     @property
     def table_id(self) -> UUID:
@@ -152,6 +202,104 @@ class TableAgent:
         if self._operation_agent is None:
             raise LlmUnavailableError("language model is not configured")
         return self._operation_agent.run(cleaned, self, self._instructions())
+
+    def describe_table(self) -> str:
+        """Ask the model for the table's business context and store it."""
+        agent: TableModelAgent
+        writer: TableContextWriter
+        agent, writer = self._describing()
+        catalog: TableCatalogContext = self._context()
+        proposed: TableContextProposal = agent.describe_table(
+            TableContextInput(
+                table=catalog,
+                saved=self._saved_context(),
+                subgraph=self._subgraph(),
+            )
+        )
+        writer.save_table(self._table_id, proposed.context, ContextOrigin.LLM)
+        return proposed.context
+
+    def describe_columns(self) -> list[ColumnContextItem]:
+        """Ask the model for every column's context, in batches, and store each one."""
+        agent: TableModelAgent
+        writer: TableContextWriter
+        agent, writer = self._describing()
+        catalog: TableCatalogContext = self._context()
+        saved: TableAnalysisContext | None = self._saved_context()
+        subgraph: list[ColumnRelation] = self._subgraph()
+        written: list[ColumnContextItem] = []
+        start: int = 0
+        while start < len(catalog.columns):
+            batch: list[ColumnMetadata] = catalog.columns[start : start + _COLUMN_BATCH]
+            proposed: TableColumnsContextProposal = agent.describe_columns(
+                TableColumnsContextInput(
+                    table=catalog,
+                    columns=batch,
+                    saved=saved,
+                    subgraph=subgraph,
+                )
+            )
+            item: ColumnContextItem
+            for item in accept_column_contexts(batch, proposed.columns):
+                writer.save_column(item.column_id, item.context, ContextOrigin.LLM)
+                written.append(item)
+            start += _COLUMN_BATCH
+        return written
+
+    def describe_column(self, column_id: UUID) -> str:
+        """Ask the model for one column's business context and store it."""
+        agent: TableModelAgent
+        writer: TableContextWriter
+        agent, writer = self._describing()
+        column: ColumnMetadata = self._require_column(column_id)
+        proposed: ColumnContextProposal = agent.describe_column(
+            ColumnContextInput(
+                table=self._context(),
+                column=column,
+                saved=self._saved_context(),
+                subgraph=self._subgraph(),
+            )
+        )
+        writer.save_column(column_id, proposed.context, ContextOrigin.LLM)
+        return proposed.context
+
+    def _describing(self) -> tuple[TableModelAgent, TableContextWriter]:
+        if self._operation_agent is None:
+            raise LlmUnavailableError("language model is not configured")
+        if self._context_writer is None:
+            raise LlmUnavailableError("context storage is not configured")
+        return self._operation_agent, self._context_writer
+
+    def _saved_context(self) -> TableAnalysisContext | None:
+        if self._saved is None:
+            return None
+        return self._saved.get(self._table_id)
+
+    def _subgraph(self) -> list[ColumnRelation]:
+        """Column links for this table. The saved snapshot and Neo4j are merged."""
+        collected: list[ColumnRelation] = []
+        saved: TableAnalysisContext | None = self._saved_context()
+        if saved is not None:
+            collected.extend(saved.column_relations)
+        if self._subgraph_reader is not None:
+            with suppress(GraphUnavailableError):
+                collected.extend(self._subgraph_reader.read(self._table_id))
+        chosen: list[ColumnRelation] = []
+        seen: set[tuple[UUID, UUID, str]] = set()
+        relation: ColumnRelation
+        for relation in collected:
+            key: tuple[UUID, UUID, str] = (
+                relation.source_column_id,
+                relation.target_column_id,
+                relation.kind.value,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            chosen.append(relation)
+            if len(chosen) == _SUBGRAPH_LIMIT:
+                break
+        return chosen
 
     def _instructions(self) -> str:
         return (

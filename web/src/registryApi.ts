@@ -13,6 +13,8 @@ export type ScopeRecord = {
   name: string
   slug: string
   description: string | null
+  context: string | null
+  context_origin: "USER" | "LLM" | null
 }
 
 export type CatalogTableRecord = {
@@ -25,6 +27,8 @@ export type CatalogTableRecord = {
   status: string
   source_key: string
   source_description: string | null
+  context: string | null
+  context_origin: "USER" | "LLM" | null
   physical_catalog: string
   physical_namespace: string
   physical_table: string
@@ -42,6 +46,8 @@ export type CatalogColumnRecord = {
   nullable: boolean | null
   is_primary_key: boolean | null
   description: string | null
+  context: string | null
+  context_origin: "USER" | "LLM" | null
   last_seen_at: string | null
 }
 
@@ -473,6 +479,105 @@ export async function fetchLatestScopeBuild(
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as ScopeBuildJob
+}
+
+export type ContextSubjectKind = "scope" | "table" | "table_columns" | "column"
+
+export type ContextEntityKind = "scope" | "table" | "column"
+
+export type ContextGenerationJob = {
+  id: string
+  subject_kind: ContextSubjectKind
+  subject_id: string
+  subject_name: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+}
+
+export async function startContextGeneration(
+  kind: ContextSubjectKind,
+  id: string,
+): Promise<ContextGenerationJob> {
+  const response: Response = await fetch(contextGeneratePath(kind, id), { method: "POST" })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ContextGenerationJob
+}
+
+export async function fetchContextGeneration(jobId: string): Promise<ContextGenerationJob> {
+  const response: Response = await fetch(`/api/v1/context-generations/${jobId}`)
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ContextGenerationJob
+}
+
+export async function fetchLatestContextGeneration(
+  kind: ContextSubjectKind,
+  id: string,
+  signal: AbortSignal,
+): Promise<ContextGenerationJob | null> {
+  const response: Response = await fetch(contextLatestPath(kind, id), { signal })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as ContextGenerationJob
+}
+
+export async function updateEntityContext(
+  kind: ContextEntityKind,
+  id: string,
+  context: string | null,
+): Promise<void> {
+  const response: Response = await fetch(contextPatchPath(kind, id), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ context }),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+}
+
+function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
+  switch (kind) {
+    case "scope":
+      return `/api/v1/scopes/${id}/context/generate`
+    case "table":
+      return `/api/v1/tables/${id}/context/generate`
+    case "table_columns":
+      return `/api/v1/tables/${id}/columns/context/generate`
+    case "column":
+      return `/api/v1/columns/${id}/context/generate`
+  }
+}
+
+function contextLatestPath(kind: ContextSubjectKind, id: string): string {
+  switch (kind) {
+    case "scope":
+      return `/api/v1/scopes/${id}/context/generation`
+    case "table":
+      return `/api/v1/tables/${id}/context/generation?lane=table`
+    case "table_columns":
+      return `/api/v1/tables/${id}/context/generation?lane=table_columns`
+    case "column":
+      return `/api/v1/columns/${id}/context/generation`
+  }
+}
+
+function contextPatchPath(kind: ContextEntityKind, id: string): string {
+  switch (kind) {
+    case "scope":
+      return `/api/v1/scopes/${id}`
+    case "table":
+      return `/api/v1/tables/${id}`
+    case "column":
+      return `/api/v1/columns/${id}`
+  }
 }
 
 export async function fetchDataSources(signal: AbortSignal): Promise<DataSourceRecord[]> {

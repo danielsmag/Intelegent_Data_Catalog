@@ -75,6 +75,7 @@ class ScopeSummary(BaseModel):
     name: str
     slug: str
     description: str | None
+    context: str | None = None
 
 
 class SpaceSummary(BaseModel):
@@ -107,6 +108,7 @@ class ColumnMetadata(BaseModel):
     name: str
     description: str | None
     source_description: str | None
+    context: str | None = None
     data_type: str | None
     native_data_type: str | None
     discovered_data_type: str | None
@@ -163,6 +165,7 @@ class TableMetadata(BaseModel):
     physical_table: str
     source_key: str
     row_count: int | None
+    context: str | None = None
     scope: ScopeSummary
     space: SpaceSummary
     tags: list[TagSummary]
@@ -244,6 +247,7 @@ class ColumnCandidate(BaseModel):
     is_foreign_key: bool
     on_focus_table: bool
     description: str | None = None
+    context: str | None = None
 
 
 class ColumnRelation(BaseModel):
@@ -372,6 +376,7 @@ class ScopeTableSummary(BaseModel):
     description: str | None
     status: TableStatus
     row_count: int | None
+    context: str | None = None
     columns: list[ColumnMetadata]
 
 
@@ -441,6 +446,108 @@ class ScopeAnalysisContext(BaseModel):
     summary: str | None = None
     tables_without_context: list[UUID] = Field(default_factory=list)
     previous_links_kept: int = Field(default=0, ge=0)
+
+
+ContextSubjectKind = Literal["scope", "table", "table_columns", "column"]
+
+_CONTEXT_LIMIT: int = 1200
+
+
+def _context_text(value: object) -> str:
+    """Keep generated context. A long answer is cut to the stored limit."""
+    if not isinstance(value, str):
+        raise ValueError("context is empty")
+    cleaned: str = value.strip()
+    if cleaned == "":
+        raise ValueError("context is empty")
+    return cleaned[:_CONTEXT_LIMIT]
+
+
+class ContextGenerationOptions(BaseModel):
+    """Which entity a background context job writes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: ContextSubjectKind
+
+
+class _ContextText(BaseModel):
+    """Shared rules for generated business context."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    context: str
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def _clean_context(cls, value: object) -> str:
+        return _context_text(value)
+
+
+class ColumnContextProposal(_ContextText):
+    """Business meaning the model wrote for one column."""
+
+
+class TableContextProposal(_ContextText):
+    """Business meaning the model wrote for one table."""
+
+
+class ColumnContextItem(BaseModel):
+    """One column's context inside a whole-table generation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    column_id: UUID
+    context: str
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def _clean_context(cls, value: object) -> str:
+        return _context_text(value)
+
+
+class TableColumnsContextProposal(BaseModel):
+    """Context for every column the model was shown."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    columns: list[ColumnContextItem] = Field(default_factory=list, max_length=40)
+
+
+class ScopeContextProposal(_ContextText):
+    """Business meaning the model wrote for one scope."""
+
+
+class TableContextInput(BaseModel):
+    """One table plus the saved analysis, when a build has run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table: TableCatalogContext
+    saved: TableAnalysisContext | None = None
+    subgraph: list[ColumnRelation] = Field(default_factory=list)
+
+
+class TableColumnsContextInput(BaseModel):
+    """A batch of columns from one table plus the saved analysis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table: TableCatalogContext
+    columns: list[ColumnMetadata]
+    saved: TableAnalysisContext | None = None
+    subgraph: list[ColumnRelation] = Field(default_factory=list)
+
+
+class ColumnContextInput(BaseModel):
+    """One column plus its table and the saved analysis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table: TableCatalogContext
+    column: ColumnMetadata
+    saved: TableAnalysisContext | None = None
+    subgraph: list[ColumnRelation] = Field(default_factory=list)
 
 
 class GraphPublishResult(BaseModel):

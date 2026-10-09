@@ -11,6 +11,7 @@ from intelegent_data_catalog.persistence.enums import (
     BindingRole,
     BindingState,
     CapabilitySupport,
+    ContextOrigin,
     DataSourceType,
     EngineConnectionStatus,
     EngineType,
@@ -192,6 +193,7 @@ class ScopeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     slug: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
+    context: str | None = Field(default=None, max_length=4000)
 
     @field_validator("slug")
     @classmethod
@@ -211,6 +213,8 @@ class ScopeRead(BaseModel):
     name: str
     slug: str
     description: str | None
+    context: str | None
+    context_origin: ContextOrigin | None
     created_at: datetime
     updated_at: datetime
 
@@ -332,6 +336,7 @@ class CatalogTableUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     display_name: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
+    context: str | None = Field(default=None, max_length=4000)
     status: TableStatus | None = None
     table_format: str | None = Field(default=None, max_length=64)
     scope_id: UUID | None = None
@@ -355,6 +360,8 @@ class CatalogTableRead(BaseModel):
     name: str
     display_name: str | None
     description: str | None
+    context: str | None
+    context_origin: ContextOrigin | None
     table_type: TableKind
     status: TableStatus
     physical_catalog: str
@@ -401,6 +408,7 @@ class ColumnUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     description: str | None = Field(default=None, max_length=16000)
+    context: str | None = Field(default=None, max_length=4000)
     data_type: str | None = Field(default=None, max_length=512)
     nullable: bool | None = None
     is_primary_key: bool | None = None
@@ -416,6 +424,8 @@ class ColumnRead(BaseModel):
     table_id: UUID
     name: str
     description: str | None
+    context: str | None
+    context_origin: ContextOrigin | None
     data_type: str | None
     native_data_type: str | None
     discovered_data_type: str | None

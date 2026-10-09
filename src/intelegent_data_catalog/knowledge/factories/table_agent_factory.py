@@ -22,10 +22,16 @@ from intelegent_data_catalog.knowledge.context.lineage import (
     PostgresDatasetCatalog,
 )
 from intelegent_data_catalog.knowledge.models import KnowledgeDefaults
-from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
+from intelegent_data_catalog.knowledge.operations.table_operation import (
+    SavedTableContextReader,
+    TableAgent,
+    TableContextWriter,
+    TableSubgraphReader,
+)
 from intelegent_data_catalog.knowledge.profiling.profiler import DataProfiler
+from intelegent_data_catalog.knowledge.store import KnowledgeContextStore, SemanticContextStore
 from intelegent_data_catalog.lineage.marquez import LineageReader
-from intelegent_data_catalog.llm.catalog import TableOperationAgent
+from intelegent_data_catalog.llm.agent import TableModelAgent
 from intelegent_data_catalog.registry.repository import RegistryRepository
 
 
@@ -40,8 +46,11 @@ class TableAgentFactory:
         lineage: LineageContextProvider,
         defaults: KnowledgeDefaults | None = None,
         publisher: GraphPublisher | None = None,
-        operation_agent: TableOperationAgent | None = None,
+        operation_agent: TableModelAgent | None = None,
         column_graph: ColumnGraphAppender | None = None,
+        saved: SavedTableContextReader | None = None,
+        context_writer: TableContextWriter | None = None,
+        subgraph: TableSubgraphReader | None = None,
     ) -> None:
         self._defaults: KnowledgeDefaults = defaults or KnowledgeDefaults()
         self._catalog: CatalogContextProvider = catalog
@@ -49,8 +58,11 @@ class TableAgentFactory:
         self._graph: GraphContextProvider = graph
         self._lineage: LineageContextProvider = lineage
         self._publisher: GraphPublisher | None = publisher
-        self._operation_agent: TableOperationAgent | None = operation_agent
+        self._operation_agent: TableModelAgent | None = operation_agent
         self._column_graph: ColumnGraphAppender | None = column_graph
+        self._saved: SavedTableContextReader | None = saved
+        self._context_writer: TableContextWriter | None = context_writer
+        self._subgraph: TableSubgraphReader | None = subgraph
         self._contexts: TableContextBuilder = TableContextBuilder(
             catalog=catalog,
             profiler=profiler,
@@ -72,6 +84,9 @@ class TableAgentFactory:
             publisher=self._publisher,
             operation_agent=self._operation_agent,
             column_graph=self._column_graph,
+            saved=self._saved,
+            context_writer=self._context_writer,
+            subgraph=self._subgraph,
         )
 
 
@@ -82,15 +97,16 @@ def build_table_agent_factory(
     profiler: DataProfiler,
     defaults: KnowledgeDefaults | None = None,
     publisher: GraphPublisher | None = None,
-    operation_agent: TableOperationAgent | None = None,
+    operation_agent: TableModelAgent | None = None,
     column_graph: ColumnGraphAppender | None = None,
+    subgraph: TableSubgraphReader | None = None,
 ) -> TableAgentFactory:
-    """Wire PostgreSQL, the graph projection, Marquez, and the operation agent.
+    """Wire PostgreSQL, the graph projection, Marquez, and the table model agent.
 
     ``graph`` is read with ``relationships``. ``publisher`` writes the full Neo4j
     projection when an operation calls ``publish_graph``. ``column_graph`` writes
-    a column subgraph when ``build_context`` runs. Without ``operation_agent``,
-    ``run`` fails until a model is configured.
+    a column subgraph when ``build_context`` runs. ``operation_agent`` serves both
+    ``run`` and ``describe_*``; without it they fail until a model is configured.
     """
     repository: RegistryRepository = RegistryRepository(session)
     return TableAgentFactory(
@@ -102,4 +118,7 @@ def build_table_agent_factory(
         publisher=publisher,
         operation_agent=operation_agent,
         column_graph=column_graph,
+        saved=KnowledgeContextStore(session),
+        context_writer=SemanticContextStore(session),
+        subgraph=subgraph,
     )

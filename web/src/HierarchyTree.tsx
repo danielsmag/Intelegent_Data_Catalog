@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams, type NavigateFunction } from
 import { errorMessage, isAbortError } from "./api"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
-import { Chevron, PanelChevron, PlusIcon, SchemaIcon, SearchIcon, SpaceIcon, TableIcon } from "./icons"
+import { Chevron, PanelChevron, PlusIcon, ScopeIcon, SearchIcon, SpaceIcon, TableIcon } from "./icons"
 import {
   createScope,
   createSpace,
@@ -131,7 +131,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
           <SpaceIcon /> Space
         </span>
         <span className="figure-scope">
-          <SchemaIcon /> Scope
+          <ScopeIcon /> Scope
         </span>
         <span className="figure-table">
           <TableIcon /> Table
@@ -254,7 +254,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                             className="tree-link figure-scope"
                             aria-current={scopeSelected ? "page" : undefined}
                           >
-                            <SchemaIcon />
+                            <ScopeIcon />
                             <span className="tree-label">{scope.name}</span>
                           </Link>
                         </div>

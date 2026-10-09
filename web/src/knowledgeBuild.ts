@@ -1,10 +1,14 @@
 import { errorMessage } from "./api"
 import { showPageAlert, type PageAlertTone } from "./pageAlertStack"
 import {
+  fetchContextGeneration,
   fetchKnowledgeBuild,
   fetchScopeBuild,
+  startContextGeneration,
   startKnowledgeBuild,
   startScopeBuild,
+  type ContextGenerationJob,
+  type ContextSubjectKind,
   type KnowledgeBuildJob,
   type ScopeBuildJob,
 } from "./registryApi"
@@ -129,4 +133,28 @@ export async function requestScopeBuild(scopeId: string): Promise<ScopeBuildJob>
 
 export function followScopeBuild(job: ScopeBuildJob): void {
   scopeBuilds.follow(job)
+}
+
+const contextGenerations: BuildFollower<ContextGenerationJob> = createFollower(
+  fetchContextGeneration,
+  (job: ContextGenerationJob): string => outcome(job.subject_name, job.status, job.error),
+)
+
+export function onContextGenerationFinished(
+  handler: FinishedHandler<ContextGenerationJob>,
+): () => void {
+  return contextGenerations.onFinished(handler)
+}
+
+export async function requestContextGeneration(
+  kind: ContextSubjectKind,
+  id: string,
+): Promise<ContextGenerationJob> {
+  const job: ContextGenerationJob = await startContextGeneration(kind, id)
+  contextGenerations.follow(job)
+  return job
+}
+
+export function followContextGeneration(job: ContextGenerationJob): void {
+  contextGenerations.follow(job)
 }

@@ -17,6 +17,7 @@ from intelegent_data_catalog.exceptions import (
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
     BindingRole,
+    ContextOrigin,
     EngineType,
     SyncRunStatus,
     TableStatus,
@@ -181,6 +182,8 @@ class RegistryService:
             row.slug = slug
         if "description" in changes:
             row.description = patch.description
+        if "context" in changes:
+            _apply_user_context(row, patch.context)
         row.updated_at = utc_now()
         self._repo.commit()
         return scope_read(row)
@@ -317,6 +320,8 @@ class RegistryService:
             row.display_name = patch.display_name
         if "description" in changes:
             row.description = patch.description
+        if "context" in changes:
+            _apply_user_context(row, patch.context)
         if "status" in changes:
             row.status = _required(patch.status, "status").value
         if "table_format" in changes:
@@ -397,6 +402,10 @@ class RegistryService:
         self._repo.commit()
         return column_read(stored)
 
+    def get_column(self, column_id: UUID) -> ColumnRead:
+        """Return one column."""
+        return column_read(self._column(column_id))
+
     def list_columns(self, table_id: UUID) -> list[ColumnRead]:
         """List columns on a table."""
         self._table(table_id)
@@ -408,6 +417,8 @@ class RegistryService:
         changes: dict[str, object] = patch.model_dump(exclude_unset=True)
         if "description" in changes:
             row.description = patch.description
+        if "context" in changes:
+            _apply_user_context(row, patch.context)
         if "data_type" in changes:
             row.data_type = patch.data_type
         if "nullable" in changes:
@@ -1036,6 +1047,15 @@ class RegistryService:
         if row is None:
             raise EntityNotFoundError("sync run", str(sync_run_id))
         return row
+
+
+def _apply_user_context(row: ScopeRow | CatalogTableRow | ColumnRow, value: str | None) -> None:
+    """Store a manual context edit. Blank text clears both the text and the origin."""
+    text: str | None = None if value is None else value.strip()
+    if text == "":
+        text = None
+    row.context = text
+    row.context_origin = None if text is None else ContextOrigin.USER.value
 
 
 def _slug_for(name: str, explicit: str | None) -> str:
