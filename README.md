@@ -42,6 +42,7 @@ docker compose logs -f spark-lineage
 | Marquez lineage UI | http://localhost:3000 |
 | Catalog API | http://localhost:8090 |
 | Catalog UI | http://localhost:5173 |
+| Celery Flower | http://localhost:5555 |
 | OpenObserve | http://localhost:5080 |
 
 MinIO is the S3 warehouse (`warehouse` bucket). Official `minio/minio` images are not anonymously pullable, so Compose pins `elestio/minio` at a digest. Spark in Compose talks to `http://minio:9000`; host clients use `http://localhost:9000`.

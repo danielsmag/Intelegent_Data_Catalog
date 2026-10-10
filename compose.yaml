@@ -2,6 +2,36 @@ name: intelegent-data-catalog
 
 # Neo4j plus an Iceberg catalog (Apache Polaris) and OpenLineage (Marquez).
 
+# Ollama runs on the host. 127.0.0.1 inside a container is not that server.
+x-catalog-environment: &catalog-environment
+  CATALOG_API__HOST: 0.0.0.0
+  CATALOG_API__PORT: "8090"
+  CATALOG_QUERY__SPARK_URL: http://spark-sql:8091
+  CATALOG_POLARIS__URI: http://polaris:8181
+  CATALOG_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
+  CATALOG_POLARIS__CATALOG: ${POLARIS_CATALOG_NAME:-catalog}
+  CATALOG_POLARIS__CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
+  CATALOG_POLARIS__CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+  CATALOG_DATABASE__URL: postgresql+psycopg://${CATALOG_DB_USER:-catalog}:${CATALOG_DB_PASSWORD:-catalog}@postgres:5432/${CATALOG_DB_NAME:-catalog}
+  CATALOG_DATABASE__AUTO_MIGRATE: "true"
+  CATALOG_TRINO__ENABLED: "true"
+  CATALOG_TRINO__HOST: trino
+  CATALOG_TRINO__PORT: "8080"
+  CATALOG_NEO4J__ENABLED: "true"
+  CATALOG_NEO4J__URI: bolt://neo4j:7687
+  CATALOG_NEO4J__USER: ${NEO4J_USER:-neo4j}
+  CATALOG_NEO4J__PASSWORD: ${NEO4J_PASSWORD:-password}
+  CATALOG_LLM__PROVIDER: ollama
+  CATALOG_LLM__BASE_URL: http://host.docker.internal:11434
+  CATALOG_LLM__MODEL: ${CATALOG_OLLAMA_MODEL:-qwen3:4b}
+  CATALOG_MARQUEZ__ENABLED: "true"
+  CATALOG_MARQUEZ__URL: http://marquez:5000
+  CATALOG_OBSERVABILITY__ENABLED: "true"
+  CATALOG_OBSERVABILITY__ENDPOINT: http://openobserve:5080/api/default
+  CATALOG_OBSERVABILITY__USERNAME: ${OPENOBSERVE_USER:-root@example.com}
+  CATALOG_OBSERVABILITY__PASSWORD: ${OPENOBSERVE_PASSWORD:-Local-observe-1}
+  CATALOG_CELERY__BROKER_URL: redis://redis:6379/0
+
 services:
   neo4j:
     image: neo4j:5.26-community
@@ -267,6 +297,18 @@ services:
       - vector_data:/var/lib/vector
     command: ["--config", "/etc/vector/vector.yaml"]
 
+  redis:
+    image: redis:7-alpine
+    container_name: intelegent-data-catalog-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   catalog-api:
     build:
       context: .
@@ -287,36 +329,11 @@ services:
         condition: service_healthy
       openobserve:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${CATALOG_API_PORT:-8090}:8090"
-    environment:
-      CATALOG_API__HOST: 0.0.0.0
-      CATALOG_API__PORT: "8090"
-      CATALOG_QUERY__SPARK_URL: http://spark-sql:8091
-      CATALOG_POLARIS__URI: http://polaris:8181
-      CATALOG_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
-      CATALOG_POLARIS__CATALOG: ${POLARIS_CATALOG_NAME:-catalog}
-      CATALOG_POLARIS__CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
-      CATALOG_POLARIS__CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
-      CATALOG_DATABASE__URL: postgresql+psycopg://${CATALOG_DB_USER:-catalog}:${CATALOG_DB_PASSWORD:-catalog}@postgres:5432/${CATALOG_DB_NAME:-catalog}
-      CATALOG_DATABASE__AUTO_MIGRATE: "true"
-      CATALOG_TRINO__ENABLED: "true"
-      CATALOG_TRINO__HOST: trino
-      CATALOG_TRINO__PORT: "8080"
-      CATALOG_NEO4J__ENABLED: "true"
-      CATALOG_NEO4J__URI: bolt://neo4j:7687
-      CATALOG_NEO4J__USER: ${NEO4J_USER:-neo4j}
-      CATALOG_NEO4J__PASSWORD: ${NEO4J_PASSWORD:-password}
-      # Ollama runs on the host. 127.0.0.1 inside this container is not that server.
-      CATALOG_LLM__PROVIDER: ollama
-      CATALOG_LLM__BASE_URL: http://host.docker.internal:11434
-      CATALOG_LLM__MODEL: ${CATALOG_OLLAMA_MODEL:-qwen3:4b}
-      CATALOG_MARQUEZ__ENABLED: "true"
-      CATALOG_MARQUEZ__URL: http://marquez:5000
-      CATALOG_OBSERVABILITY__ENABLED: "true"
-      CATALOG_OBSERVABILITY__ENDPOINT: http://openobserve:5080/api/default
-      CATALOG_OBSERVABILITY__USERNAME: ${OPENOBSERVE_USER:-root@example.com}
-      CATALOG_OBSERVABILITY__PASSWORD: ${OPENOBSERVE_PASSWORD:-Local-observe-1}
+    environment: *catalog-environment
     healthcheck:
       test:
         [
@@ -329,6 +346,54 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  catalog-worker:
+    image: intelegent-data-catalog-api:local
+    container_name: intelegent-data-catalog-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "intelegent_data_catalog.jobs.celery_app", "worker", "-E"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      catalog-api:
+        condition: service_healthy
+    environment: *catalog-environment
+
+  catalog-beat:
+    image: intelegent-data-catalog-api:local
+    container_name: intelegent-data-catalog-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "intelegent_data_catalog.jobs.celery_app", "beat"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      catalog-api:
+        condition: service_healthy
+    environment: *catalog-environment
+
+  catalog-flower:
+    image: intelegent-data-catalog-api:local
+    container_name: intelegent-data-catalog-flower
+    restart: unless-stopped
+    command:
+      [
+        "celery",
+        "-A",
+        "intelegent_data_catalog.jobs.celery_app",
+        "flower",
+        "--address=0.0.0.0",
+        "--port=5555",
+      ]
+    depends_on:
+      redis:
+        condition: service_healthy
+      catalog-api:
+        condition: service_healthy
+    ports:
+      - "${CATALOG_FLOWER_PORT:-5555}:5555"
+    environment:
+      <<: *catalog-environment
+      FLOWER_UNAUTHENTICATED_API: "true"
 
   catalog-ui:
     build:

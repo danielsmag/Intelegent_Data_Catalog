@@ -4,6 +4,7 @@ import { fetchAirflowTree, type AirflowDag, type AirflowTree } from "./airflowAp
 import { bumpAirflowRevision, useAirflowRevision } from "./airflowSidebarStore"
 import { errorMessage, isAbortError } from "./api"
 import { AirflowIcon, Chevron, PanelChevron, PlusIcon, RefreshIcon, SchemaIcon, SearchIcon } from "./icons"
+import { ResizeHandle } from "./ResizeHandle"
 
 type AirflowSidebarProps = {
   collapsed: boolean
@@ -202,6 +203,7 @@ export function AirflowSidebar(props: AirflowSidebarProps): ReactElement {
           </div>
         </>
       )}
+      {props.collapsed ? null : <ResizeHandle pane="sidebar" edge="end" label="Resize sidebar" />}
     </aside>
   )
 }

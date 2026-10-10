@@ -11,6 +11,8 @@ RUN uv sync --frozen --no-install-project --no-dev
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
+COPY settings.toml ./
+
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8090
 CMD ["intelegent-data-catalog-api"]

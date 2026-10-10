@@ -343,15 +343,20 @@ export type KnowledgeBuildJob = {
   error: string | null
 }
 
-export async function startKnowledgeBuild(tableId: string): Promise<KnowledgeBuildJob> {
+export type TableBuildOptions = {
+  include_data_profile: boolean
+  include_graph: boolean
+  include_lineage: boolean
+}
+
+export async function startKnowledgeBuild(
+  tableId: string,
+  options: TableBuildOptions,
+): Promise<KnowledgeBuildJob> {
   const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      include_data_profile: false,
-      include_graph: true,
-      include_lineage: true,
-    }),
+    body: JSON.stringify(options),
   })
   if (!response.ok) {
     throw new Error(await readDetail(response))
@@ -447,15 +452,17 @@ export type ScopeBuildJob = {
   error: string | null
 }
 
-export async function startScopeBuild(scopeId: string): Promise<ScopeBuildJob> {
+export type ScopeBuildOptions = {
+  include_table_knowledge: boolean
+  include_previous: boolean
+  include_summary: boolean
+}
+
+export async function startScopeBuild(scopeId: string, options: ScopeBuildOptions): Promise<ScopeBuildJob> {
   const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      include_table_knowledge: true,
-      include_previous: true,
-      include_summary: true,
-    }),
+    body: JSON.stringify(options),
   })
   if (!response.ok) {
     throw new Error(await readDetail(response))
@@ -541,15 +548,17 @@ export type SpaceBuildJob = {
   error: string | null
 }
 
-export async function startSpaceBuild(spaceId: string): Promise<SpaceBuildJob> {
+export type SpaceBuildOptions = {
+  include_scope_knowledge: boolean
+  include_previous: boolean
+  include_summary: boolean
+}
+
+export async function startSpaceBuild(spaceId: string, options: SpaceBuildOptions): Promise<SpaceBuildJob> {
   const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      include_scope_knowledge: true,
-      include_previous: true,
-      include_summary: true,
-    }),
+    body: JSON.stringify(options),
   })
   if (!response.ok) {
     throw new Error(await readDetail(response))

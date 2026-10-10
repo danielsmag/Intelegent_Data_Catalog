@@ -5,20 +5,12 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
 
+import intelegent_data_catalog.jobs.celery_app as catalog_celery
 from intelegent_data_catalog.api.app import configure_app
 from intelegent_data_catalog.api.container import AppContainer
-from intelegent_data_catalog.jobs.catalog import (
-    CatalogContextGeneration,
-    CatalogKnowledgeBuild,
-    CatalogScopeBuild,
-    CatalogSpaceBuild,
-)
-from intelegent_data_catalog.jobs.queue import (
-    ContextGenerationQueue,
-    KnowledgeBuildQueue,
-    ScopeBuildQueue,
-    SpaceBuildQueue,
-)
+from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
+from intelegent_data_catalog.jobs.publisher import CeleryJobPublisher
+from intelegent_data_catalog.jobs.runtime import set_job_container
 
 
 def create_app(container: AppContainer | None = None) -> FastAPI:
@@ -29,10 +21,9 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
         lifespan=_lifespan(app_container),
     )
     app.state.container = app_container
-    app.state.knowledge_builds = KnowledgeBuildQueue(CatalogKnowledgeBuild(app_container))
-    app.state.scope_builds = ScopeBuildQueue(CatalogScopeBuild(app_container))
-    app.state.space_builds = SpaceBuildQueue(CatalogSpaceBuild(app_container))
-    app.state.context_generations = ContextGenerationQueue(CatalogContextGeneration(app_container))
+    app.state.celery_app = catalog_celery.celery_app
+    set_job_container(app_container)
+    app.state.catalog_jobs = CatalogJobs(app_container.database(), CeleryJobPublisher())
     configure_app(app)
     return app
 

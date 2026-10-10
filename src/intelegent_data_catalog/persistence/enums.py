@@ -136,6 +136,31 @@ class AirflowMappingDirection(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class CatalogJobKind(StrEnum):
+    """Which background build a catalog job row runs."""
+
+    KNOWLEDGE = "knowledge"
+    SCOPE = "scope"
+    SPACE = "space"
+    CONTEXT = "context"
+
+
+class CatalogJobStatus(StrEnum):
+    """Outcome stored for a background build. Matches the API job read."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class RefreshSubjectKind(StrEnum):
+    """Which catalog entity a saved configuration row belongs to."""
+
+    SPACE = "space"
+    SCOPE = "scope"
+    TABLE = "table"
+
+
 class CapabilitySupport(StrEnum):
     """Whether a source binding claims a metadata feature.
 

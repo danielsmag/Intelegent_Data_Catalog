@@ -4,6 +4,7 @@ import { useTabParam } from "./useTabParam"
 import { ActivityBar } from "./ActivityBar"
 import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
+import { ConfigRail, optionsFromFields } from "./ConfigRail"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { ContextEditor } from "./ContextEditor"
@@ -16,6 +17,7 @@ import {
   followKnowledgeBuild,
   followScopeBuild,
   followSpaceBuild,
+  useRunningJobWatch,
   onContextGenerationFinished,
   onKnowledgeBuildFinished,
   onScopeBuildFinished,
@@ -26,9 +28,11 @@ import {
   requestSpaceBuild,
 } from "./knowledgeBuild"
 import { HierarchyTree } from "./HierarchyTree"
+import { PageSlot } from "./PageSlot"
 import { PanelChevron, PlusIcon } from "./icons"
 import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { errorMessage, isAbortError } from "./api"
+import { useDeadlineLabel, useEntityConfig, type EntityConfigController, type OptionField } from "./refreshSettings"
 import {
   fetchKnowledgeContext,
   fetchLatestKnowledgeBuild,
@@ -79,7 +83,12 @@ import {
 
 type TabName = "overview" | "columns" | "relationships" | "lineage" | "graph" | "source"
 
-function Shell(props: { status: string; tree?: boolean; children: ReactElement }): ReactElement {
+function Shell(props: {
+  status: string
+  tree?: boolean
+  config?: ReactElement
+  children: ReactElement
+}): ReactElement {
   const sidebarOpen: boolean = useSpacesSidebarOpen()
   return (
     <div className="shell">
@@ -95,8 +104,11 @@ function Shell(props: { status: string; tree?: boolean; children: ReactElement }
           />
         ) : null}
         <main className="main">
-          <div className="main-scroll">{props.children}</div>
+          <div className="main-scroll">
+            <PageSlot>{props.children}</PageSlot>
+          </div>
         </main>
+        {props.config ?? null}
       </div>
       <footer className="status">
         <span>Spaces</span>
@@ -282,6 +294,12 @@ const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "graph"]
 
 type SpaceTab = "overview" | "scopes" | "graph"
 
+const SPACE_OPTION_FIELDS: readonly OptionField[] = [
+  { key: "include_scope_knowledge", label: "Include scope knowledge", defaultValue: true },
+  { key: "include_previous", label: "Keep previous findings", defaultValue: true },
+  { key: "include_summary", label: "Write summary", defaultValue: true },
+]
+
 export function SpacePage(): ReactElement {
   const spaceId: string = useParams().spaceId ?? ""
   const revision: number = useCatalogRevision()
@@ -296,6 +314,16 @@ export function SpacePage(): ReactElement {
   const [building, setBuilding] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<boolean>(false)
+  const config: EntityConfigController = useEntityConfig("space", spaceId, SPACE_OPTION_FIELDS)
+  const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
+  useRunningJobWatch(
+    config.loaded && config.enabled,
+    (signal: AbortSignal) => fetchLatestSpaceBuild(spaceId, signal),
+    followSpaceBuild,
+    () => {
+      setBuilding(true)
+    },
+  )
   useEffect(() => {
     setCreating(false)
     setBuilding(false)
@@ -403,7 +431,11 @@ export function SpacePage(): ReactElement {
   function runBuildContext(): void {
     setBuilding(true)
     setKnowledgeError(null)
-    void requestSpaceBuild(spaceId)
+    void requestSpaceBuild(spaceId, {
+      include_scope_knowledge: config.options.include_scope_knowledge ?? true,
+      include_previous: config.options.include_previous ?? true,
+      include_summary: config.options.include_summary ?? true,
+    })
       .then((job: SpaceBuildJob) => {
         setBuilding(job.status === "running")
       })
@@ -430,7 +462,21 @@ export function SpacePage(): ReactElement {
       ? null
       : [...scopeTables.values()].reduce((sum: number, count: number) => sum + count, 0)
   return (
-    <Shell status={space?.name ?? "Space"} tree>
+    <Shell
+      status={space?.name ?? "Space"}
+      tree
+      config={
+        <ConfigRail
+          minutes={config.minutes}
+          enabled={config.enabled}
+          busy={config.busy}
+          error={config.error}
+          detail={rebuildDetail(config, rebuildLabel)}
+          options={optionsFromFields(SPACE_OPTION_FIELDS, config.options)}
+          onCommit={config.commit}
+        />
+      }
+    >
       <section className={tab === "graph" ? "catalog-page catalog-page-graph" : "catalog-page"}>
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -587,6 +633,12 @@ const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "graph"]
 
 type ScopeTab = "overview" | "tables" | "graph"
 
+const SCOPE_OPTION_FIELDS: readonly OptionField[] = [
+  { key: "include_table_knowledge", label: "Include table knowledge", defaultValue: true },
+  { key: "include_previous", label: "Keep previous findings", defaultValue: true },
+  { key: "include_summary", label: "Write summary", defaultValue: true },
+]
+
 export function ScopePage(): ReactElement {
   const scopeId: string = useParams().scopeId ?? ""
   const revision: number = useCatalogRevision()
@@ -601,6 +653,16 @@ export function ScopePage(): ReactElement {
   const [building, setBuilding] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [attaching, setAttaching] = useState<boolean>(false)
+  const config: EntityConfigController = useEntityConfig("scope", scopeId, SCOPE_OPTION_FIELDS)
+  const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
+  useRunningJobWatch(
+    config.loaded && config.enabled,
+    (signal: AbortSignal) => fetchLatestScopeBuild(scopeId, signal),
+    followScopeBuild,
+    () => {
+      setBuilding(true)
+    },
+  )
   useEffect(() => {
     setAttaching(false)
     setSpaceName(null)
@@ -710,7 +772,11 @@ export function ScopePage(): ReactElement {
   function runBuildContext(): void {
     setBuilding(true)
     setKnowledgeError(null)
-    void requestScopeBuild(scopeId)
+    void requestScopeBuild(scopeId, {
+      include_table_knowledge: config.options.include_table_knowledge ?? true,
+      include_previous: config.options.include_previous ?? true,
+      include_summary: config.options.include_summary ?? true,
+    })
       .then((job: ScopeBuildJob) => {
         setBuilding(job.status === "running")
       })
@@ -736,7 +802,21 @@ export function ScopePage(): ReactElement {
       ? scope.description
       : "Tables attached to this scope."
   return (
-    <Shell status={scope?.name ?? "Scope"} tree>
+    <Shell
+      status={scope?.name ?? "Scope"}
+      tree
+      config={
+        <ConfigRail
+          minutes={config.minutes}
+          enabled={config.enabled}
+          busy={config.busy}
+          error={config.error}
+          detail={rebuildDetail(config, rebuildLabel)}
+          options={optionsFromFields(SCOPE_OPTION_FIELDS, config.options)}
+          onCommit={config.commit}
+        />
+      }
+    >
       <section className={tab === "graph" ? "catalog-page catalog-page-graph" : "catalog-page"}>
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -878,10 +958,29 @@ export function ScopePage(): ReactElement {
   )
 }
 
+function rebuildDetail(config: EntityConfigController, label: string | null): string | null {
+  if (!config.loaded) {
+    return null
+  }
+  if (!config.enabled) {
+    return "Automatic refresh is off."
+  }
+  return label
+}
+
 const TABLE_TABS: readonly TabName[] = ["overview", "columns", "relationships", "lineage", "graph", "source"]
+
+const TABLE_OPTION_FIELDS: readonly OptionField[] = [
+  { key: "include_graph", label: "Include graph", defaultValue: true },
+  { key: "include_lineage", label: "Include lineage", defaultValue: true },
+  { key: "include_data_profile", label: "Include data profile", defaultValue: false },
+]
 
 export function RegistryTablePage(): ReactElement {
   const tableId: string = useParams().tableId ?? ""
+  const revision: number = useCatalogRevision()
+  const config: EntityConfigController = useEntityConfig("table", tableId, TABLE_OPTION_FIELDS)
+  const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
   const [tab, selectTab] = useTabParam<TabName>(TABLE_TABS, "overview")
   const [table, setTable] = useState<CatalogTableRecord | null>(null)
   const [columns, setColumns] = useState<CatalogColumnRecord[]>([])
@@ -898,12 +997,22 @@ export function RegistryTablePage(): ReactElement {
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
   const [columnsBuilding, setColumnsBuilding] = useState<boolean>(false)
+  useRunningJobWatch(
+    config.loaded && config.enabled,
+    (signal: AbortSignal) => fetchLatestKnowledgeBuild(tableId, signal),
+    followKnowledgeBuild,
+    () => {
+      setBuilding(true)
+    },
+  )
   const loadAbort = useRef<AbortController | null>(null)
+  useEffect(() => {
+    setBuilding(false)
+    setColumnsBuilding(false)
+  }, [tableId])
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setError(null)
-    setBuilding(false)
-    setColumnsBuilding(false)
     void Promise.all([
       fetchCatalogTable(tableId, controller.signal),
       fetchCatalogColumns(tableId, controller.signal),
@@ -999,7 +1108,7 @@ export function RegistryTablePage(): ReactElement {
       controller.abort()
       knowledgeController.abort()
     }
-  }, [tableId])
+  }, [tableId, revision])
   useEffect(() => {
     return onKnowledgeBuildFinished((job: KnowledgeBuildJob) => {
       if (job.table_id !== tableId) {
@@ -1081,7 +1190,11 @@ export function RegistryTablePage(): ReactElement {
   function runBuildContext(): void {
     setBuilding(true)
     setKnowledgeError(null)
-    void requestKnowledgeBuild(tableId)
+    void requestKnowledgeBuild(tableId, {
+      include_data_profile: config.options.include_data_profile ?? false,
+      include_graph: config.options.include_graph ?? true,
+      include_lineage: config.options.include_lineage ?? true,
+    })
       .then((job: KnowledgeBuildJob) => {
         setBuilding(job.status === "running")
       })
@@ -1107,7 +1220,21 @@ export function RegistryTablePage(): ReactElement {
   }
   const qualified: string = table?.source_key ?? "Table"
   return (
-    <Shell status={qualified} tree>
+    <Shell
+      status={qualified}
+      tree
+      config={
+        <ConfigRail
+          minutes={config.minutes}
+          enabled={config.enabled}
+          busy={config.busy}
+          error={config.error}
+          detail={rebuildDetail(config, rebuildLabel)}
+          options={optionsFromFields(TABLE_OPTION_FIELDS, config.options)}
+          onCommit={config.commit}
+        />
+      }
+    >
       <section className={tab === "graph" ? "section-fill" : undefined}>
         <p className="crumb">
           <Link to="/spaces">Spaces</Link>

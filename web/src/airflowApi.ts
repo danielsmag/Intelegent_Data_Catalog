@@ -219,6 +219,40 @@ export async function syncAirflowInstance(instanceId: string): Promise<AirflowSy
   return sendJson<AirflowSyncRun>(`/api/v1/airflow/instances/${instanceId}/sync`, "POST", {})
 }
 
+export type SyncSchedule = {
+  id: string
+  source_engine_binding_id: string | null
+  airflow_instance_id: string | null
+  interval_seconds: number
+  enabled: boolean
+  next_run_at: string
+}
+
+export async function fetchAirflowSchedule(
+  instanceId: string,
+  signal: AbortSignal,
+): Promise<SyncSchedule | null> {
+  const response: Response = await fetch(`/api/v1/airflow/instances/${instanceId}/schedule`, { signal })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as SyncSchedule
+}
+
+export async function saveAirflowSchedule(
+  instanceId: string,
+  intervalSeconds: number,
+  enabled: boolean,
+): Promise<SyncSchedule> {
+  return sendJson<SyncSchedule>(`/api/v1/airflow/instances/${instanceId}/schedule`, "PUT", {
+    interval_seconds: intervalSeconds,
+    enabled,
+  })
+}
+
 export async function fetchAirflowOverview(instanceId: string, signal: AbortSignal): Promise<AirflowOverview> {
   return readJson<AirflowOverview>(`/api/v1/airflow/instances/${instanceId}/overview`, signal)
 }

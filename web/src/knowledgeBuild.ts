@@ -1,3 +1,4 @@
+import { useEffect, useRef, type MutableRefObject } from "react"
 import { errorMessage } from "./api"
 import { showPageAlert, type PageAlertTone } from "./pageAlertStack"
 import {
@@ -13,7 +14,10 @@ import {
   type ContextSubjectKind,
   type KnowledgeBuildJob,
   type ScopeBuildJob,
+  type ScopeBuildOptions,
   type SpaceBuildJob,
+  type SpaceBuildOptions,
+  type TableBuildOptions,
 } from "./registryApi"
 
 type BuildStatus = {
@@ -114,8 +118,11 @@ export function onKnowledgeBuildFinished(handler: FinishedHandler<KnowledgeBuild
   return tableBuilds.onFinished(handler)
 }
 
-export async function requestKnowledgeBuild(tableId: string): Promise<KnowledgeBuildJob> {
-  const job: KnowledgeBuildJob = await startKnowledgeBuild(tableId)
+export async function requestKnowledgeBuild(
+  tableId: string,
+  options: TableBuildOptions,
+): Promise<KnowledgeBuildJob> {
+  const job: KnowledgeBuildJob = await startKnowledgeBuild(tableId, options)
   tableBuilds.follow(job)
   return job
 }
@@ -128,8 +135,11 @@ export function onScopeBuildFinished(handler: FinishedHandler<ScopeBuildJob>): (
   return scopeBuilds.onFinished(handler)
 }
 
-export async function requestScopeBuild(scopeId: string): Promise<ScopeBuildJob> {
-  const job: ScopeBuildJob = await startScopeBuild(scopeId)
+export async function requestScopeBuild(
+  scopeId: string,
+  options: ScopeBuildOptions,
+): Promise<ScopeBuildJob> {
+  const job: ScopeBuildJob = await startScopeBuild(scopeId, options)
   scopeBuilds.follow(job)
   return job
 }
@@ -153,8 +163,11 @@ export function onSpaceBuildFinished(handler: FinishedHandler<SpaceBuildJob>): (
   return spaceBuilds.onFinished(handler)
 }
 
-export async function requestSpaceBuild(spaceId: string): Promise<SpaceBuildJob> {
-  const job: SpaceBuildJob = await startSpaceBuild(spaceId)
+export async function requestSpaceBuild(
+  spaceId: string,
+  options: SpaceBuildOptions,
+): Promise<SpaceBuildJob> {
+  const job: SpaceBuildJob = await startSpaceBuild(spaceId, options)
   spaceBuilds.follow(job)
   return job
 }
@@ -185,4 +198,47 @@ export async function requestContextGeneration(
 
 export function followContextGeneration(job: ContextGenerationJob): void {
   contextGenerations.follow(job)
+}
+
+export function useRunningJobWatch<Job extends BuildStatus>(
+  enabled: boolean,
+  load: (signal: AbortSignal) => Promise<Job | null>,
+  follow: (job: Job) => void,
+  markRunning: () => void,
+): void {
+  const loadRef: MutableRefObject<(signal: AbortSignal) => Promise<Job | null>> = useRef(load)
+  loadRef.current = load
+  const followRef: MutableRefObject<(job: Job) => void> = useRef(follow)
+  followRef.current = follow
+  const markRef: MutableRefObject<() => void> = useRef(markRunning)
+  markRef.current = markRunning
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+    let stopped: boolean = false
+    let inflight: AbortController | null = null
+    const timer: number = window.setInterval(() => {
+      inflight?.abort()
+      const controller: AbortController = new AbortController()
+      inflight = controller
+      void loadRef
+        .current(controller.signal)
+        .then((job: Job | null) => {
+          if (stopped || controller.signal.aborted || job === null || job.status !== "running") {
+            return
+          }
+          markRef.current()
+          followRef.current(job)
+        })
+        .catch(() => {
+          return
+        })
+    }, 2000)
+    return () => {
+      stopped = true
+      inflight?.abort()
+      window.clearInterval(timer)
+    }
+  }, [enabled])
 }

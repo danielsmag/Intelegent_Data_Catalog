@@ -4,6 +4,7 @@ import { errorMessage, isAbortError } from "./api"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { Chevron, PanelChevron, PlusIcon, ScopeIcon, SearchIcon, SpaceIcon, TableIcon } from "./icons"
+import { ResizeHandle } from "./ResizeHandle"
 import {
   createScope,
   createSpace,
@@ -285,6 +286,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
       </div>
         </>
       )}
+      {props.collapsed ? null : <ResizeHandle pane="sidebar" edge="end" label="Resize sidebar" />}
     </aside>
   )
 }

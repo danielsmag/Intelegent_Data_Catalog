@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react"
 import { useSearchParams } from "react-router-dom"
 import { ActivityBar } from "./ActivityBar"
+import { PageSlot } from "./PageSlot"
 import { errorMessage, isAbortError, runQuery } from "./api"
 import { ResultGrid } from "./ResultGrid"
 import type { QueryResult } from "./types"
@@ -67,33 +68,37 @@ export function QueryPage(): ReactElement {
       <div className="workspace">
         <ActivityBar />
         <section className="main">
-          <div className="main-scroll query-layout">
-            <h1>Query</h1>
-            <textarea
-              className="query-editor"
-              aria-label="SQL"
-              spellCheck={false}
-              value={sql}
-              onChange={(event) => {
-                setSql(event.target.value)
-              }}
-              onKeyDown={onKeyDown}
-            />
-            <div className="query-actions">
-              <button
-                type="button"
-                className="button"
-                disabled={loading || sql.trim() === ""}
-                onClick={() => {
-                  setRunId((current: number) => current + 1)
-                }}
-              >
-                {loading ? "Running…" : "Run"}
-              </button>
-              <span className="note">Ctrl/Cmd+Enter</span>
-            </div>
-            {error !== null ? <p className="error-text">{error}</p> : null}
-            {result !== null ? <ResultGrid result={result} /> : null}
+          <div className="main-scroll">
+            <PageSlot>
+              <div className="query-layout">
+                <h1>Query</h1>
+                <textarea
+                  className="query-editor"
+                  aria-label="SQL"
+                  spellCheck={false}
+                  value={sql}
+                  onChange={(event) => {
+                    setSql(event.target.value)
+                  }}
+                  onKeyDown={onKeyDown}
+                />
+                <div className="query-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={loading || sql.trim() === ""}
+                    onClick={() => {
+                      setRunId((current: number) => current + 1)
+                    }}
+                  >
+                    {loading ? "Running…" : "Run"}
+                  </button>
+                  <span className="note">Ctrl/Cmd+Enter</span>
+                </div>
+                {error !== null ? <p className="error-text">{error}</p> : null}
+                {result !== null ? <ResultGrid result={result} /> : null}
+              </div>
+            </PageSlot>
           </div>
         </section>
       </div>

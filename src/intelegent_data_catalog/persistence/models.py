@@ -31,11 +31,14 @@ from intelegent_data_catalog.persistence.enums import (
     AirflowMappingOrigin,
     BindingRole,
     BindingState,
+    CatalogJobKind,
+    CatalogJobStatus,
     ContextOrigin,
     DataSourceType,
     EngineConnectionStatus,
     EngineType,
     MetadataOrigin,
+    RefreshSubjectKind,
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
@@ -741,3 +744,116 @@ class AirflowSyncRunRow(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     counts: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     sanitized_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SyncScheduleRow(Base):
+    """Interval for one Trino binding or one Airflow instance. Beat claims due rows."""
+
+    __tablename__: str = "sync_schedules"
+    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
+        UniqueConstraint("source_engine_binding_id", name="uq_sync_schedules_binding"),
+        UniqueConstraint("airflow_instance_id", name="uq_sync_schedules_instance"),
+        CheckConstraint(
+            "(source_engine_binding_id IS NOT NULL AND airflow_instance_id IS NULL) OR "
+            "(source_engine_binding_id IS NULL AND airflow_instance_id IS NOT NULL)",
+            name="ck_sync_schedules_one_target",
+        ),
+        CheckConstraint("interval_seconds >= 1", name="ck_sync_schedules_interval"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    source_engine_binding_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("source_engine_bindings.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    airflow_instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_instances.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CatalogJobRow(Base):
+    """One background build. Status is shared by the API process and the Celery worker."""
+
+    __tablename__: str = "catalog_jobs"
+    __table_args__: tuple[CheckConstraint | Index, ...] = (
+        _enum_check(
+            "kind",
+            tuple(item.value for item in CatalogJobKind),
+            "ck_catalog_jobs_kind",
+        ),
+        _enum_check(
+            "status",
+            tuple(item.value for item in CatalogJobStatus),
+            "ck_catalog_jobs_status",
+        ),
+        Index(
+            "uq_catalog_jobs_running",
+            "kind",
+            "subject_id",
+            "lane",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+            postgresql_where=text("status = 'running'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    subject_name: Mapped[str] = mapped_column(String(1024), nullable=False)
+    lane: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    options: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+_ONE_CONFIGURATION: str = (
+    "(space_id IS NOT NULL AND scope_id IS NULL AND catalog_table_id IS NULL) OR "
+    "(space_id IS NULL AND scope_id IS NOT NULL AND catalog_table_id IS NULL) OR "
+    "(space_id IS NULL AND scope_id IS NULL AND catalog_table_id IS NOT NULL)"
+)
+
+
+class EntityConfigurationRow(Base):
+    """Saved refresh interval and build options for one space, scope, or table."""
+
+    __tablename__: str = "entity_configurations"
+    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
+        UniqueConstraint("space_id", name="uq_entity_configurations_space"),
+        UniqueConstraint("scope_id", name="uq_entity_configurations_scope"),
+        UniqueConstraint("catalog_table_id", name="uq_entity_configurations_table"),
+        CheckConstraint(_ONE_CONFIGURATION, name="ck_entity_configurations_one_subject"),
+        CheckConstraint("interval_seconds >= 1", name="ck_entity_configurations_interval"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    space_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("spaces.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("scopes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    catalog_table_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("catalog_tables.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    options: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

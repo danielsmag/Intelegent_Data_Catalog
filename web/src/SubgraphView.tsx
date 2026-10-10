@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactElement } from "react"
 import { Link } from "react-router-dom"
+import { ResizeHandle } from "./ResizeHandle"
 import type { GraphEdgeRecord, GraphNodeRecord, GraphViewRecord } from "./registryApi"
 
 const VIEW_WIDTH: number = 1000
@@ -333,16 +334,21 @@ function NodeDetails(props: {
   const node: GraphNodeRecord | null = props.node
   if (node === null) {
     return (
+      <div className="subgraph-details-frame">
+        <ResizeHandle pane="details" edge="start" label="Resize node details" />
       <aside className="subgraph-details">
         <h2>Node details</h2>
         <p className="note">Select a node.</p>
       </aside>
+      </div>
     )
   }
   const links: GraphEdgeRecord[] = props.graph.edges.filter(
     (edge: GraphEdgeRecord) => edge.source === node.id || edge.target === node.id,
   )
   return (
+    <div className="subgraph-details-frame">
+      <ResizeHandle pane="details" edge="start" label="Resize node details" />
     <aside className="subgraph-details" aria-label="Node details">
       <h2>Node details</h2>
       <span className={badgeClass(node.kind)}>{node.kind}</span>
@@ -388,6 +394,7 @@ function NodeDetails(props: {
         })}
       </ul>
     </aside>
+    </div>
   )
 }
 

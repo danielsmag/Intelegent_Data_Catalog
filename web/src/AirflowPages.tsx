@@ -35,13 +35,15 @@ import {
   type AirflowTask,
 } from "./airflowApi"
 import { AirflowSidebar } from "./AirflowSidebar"
+import { PageSlot } from "./PageSlot"
+import { AirflowConfigRail } from "./ConfigRail"
 import { bumpAirflowRevision, setAirflowSidebarOpen, useAirflowRevision, useAirflowSidebarOpen } from "./airflowSidebarStore"
 import { errorMessage, isAbortError } from "./api"
 import { PlusIcon } from "./icons"
 import { searchCatalog, type SearchHitRecord } from "./registryApi"
 import { useTabParam } from "./useTabParam"
 
-function Shell(props: { status: string; children: ReactElement }): ReactElement {
+function Shell(props: { status: string; config?: ReactElement; children: ReactElement }): ReactElement {
   const sidebarOpen: boolean = useAirflowSidebarOpen()
   return (
     <div className="shell">
@@ -54,8 +56,11 @@ function Shell(props: { status: string; children: ReactElement }): ReactElement 
           }}
         />
         <main className="main">
-          <div className="main-scroll">{props.children}</div>
+          <div className="main-scroll">
+            <PageSlot>{props.children}</PageSlot>
+          </div>
         </main>
+        {props.config ?? null}
       </div>
       <footer className="status">
         <span>Airflow</span>
@@ -349,7 +354,7 @@ export function AirflowInstancePage(): ReactElement {
 
   const mappings: AirflowDagTable[] = (dags ?? []).flatMap((dag: AirflowDag) => dag.tables)
   return (
-    <Shell status={instance?.name ?? "Instance"}>
+    <Shell status={instance?.name ?? "Instance"} config={<AirflowConfigRail instanceId={instanceId} />}>
       <section className="catalog-page">
         <header className="catalog-hero">
           <div className="catalog-hero-top">

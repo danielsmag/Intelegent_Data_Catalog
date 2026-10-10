@@ -57,6 +57,13 @@ max_tool_steps = 6
 [airflow]
 timeout_seconds = 30
 
+# How often Beat looks for due rows. The saved configuration interval is the
+# schedule. Beat enqueues a target only when that row is due.
+[celery]
+broker_url = "redis://127.0.0.1:6379/0"
+dispatch_interval_seconds = 60
+task_always_eager = false
+
 # OpenObserve export. Compose sets CATALOG_OBSERVABILITY__ENABLED=true.
 # A host run stays off until that variable is set.
 [observability]

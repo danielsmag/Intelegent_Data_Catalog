@@ -16,13 +16,10 @@ from intelegent_data_catalog.catalog.services.explorer_service import ExplorerSe
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.core.settings import AppSettings
+from intelegent_data_catalog.entity_configuration import EntityConfigurationService
 from intelegent_data_catalog.exceptions import PersistenceUnavailableError
-from intelegent_data_catalog.jobs.queue import (
-    ContextGenerationQueue,
-    KnowledgeBuildQueue,
-    ScopeBuildQueue,
-    SpaceBuildQueue,
-)
+from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
+from intelegent_data_catalog.jobs.schedules import SyncScheduleService
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.service import RegistryService
 
@@ -158,45 +155,56 @@ def get_platform(
 PlatformDep = Annotated[RequestPlatform, Depends(get_platform)]
 
 
-def get_knowledge_builds(request: Request) -> KnowledgeBuildQueue:
-    """Return the process-wide queue created with the application."""
-    queue: object = getattr(request.app.state, "knowledge_builds", None)
-    if not isinstance(queue, KnowledgeBuildQueue):
-        raise RuntimeError("knowledge builds are not configured")
-    return queue
+def get_catalog_jobs(request: Request) -> CatalogJobs:
+    """Return the Postgres-backed starter created with the application."""
+    jobs: object = getattr(request.app.state, "catalog_jobs", None)
+    if not isinstance(jobs, CatalogJobs):
+        raise RuntimeError("catalog jobs are not configured")
+    return jobs
 
 
-KnowledgeBuildDep = Annotated[KnowledgeBuildQueue, Depends(get_knowledge_builds)]
+CatalogJobsDep = Annotated[CatalogJobs, Depends(get_catalog_jobs)]
 
 
-def get_scope_builds(request: Request) -> ScopeBuildQueue:
-    """Return the process-wide scope queue created with the application."""
-    queue: object = getattr(request.app.state, "scope_builds", None)
-    if not isinstance(queue, ScopeBuildQueue):
-        raise RuntimeError("scope builds are not configured")
-    return queue
+def get_sync_schedules(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[SyncScheduleService]:
+    """Open one catalog session for sync schedule reads and writes."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: SyncScheduleService = SyncScheduleService(session)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
-ScopeBuildDep = Annotated[ScopeBuildQueue, Depends(get_scope_builds)]
+SyncScheduleDep = Annotated[SyncScheduleService, Depends(get_sync_schedules)]
 
 
-def get_space_builds(request: Request) -> SpaceBuildQueue:
-    """Return the process-wide space queue created with the application."""
-    queue: object = getattr(request.app.state, "space_builds", None)
-    if not isinstance(queue, SpaceBuildQueue):
-        raise RuntimeError("space builds are not configured")
-    return queue
+def get_entity_configuration(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[EntityConfigurationService]:
+    """Open one catalog session for entity configuration reads and writes."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: EntityConfigurationService = EntityConfigurationService(session)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
-SpaceBuildDep = Annotated[SpaceBuildQueue, Depends(get_space_builds)]
-
-
-def get_context_generations(request: Request) -> ContextGenerationQueue:
-    """Return the process-wide context queue created with the application."""
-    queue: object = getattr(request.app.state, "context_generations", None)
-    if not isinstance(queue, ContextGenerationQueue):
-        raise RuntimeError("context generations are not configured")
-    return queue
-
-
-ContextGenerationDep = Annotated[ContextGenerationQueue, Depends(get_context_generations)]
+EntityConfigurationDep = Annotated[EntityConfigurationService, Depends(get_entity_configuration)]

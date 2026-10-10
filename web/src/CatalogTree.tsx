@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type ReactElement } fro
 import { Link } from "react-router-dom"
 import { catalogTablePath } from "./api"
 import { CatalogIcon, Chevron, RefreshIcon, SchemaIcon, SearchIcon, SourceIcon, TableIcon } from "./icons"
+import { ResizeHandle } from "./ResizeHandle"
 import type { CatalogNode, ExplorerSource, ExplorerTree, NamespaceNode, TableSummary } from "./types"
 
 type CatalogTreeProps = {
@@ -142,6 +143,7 @@ export function CatalogTreePane(props: CatalogTreeProps): ReactElement {
           )
         })}
       </div>
+      <ResizeHandle pane="sidebar" edge="end" label="Resize sidebar" />
     </aside>
   )
 }

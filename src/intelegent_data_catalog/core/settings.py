@@ -198,6 +198,16 @@ class AirflowSettings(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0, le=120)
 
 
+class CelerySettings(BaseModel):
+    """Redis broker and the beat tick. Job status stays in Postgres."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    broker_url: str = Field(default="redis://127.0.0.1:6379/0", min_length=1)
+    dispatch_interval_seconds: float = Field(default=1.0, gt=0)
+    task_always_eager: bool = False
+
+
 class ObservabilitySettings(BaseModel):
     """OTLP export of catalog logs and agent spans. Disabled until configured."""
 
@@ -243,6 +253,7 @@ class AppSettings(BaseSettings):
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
     airflow: AirflowSettings = Field(default_factory=AirflowSettings)
+    celery: CelerySettings = Field(default_factory=CelerySettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 
     @classmethod
