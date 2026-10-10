@@ -1,6 +1,6 @@
 import type { ReactElement } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { BrandMark, CatalogIcon, GraphIcon, QueryIcon, SpaceIcon, TableIcon } from "./icons"
+import { AirflowIcon, BrandMark, CatalogIcon, GraphIcon, QueryIcon, SpaceIcon, TableIcon } from "./icons"
 import { setSpacesSidebarOpen } from "./spacesSidebar"
 
 type Item = {
@@ -24,6 +24,12 @@ export function ActivityBar(): ReactElement {
       label: "Catalog",
       icon: <CatalogIcon />,
       current: path.startsWith("/catalog"),
+    },
+    {
+      to: "/airflow",
+      label: "Airflow",
+      icon: <AirflowIcon />,
+      current: path.startsWith("/airflow"),
     },
     {
       to: "/search",

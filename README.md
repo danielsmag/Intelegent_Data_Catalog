@@ -68,6 +68,12 @@ The UI container serves the built explorer and proxies `/api` to the catalog API
 
 The Spark seed must have run so `sales.customers`, `sales.orders`, and `sales.customer_spend` exist. For a host-only dev server instead of the UI container, run `cd web && npm install && npm run dev`. That Vite server proxies `/api` to `http://127.0.0.1:8090`.
 
+## Airflow
+
+The Airflow page registers Airflow 3 API servers (`POST /auth/token`, then `/api/v2`). A sync stores a DAG snapshot in Postgres and links DAGs to catalog tables from asset URIs, source text, and manual links. From the Compose API container, add `http://airflow-apiserver:8080`. The Airflow compose project already joins `intelegent-data-catalog_default`. From a host `uv run`, use `http://localhost:8082`. The local Airflow user is `admin` and the password is `airflow`.
+
+The password is stored unencrypted in `airflow_instances`. The API never returns it.
+
 ## Querying tables
 
 Sample Data and the Query view run Spark SQL. Compose service `spark-sql` keeps a Spark 4.1.3 session connected to Polaris. The catalog API accepts one read-only statement, then sends it to that session. The seed job uses the same Spark image and Iceberg 1.11. The first query after Spark starts takes longer while the session warms up. Later queries reuse that session.

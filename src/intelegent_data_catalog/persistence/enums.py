@@ -113,6 +113,29 @@ class SyncRunStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class AirflowInstanceStatus(StrEnum):
+    """Whether the catalog should call a registered Airflow instance."""
+
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+
+
+class AirflowMappingOrigin(StrEnum):
+    """How a DAG was linked to a catalog table. Sync never rewrites MANUAL."""
+
+    ASSET = "ASSET"
+    SOURCE_MATCH = "SOURCE_MATCH"
+    MANUAL = "MANUAL"
+
+
+class AirflowMappingDirection(StrEnum):
+    """Whether the DAG reads or writes the catalog table. UNKNOWN is unresolved."""
+
+    INPUT = "INPUT"
+    OUTPUT = "OUTPUT"
+    UNKNOWN = "UNKNOWN"
+
+
 class CapabilitySupport(StrEnum):
     """Whether a source binding claims a metadata feature.
 

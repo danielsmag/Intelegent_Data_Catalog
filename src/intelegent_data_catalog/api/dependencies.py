@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
@@ -104,6 +105,33 @@ def get_scope_attachment(
 
 
 ScopeAttachmentDep = Annotated[ScopeAttachmentService, Depends(get_scope_attachment)]
+
+
+def get_airflow_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[AirflowService]:
+    """Open one catalog session for Airflow instance reads and syncs."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: AirflowService = AirflowService(
+        session,
+        container.http_client(),
+        container.settings().airflow,
+        container.logger().getChild("airflow"),
+    )
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AirflowServiceDep = Annotated[AirflowService, Depends(get_airflow_service)]
 
 
 def get_platform(

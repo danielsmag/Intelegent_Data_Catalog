@@ -1622,6 +1622,72 @@ a.tree-row {
   color: var(--text-strong);
 }
 
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--hover);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.state-success {
+  background: rgba(46, 230, 200, 0.18);
+  color: #9cf3e6;
+}
+
+.state-failed {
+  background: rgba(255, 107, 107, 0.18);
+  color: #ffb4b4;
+}
+
+.state-running {
+  background: rgba(47, 155, 255, 0.22);
+  color: #d7eeff;
+}
+
+.state-queued {
+  background: rgba(255, 196, 80, 0.16);
+  color: #ffe3a3;
+}
+
+.create-form select {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.create-form .check-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.source-code {
+  overflow: auto;
+  max-height: 70vh;
+  margin: 8px 0 0;
+  padding: 12px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre;
+}
+
 @media (max-width: 900px) {
   .subgraph {
     grid-template-columns: 1fr;

@@ -26,6 +26,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from intelegent_data_catalog.persistence.enums import (
+    AirflowInstanceStatus,
+    AirflowMappingDirection,
+    AirflowMappingOrigin,
     BindingRole,
     BindingState,
     ContextOrigin,
@@ -595,3 +598,146 @@ class MarquezMappingRow(Base):
     marquez_dataset_name: Mapped[str] = mapped_column(String(1024), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AirflowInstanceRow(Base):
+    """Registered Airflow 3 deployment. The password is stored and never returned."""
+
+    __tablename__: str = "airflow_instances"
+    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
+        UniqueConstraint("base_url", name="uq_airflow_instances_base_url"),
+        _enum_check(
+            "status",
+            tuple(item.value for item in AirflowInstanceStatus),
+            "ck_airflow_instances_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    password: Mapped[str] = mapped_column(Text, nullable=False)
+    verify_tls: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:
+        """Omit the password. SQLAlchemy's default repr would include it."""
+        return (
+            f"AirflowInstanceRow(id={self.id!r}, name={self.name!r}, "
+            f"slug={self.slug!r}, base_url={self.base_url!r})"
+        )
+
+
+class AirflowDagRow(Base):
+    """Synced DAG snapshot. Live runs are read from Airflow and not stored here."""
+
+    __tablename__: str = "airflow_dags"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("instance_id", "dag_id", name="uq_airflow_dags_instance_dag"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    dag_id: Mapped[str] = mapped_column(String(250), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_paused: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    has_import_errors: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    timetable_summary: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    timetable_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owners: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    fileloc: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    bundle_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    max_active_runs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    next_dagrun_run_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_parsed_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    tasks: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    last_run: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    run_stats: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    source_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AirflowDagTableRow(Base):
+    """DAG to catalog table link. Sync replaces ASSET and SOURCE_MATCH, not MANUAL."""
+
+    __tablename__: str = "airflow_dag_tables"
+    __table_args__: tuple[UniqueConstraint | CheckConstraint | Index, ...] = (
+        UniqueConstraint(
+            "dag_row_id",
+            "catalog_table_id",
+            "origin",
+            name="uq_airflow_dag_tables_link",
+        ),
+        _enum_check(
+            "origin",
+            tuple(item.value for item in AirflowMappingOrigin),
+            "ck_airflow_dag_tables_origin",
+        ),
+        _enum_check(
+            "direction",
+            tuple(item.value for item in AirflowMappingDirection),
+            "ck_airflow_dag_tables_direction",
+        ),
+        Index("ix_airflow_dag_tables_table", "catalog_table_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    dag_row_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_dags.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    catalog_table_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("catalog_tables.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    origin: Mapped[str] = mapped_column(String(32), nullable=False)
+    direction: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AirflowSyncRunRow(Base):
+    """One DAG snapshot sync against an Airflow instance."""
+
+    __tablename__: str = "airflow_sync_runs"
+    __table_args__: tuple[CheckConstraint, ...] = (
+        _enum_check(
+            "status",
+            tuple(item.value for item in SyncRunStatus),
+            "ck_airflow_sync_runs_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    counts: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    sanitized_error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -53,6 +53,10 @@ max_tokens = 2048
 temperature = 0.0
 max_tool_steps = 6
 
+# Airflow 3 REST calls. Instance URL and password are stored per instance.
+[airflow]
+timeout_seconds = 30
+
 # OpenObserve export. Compose sets CATALOG_OBSERVABILITY__ENABLED=true.
 # A host run stays off until that variable is set.
 [observability]

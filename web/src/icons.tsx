@@ -205,6 +205,24 @@ export function LineageIcon(): ReactElement {
   )
 }
 
+export function AirflowIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="3.2" cy="8" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="8" cy="3.3" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="8" cy="12.7" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="12.8" cy="8" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <path
+        d="M4.6 7.2 6.6 4.5M4.6 8.8 6.6 11.5M9.5 4.2 11.4 6.7M9.5 11.8 11.4 9.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+      />
+    </Icon>
+  )
+}
+
 export function GraphIcon(): ReactElement {
   return (
     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">

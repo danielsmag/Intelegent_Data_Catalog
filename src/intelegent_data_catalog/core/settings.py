@@ -190,6 +190,14 @@ class PolarisSettings(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0)
 
 
+class AirflowSettings(BaseModel):
+    """Timeouts for Airflow 3 REST calls. Instance URLs live in the catalog database."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+
 class ObservabilitySettings(BaseModel):
     """OTLP export of catalog logs and agent spans. Disabled until configured."""
 
@@ -234,6 +242,7 @@ class AppSettings(BaseSettings):
     marquez: MarquezSettings = Field(default_factory=MarquezSettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
+    airflow: AirflowSettings = Field(default_factory=AirflowSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 
     @classmethod

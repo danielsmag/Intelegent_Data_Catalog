@@ -9,6 +9,8 @@ from starlette.requests import Request
 
 from intelegent_data_catalog.api.v1.schemas import ErrorResponse
 from intelegent_data_catalog.exceptions import (
+    AirflowAuthError,
+    AirflowUnavailableError,
     CatalogError,
     ConflictError,
     EntityNotFoundError,
@@ -41,6 +43,8 @@ _STATUS_BY_ERROR: dict[type[CatalogError], int] = {
     SparkQueryError: 502,
     PolarisError: 502,
     TrinoUnavailableError: 502,
+    AirflowAuthError: 502,
+    AirflowUnavailableError: 502,
     GraphUnavailableError: 503,
     PersistenceUnavailableError: 503,
 }

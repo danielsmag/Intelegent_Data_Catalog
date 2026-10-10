@@ -1,0 +1,415 @@
+"""SQLAlchemy store for Airflow instances and DAG snapshots."""
+
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import Select, delete, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from intelegent_data_catalog.exceptions import ConflictError
+from intelegent_data_catalog.persistence.clock import utc_now
+from intelegent_data_catalog.persistence.enums import AirflowMappingOrigin
+from intelegent_data_catalog.persistence.models import (
+    AirflowDagRow,
+    AirflowDagTableRow,
+    AirflowInstanceRow,
+    AirflowSyncRunRow,
+    CatalogTableRow,
+)
+
+_CONFLICT: str = "airflow record conflicts with an existing record"
+_DISCOVERED: tuple[str, str] = (
+    AirflowMappingOrigin.ASSET.value,
+    AirflowMappingOrigin.SOURCE_MATCH.value,
+)
+
+
+@dataclass(frozen=True)
+class DagWrite:
+    """Fields applied to one DAG snapshot row."""
+
+    dag_id: str
+    display_name: str | None
+    description: str | None
+    is_paused: bool
+    is_stale: bool
+    has_import_errors: bool
+    timetable_summary: str | None
+    timetable_description: str | None
+    owners: list[str]
+    tags: list[str]
+    fileloc: str | None
+    bundle_name: str | None
+    max_active_runs: int | None
+    next_dagrun_run_after: datetime | None
+    last_parsed_time: datetime | None
+    tasks: list[dict[str, object]]
+    last_run: dict[str, object] | None
+    run_stats: list[dict[str, object]]
+    source_code: str | None
+    source_version: int | None
+
+
+@dataclass(frozen=True)
+class MappingWrite:
+    """Discovered DAG-to-table link. MANUAL is ignored by replace."""
+
+    dag_id: str
+    table_id: uuid.UUID
+    origin: str
+    direction: str
+    evidence: str | None
+
+
+class AirflowRepository:
+    """Reads and writes Airflow rows in one session."""
+
+    def __init__(self, session: Session) -> None:
+        self._session: Session = session
+
+    def add_instance(
+        self,
+        *,
+        name: str,
+        slug: str,
+        base_url: str,
+        username: str,
+        password: str,
+        verify_tls: bool,
+        description: str | None,
+        status: str,
+    ) -> AirflowInstanceRow:
+        """Insert an instance."""
+        now: datetime = utc_now()
+        row: AirflowInstanceRow = AirflowInstanceRow(
+            id=uuid.uuid4(),
+            name=name,
+            slug=slug,
+            base_url=base_url,
+            username=username,
+            password=password,
+            verify_tls=verify_tls,
+            description=description,
+            status=status,
+            last_synced_at=None,
+            last_error=None,
+            created_at=now,
+            updated_at=now,
+        )
+        return self._add(row)
+
+    def list_instances(self) -> list[AirflowInstanceRow]:
+        """Return instances ordered by name."""
+        statement: Select[tuple[AirflowInstanceRow]] = select(AirflowInstanceRow).order_by(
+            AirflowInstanceRow.name,
+        )
+        return list(self._session.scalars(statement))
+
+    def get_instance(self, instance_id: uuid.UUID) -> AirflowInstanceRow | None:
+        """Return one instance."""
+        return self._session.get(AirflowInstanceRow, instance_id)
+
+    def find_instance_by_slug(self, slug: str) -> AirflowInstanceRow | None:
+        """Return the instance with this slug."""
+        statement: Select[tuple[AirflowInstanceRow]] = select(AirflowInstanceRow).where(
+            AirflowInstanceRow.slug == slug,
+        )
+        return self._session.scalar(statement)
+
+    def find_instance_by_base_url(self, base_url: str) -> AirflowInstanceRow | None:
+        """Return the instance registered at this API URL."""
+        statement: Select[tuple[AirflowInstanceRow]] = select(AirflowInstanceRow).where(
+            AirflowInstanceRow.base_url == base_url,
+        )
+        return self._session.scalar(statement)
+
+    def dag_counts(self) -> dict[uuid.UUID, int]:
+        """Count synced DAGs per instance."""
+        statement = (
+            select(AirflowDagRow.instance_id, func.count())
+            .group_by(AirflowDagRow.instance_id)
+        )
+        counts: dict[uuid.UUID, int] = {}
+        for row in self._session.execute(statement):
+            raw_id: object = row[0]
+            raw_count: object = row[1]
+            if isinstance(raw_id, uuid.UUID) and isinstance(raw_count, int):
+                counts[raw_id] = raw_count
+        return counts
+
+    def upsert_dag(self, instance_id: uuid.UUID, write: DagWrite) -> AirflowDagRow:
+        """Insert or update one DAG snapshot."""
+        existing: AirflowDagRow | None = self.find_dag(instance_id, write.dag_id)
+        if existing is None:
+            row: AirflowDagRow = AirflowDagRow(
+                id=uuid.uuid4(),
+                instance_id=instance_id,
+                dag_id=write.dag_id,
+                display_name=write.display_name,
+                description=write.description,
+                is_paused=write.is_paused,
+                is_stale=write.is_stale,
+                has_import_errors=write.has_import_errors,
+                timetable_summary=write.timetable_summary,
+                timetable_description=write.timetable_description,
+                owners=write.owners,
+                tags=write.tags,
+                fileloc=write.fileloc,
+                bundle_name=write.bundle_name,
+                max_active_runs=write.max_active_runs,
+                next_dagrun_run_after=write.next_dagrun_run_after,
+                last_parsed_time=write.last_parsed_time,
+                tasks=write.tasks,
+                last_run=write.last_run,
+                run_stats=write.run_stats,
+                source_code=write.source_code,
+                source_version=write.source_version,
+                last_seen_at=utc_now(),
+            )
+            return self._add(row)
+        self._apply_dag(existing, write)
+        return existing
+
+    def find_dag(self, instance_id: uuid.UUID, dag_id: str) -> AirflowDagRow | None:
+        """Return one DAG snapshot."""
+        statement: Select[tuple[AirflowDagRow]] = select(AirflowDagRow).where(
+            AirflowDagRow.instance_id == instance_id,
+            AirflowDagRow.dag_id == dag_id,
+        )
+        return self._session.scalar(statement)
+
+    def list_dags(self, instance_id: uuid.UUID) -> list[AirflowDagRow]:
+        """Return DAG snapshots for one instance."""
+        statement: Select[tuple[AirflowDagRow]] = (
+            select(AirflowDagRow)
+            .where(AirflowDagRow.instance_id == instance_id)
+            .order_by(AirflowDagRow.dag_id)
+        )
+        return list(self._session.scalars(statement))
+
+    def delete_missing_dags(self, instance_id: uuid.UUID, keep: set[str]) -> int:
+        """Delete snapshots whose dag id was not in the latest list."""
+        removed: int = 0
+        row: AirflowDagRow
+        for row in self.list_dags(instance_id):
+            if row.dag_id in keep:
+                continue
+            self._session.delete(row)
+            removed += 1
+        if removed > 0:
+            self._flush()
+        return removed
+
+    def list_mappings_for_instance(self, instance_id: uuid.UUID) -> list[AirflowDagTableRow]:
+        """Return every table link for DAGs of one instance."""
+        statement: Select[tuple[AirflowDagTableRow]] = (
+            select(AirflowDagTableRow)
+            .join(AirflowDagRow, AirflowDagRow.id == AirflowDagTableRow.dag_row_id)
+            .where(AirflowDagRow.instance_id == instance_id)
+        )
+        return list(self._session.scalars(statement))
+
+    def list_links(self, dag_row_id: uuid.UUID, table_id: uuid.UUID) -> list[AirflowDagTableRow]:
+        """Return links between one DAG row and one catalog table."""
+        statement: Select[tuple[AirflowDagTableRow]] = select(AirflowDagTableRow).where(
+            AirflowDagTableRow.dag_row_id == dag_row_id,
+            AirflowDagTableRow.catalog_table_id == table_id,
+        )
+        return list(self._session.scalars(statement))
+
+    def find_mapping(
+        self,
+        dag_row_id: uuid.UUID,
+        table_id: uuid.UUID,
+        origin: str,
+    ) -> AirflowDagTableRow | None:
+        """Return one origin-specific link."""
+        statement: Select[tuple[AirflowDagTableRow]] = select(AirflowDagTableRow).where(
+            AirflowDagTableRow.dag_row_id == dag_row_id,
+            AirflowDagTableRow.catalog_table_id == table_id,
+            AirflowDagTableRow.origin == origin,
+        )
+        return self._session.scalar(statement)
+
+    def add_mapping(
+        self,
+        *,
+        dag_row_id: uuid.UUID,
+        table_id: uuid.UUID,
+        origin: str,
+        direction: str,
+        evidence: str | None,
+    ) -> AirflowDagTableRow:
+        """Insert one DAG-to-table link."""
+        row: AirflowDagTableRow = AirflowDagTableRow(
+            id=uuid.uuid4(),
+            dag_row_id=dag_row_id,
+            catalog_table_id=table_id,
+            origin=origin,
+            direction=direction,
+            evidence=evidence,
+        )
+        return self._add(row)
+
+    def replace_discovered_mappings(
+        self,
+        instance_id: uuid.UUID,
+        writes: list[MappingWrite],
+    ) -> int:
+        """Replace ASSET and SOURCE_MATCH links. MANUAL rows stay."""
+        dags: dict[str, AirflowDagRow] = {
+            row.dag_id: row for row in self.list_dags(instance_id)
+        }
+        dag_row_ids: list[uuid.UUID] = [row.id for row in dags.values()]
+        if len(dag_row_ids) > 0:
+            self._session.execute(
+                delete(AirflowDagTableRow).where(
+                    AirflowDagTableRow.dag_row_id.in_(dag_row_ids),
+                    AirflowDagTableRow.origin.in_(_DISCOVERED),
+                ),
+            )
+            self._flush()
+        inserted: int = 0
+        write: MappingWrite
+        for write in writes:
+            if write.origin == AirflowMappingOrigin.MANUAL.value:
+                continue
+            dag: AirflowDagRow | None = dags.get(write.dag_id)
+            if dag is None:
+                continue
+            self.add_mapping(
+                dag_row_id=dag.id,
+                table_id=write.table_id,
+                origin=write.origin,
+                direction=write.direction,
+                evidence=write.evidence,
+            )
+            inserted += 1
+        return inserted
+
+    def list_table_links(
+        self,
+        table_id: uuid.UUID,
+    ) -> list[tuple[AirflowDagTableRow, AirflowDagRow, AirflowInstanceRow]]:
+        """Return links that point at one catalog table."""
+        statement = (
+            select(AirflowDagTableRow, AirflowDagRow, AirflowInstanceRow)
+            .join(AirflowDagRow, AirflowDagRow.id == AirflowDagTableRow.dag_row_id)
+            .join(AirflowInstanceRow, AirflowInstanceRow.id == AirflowDagRow.instance_id)
+            .where(AirflowDagTableRow.catalog_table_id == table_id)
+            .order_by(AirflowInstanceRow.name, AirflowDagRow.dag_id)
+        )
+        found: list[tuple[AirflowDagTableRow, AirflowDagRow, AirflowInstanceRow]] = []
+        for row in self._session.execute(statement):
+            link: object = row[0]
+            dag: object = row[1]
+            instance: object = row[2]
+            if (
+                isinstance(link, AirflowDagTableRow)
+                and isinstance(dag, AirflowDagRow)
+                and isinstance(instance, AirflowInstanceRow)
+            ):
+                found.append((link, dag, instance))
+        return found
+
+    def get_catalog_table(self, table_id: uuid.UUID) -> CatalogTableRow | None:
+        """Return one catalog table."""
+        return self._session.get(CatalogTableRow, table_id)
+
+    def catalog_tables(self, table_ids: set[uuid.UUID]) -> dict[uuid.UUID, CatalogTableRow]:
+        """Return catalog tables for the given ids."""
+        if len(table_ids) == 0:
+            return {}
+        statement: Select[tuple[CatalogTableRow]] = select(CatalogTableRow).where(
+            CatalogTableRow.id.in_(table_ids),
+        )
+        rows: list[CatalogTableRow] = list(self._session.scalars(statement))
+        return {row.id: row for row in rows}
+
+    def list_catalog_tables(self) -> list[CatalogTableRow]:
+        """Return every catalog table for DAG name matching."""
+        return list(self._session.scalars(select(CatalogTableRow)))
+
+    def add_sync_run(
+        self,
+        *,
+        instance_id: uuid.UUID,
+        started_at: datetime,
+        finished_at: datetime | None,
+        status: str,
+        counts: dict[str, object],
+        sanitized_error: str | None,
+    ) -> AirflowSyncRunRow:
+        """Insert a sync run."""
+        row: AirflowSyncRunRow = AirflowSyncRunRow(
+            id=uuid.uuid4(),
+            instance_id=instance_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            status=status,
+            counts=counts,
+            sanitized_error=sanitized_error,
+        )
+        return self._add(row)
+
+    def list_sync_runs(self, instance_id: uuid.UUID) -> list[AirflowSyncRunRow]:
+        """Return sync runs, newest first."""
+        statement: Select[tuple[AirflowSyncRunRow]] = (
+            select(AirflowSyncRunRow)
+            .where(AirflowSyncRunRow.instance_id == instance_id)
+            .order_by(AirflowSyncRunRow.started_at.desc())
+        )
+        return list(self._session.scalars(statement))
+
+    def delete(self, row: object) -> None:
+        """Delete a row already loaded in this session."""
+        self._session.delete(row)
+        self._flush()
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        try:
+            self._session.commit()
+        except IntegrityError as err:
+            self._session.rollback()
+            raise ConflictError(_CONFLICT) from err
+
+    def rollback(self) -> None:
+        """Drop uncommitted work so a failed sync can record its error."""
+        self._session.rollback()
+
+    def _apply_dag(self, row: AirflowDagRow, write: DagWrite) -> None:
+        row.display_name = write.display_name
+        row.description = write.description
+        row.is_paused = write.is_paused
+        row.is_stale = write.is_stale
+        row.has_import_errors = write.has_import_errors
+        row.timetable_summary = write.timetable_summary
+        row.timetable_description = write.timetable_description
+        row.owners = write.owners
+        row.tags = write.tags
+        row.fileloc = write.fileloc
+        row.bundle_name = write.bundle_name
+        row.max_active_runs = write.max_active_runs
+        row.next_dagrun_run_after = write.next_dagrun_run_after
+        row.last_parsed_time = write.last_parsed_time
+        row.tasks = write.tasks
+        row.last_run = write.last_run
+        row.run_stats = write.run_stats
+        row.source_code = write.source_code
+        row.source_version = write.source_version
+        row.last_seen_at = utc_now()
+
+    def _add[RowT](self, row: RowT) -> RowT:
+        self._session.add(row)
+        self._flush()
+        return row
+
+    def _flush(self) -> None:
+        try:
+            self._session.flush()
+        except IntegrityError as err:
+            self._session.rollback()
+            raise ConflictError(_CONFLICT) from err

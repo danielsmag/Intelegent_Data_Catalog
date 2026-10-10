@@ -1,5 +1,6 @@
 import type { ReactElement } from "react"
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
+import { AirflowDagPage, AirflowInstancePage, AirflowInstancesPage } from "./AirflowPages"
 import { Explorer } from "./Explorer"
 import { PageAlertStack } from "./pageAlertStack"
 import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
@@ -11,6 +12,9 @@ export function App(): ReactElement {
       <PageAlertStack />
       <Routes>
         <Route path="/" element={<SpacesPage />} />
+        <Route path="/airflow" element={<AirflowInstancesPage />} />
+        <Route path="/airflow/:instanceId" element={<AirflowInstancePage />} />
+        <Route path="/airflow/:instanceId/dags/:dagId" element={<AirflowDagPage />} />
         <Route path="/catalog" element={<Explorer />} />
         <Route path="/catalog/:source/:catalog/:namespace/:table" element={<Explorer />} />
         <Route path="/query" element={<QueryPage />} />

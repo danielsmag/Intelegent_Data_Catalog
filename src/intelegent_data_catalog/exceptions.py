@@ -110,6 +110,20 @@ class LlmUnavailableError(LlmError):
         super().__init__(message)
 
 
+class AirflowUnavailableError(CatalogError):
+    """Raised when an Airflow REST call cannot complete. The message is sanitized."""
+
+    def __init__(self, message: str = "Airflow is unavailable") -> None:
+        super().__init__(message)
+
+
+class AirflowAuthError(AirflowUnavailableError):
+    """Raised when Airflow rejects the stored username or password."""
+
+    def __init__(self, message: str = "Airflow rejected the credentials") -> None:
+        super().__init__(message)
+
+
 class PersistenceUnavailableError(CatalogError):
     """Raised when the catalog database cannot be used. The message stays generic."""
 
