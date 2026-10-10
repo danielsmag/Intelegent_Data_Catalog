@@ -146,6 +146,7 @@ class SpaceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     slug: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
+    context: str | None = Field(default=None, max_length=4000)
 
     @field_validator("slug")
     @classmethod
@@ -164,6 +165,8 @@ class SpaceRead(BaseModel):
     name: str
     slug: str
     description: str | None
+    context: str | None
+    context_origin: ContextOrigin | None
     created_at: datetime
     updated_at: datetime
 

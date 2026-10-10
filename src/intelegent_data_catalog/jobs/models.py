@@ -34,6 +34,18 @@ class ScopeBuildJobRead(BaseModel):
     error: str | None = None
 
 
+class SpaceBuildJobRead(BaseModel):
+    """One background space build. The saved context is a separate read."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    space_id: UUID
+    space_name: str
+    status: KnowledgeBuildState
+    error: str | None = None
+
+
 class ContextGenerationJobRead(BaseModel):
     """One background context write. The catalog row is a separate read."""
 

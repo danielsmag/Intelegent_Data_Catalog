@@ -135,6 +135,8 @@ class RegistryService:
             row.slug = slug
         if "description" in changes:
             row.description = patch.description
+        if "context" in changes:
+            _apply_user_context(row, patch.context)
         row.updated_at = utc_now()
         self._repo.commit()
         return space_read(row)
@@ -1049,7 +1051,10 @@ class RegistryService:
         return row
 
 
-def _apply_user_context(row: ScopeRow | CatalogTableRow | ColumnRow, value: str | None) -> None:
+def _apply_user_context(
+    row: SpaceRow | ScopeRow | CatalogTableRow | ColumnRow,
+    value: str | None,
+) -> None:
     """Store a manual context edit. Blank text clears both the text and the origin."""
     text: str | None = None if value is None else value.strip()
     if text == "":

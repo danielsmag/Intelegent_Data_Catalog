@@ -17,6 +17,7 @@ from intelegent_data_catalog.graph.neo4j_store import (
     Neo4jColumnSubgraph,
     Neo4jProjection,
     Neo4jScopeSubgraph,
+    Neo4jSpaceSubgraph,
 )
 from intelegent_data_catalog.graph.service import GraphService
 from intelegent_data_catalog.knowledge.context.column_graph import (
@@ -37,9 +38,24 @@ from intelegent_data_catalog.knowledge.context.scope_graph import (
     ScopeGraphAppender,
     ScopeGraphBuilder,
 )
+from intelegent_data_catalog.knowledge.context.space_catalog import (
+    MergedScopeKnowledgeReader,
+    Neo4jScopeKnowledgeReader,
+    PostgresScopeKnowledgeReader,
+    PostgresSpaceCatalogContextProvider,
+    ScopeKnowledgeReader,
+)
+from intelegent_data_catalog.knowledge.context.space_graph import (
+    SpaceGraphAppender,
+    SpaceGraphBuilder,
+)
 from intelegent_data_catalog.knowledge.factories.scope_agent_factory import (
     ScopeAgentFactory,
     build_scope_agent_factory,
+)
+from intelegent_data_catalog.knowledge.factories.space_agent_factory import (
+    SpaceAgentFactory,
+    build_space_agent_factory,
 )
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     TableAgentFactory,
@@ -50,16 +66,20 @@ from intelegent_data_catalog.knowledge.models import (
     ContextGenerationOptions,
     ScopeAnalysisContext,
     ScopeContextOptions,
+    SpaceAnalysisContext,
+    SpaceContextOptions,
     TableAnalysisContext,
     TableContextOptions,
 )
 from intelegent_data_catalog.knowledge.operations.scope_operation import ScopeAgent
+from intelegent_data_catalog.knowledge.operations.space_operation import SpaceAgent
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
 from intelegent_data_catalog.knowledge.store import (
     KnowledgeContextStore,
     ScopeKnowledgeContextStore,
     SemanticContextStore,
+    SpaceKnowledgeContextStore,
 )
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
@@ -67,6 +87,8 @@ from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
 from intelegent_data_catalog.llm.factory import build_model, build_table_operation_agent
 from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
 from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
+from intelegent_data_catalog.llm.space_context import SpaceContextAgent
+from intelegent_data_catalog.llm.space_graph import SpaceSubgraphAgent
 from intelegent_data_catalog.persistence.models import ColumnRow
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
@@ -142,6 +164,20 @@ class RequestPlatform:
             timeout_seconds=scope_timeout,
         )
         self._scope_describer: ScopeContextAgent = ScopeContextAgent(
+            build_model(settings.llm),
+            max_requests=settings.llm.max_tool_steps,
+            temperature=settings.llm.temperature,
+            max_tokens=settings.llm.max_tokens,
+            timeout_seconds=scope_timeout,
+        )
+        self._space_proposer: SpaceSubgraphAgent = SpaceSubgraphAgent(
+            build_model(settings.llm),
+            max_requests=settings.llm.max_tool_steps,
+            temperature=settings.llm.temperature,
+            max_tokens=settings.llm.max_tokens,
+            timeout_seconds=scope_timeout,
+        )
+        self._space_describer: SpaceContextAgent = SpaceContextAgent(
             build_model(settings.llm),
             max_requests=settings.llm.max_tool_steps,
             temperature=settings.llm.temperature,
@@ -231,10 +267,53 @@ class RequestPlatform:
             raise EntityNotFoundError("knowledge context", str(scope_id))
         return saved
 
+    def build_space_context(
+        self,
+        space_id: UUID,
+        options: SpaceContextOptions,
+    ) -> SpaceAnalysisContext:
+        """Build one space context and store it.
+
+        The model reads each scope's saved context and, when Neo4j is configured,
+        that scope's knowledge subgraph. Accepted links replace prior cross-scope
+        LLM relationships.
+        """
+        logger.info("build space context start space_id=%s", space_id)
+        writer: KnowledgeSubgraphWriter
+        if self._neo4j is not None:
+            writer = Neo4jSpaceSubgraph(self._neo4j)
+        else:
+            writer = EmptyKnowledgeSubgraphWriter()
+        builder: SpaceGraphBuilder = SpaceGraphBuilder(
+            proposer=self._space_proposer,
+            writer=writer,
+            relationships=LlmRelationshipStore(self._session),
+            publisher=self.graph,
+        )
+        agent: SpaceAgent = self._space_factory(builder).create(space_id)
+        built: SpaceAnalysisContext = agent.build_context(options)
+        SpaceKnowledgeContextStore(self._session).save(built)
+        logger.info(
+            "build space context done space_id=%s links=%s missing=%s",
+            space_id,
+            len(built.table_links),
+            len(built.scopes_without_context),
+        )
+        return built
+
+    def read_space_context(self, space_id: UUID) -> SpaceAnalysisContext:
+        """Return the last context saved for this space."""
+        saved: SpaceAnalysisContext | None = SpaceKnowledgeContextStore(self._session).get(space_id)
+        if saved is None:
+            raise EntityNotFoundError("knowledge context", str(space_id))
+        return saved
+
     def generate_context(self, subject_id: UUID, options: ContextGenerationOptions) -> None:
-        """Ask the table or scope agent for business context. Origin is ``LLM``."""
+        """Ask the space, table, or scope agent for business context. Origin is ``LLM``."""
         logger.info("generate context start kind=%s subject_id=%s", options.kind, subject_id)
         match options.kind:
+            case "space":
+                self._space_factory(None).create(subject_id).describe()
             case "scope":
                 self._scope_factory(None).create(subject_id).describe()
             case "table":
@@ -275,6 +354,23 @@ class RequestPlatform:
             ),
             graph_builder,
             describer=self._scope_describer,
+            context_writer=SemanticContextStore(self._session),
+        )
+
+    def _space_factory(self, graph_builder: SpaceGraphAppender | None) -> SpaceAgentFactory:
+        readers: list[ScopeKnowledgeReader] = [
+            PostgresScopeKnowledgeReader(ScopeKnowledgeContextStore(self._session)),
+        ]
+        if self._neo4j is not None:
+            readers.append(Neo4jScopeKnowledgeReader(self._neo4j))
+        return build_space_agent_factory(
+            PostgresSpaceCatalogContextProvider(
+                RegistryRepository(self._session),
+                MergedScopeKnowledgeReader(readers),
+                SpaceKnowledgeContextStore(self._session),
+            ),
+            graph_builder,
+            describer=self._space_describer,
             context_writer=SemanticContextStore(self._session),
         )
 

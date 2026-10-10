@@ -11,11 +11,13 @@ from intelegent_data_catalog.jobs.catalog import (
     CatalogContextGeneration,
     CatalogKnowledgeBuild,
     CatalogScopeBuild,
+    CatalogSpaceBuild,
 )
 from intelegent_data_catalog.jobs.queue import (
     ContextGenerationQueue,
     KnowledgeBuildQueue,
     ScopeBuildQueue,
+    SpaceBuildQueue,
 )
 
 
@@ -29,6 +31,7 @@ def create_app(container: AppContainer | None = None) -> FastAPI:
     app.state.container = app_container
     app.state.knowledge_builds = KnowledgeBuildQueue(CatalogKnowledgeBuild(app_container))
     app.state.scope_builds = ScopeBuildQueue(CatalogScopeBuild(app_container))
+    app.state.space_builds = SpaceBuildQueue(CatalogSpaceBuild(app_container))
     app.state.context_generations = ContextGenerationQueue(CatalogContextGeneration(app_container))
     configure_app(app)
     return app

@@ -13,11 +13,13 @@ from intelegent_data_catalog.jobs.models import (
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
     ScopeBuildJobRead,
+    SpaceBuildJobRead,
 )
 from intelegent_data_catalog.knowledge.models import (
     ContextGenerationOptions,
     ContextSubjectKind,
     ScopeContextOptions,
+    SpaceContextOptions,
     TableContextOptions,
 )
 
@@ -49,6 +51,14 @@ class ScopeBuildWork(Protocol):
     """Stores one scope context. The queue does not open a database session."""
 
     def run(self, subject_id: UUID, options: ScopeContextOptions) -> None:
+        """Build and save the context. Raise ``CatalogError`` for a domain failure."""
+        ...
+
+
+class SpaceBuildWork(Protocol):
+    """Stores one space context. The queue does not open a database session."""
+
+    def run(self, subject_id: UUID, options: SpaceContextOptions) -> None:
         """Build and save the context. Raise ``CatalogError`` for a domain failure."""
         ...
 
@@ -230,6 +240,24 @@ def _read_scope_job(
     )
 
 
+def _read_space_job(
+    job_id: UUID,
+    subject_id: UUID,
+    subject_name: str,
+    lane: str,
+    status: KnowledgeBuildState,
+    error: str | None,
+) -> SpaceBuildJobRead:
+    del lane
+    return SpaceBuildJobRead(
+        id=job_id,
+        space_id=subject_id,
+        space_name=subject_name,
+        status=status,
+        error=error,
+    )
+
+
 def _read_context_job(
     job_id: UUID,
     subject_id: UUID,
@@ -250,6 +278,8 @@ def _read_context_job(
 
 def _subject_kind(lane: str) -> ContextSubjectKind:
     match lane:
+        case "space":
+            return "space"
         case "scope":
             return "scope"
         case "table":
@@ -285,6 +315,19 @@ class ScopeBuildQueue(BuildQueue[ScopeContextOptions, ScopeBuildJobRead]):
             thread_prefix="scope-build",
             failure_log="scope context build failed",
             failure_message="scope context build failed",
+        )
+
+
+class SpaceBuildQueue(BuildQueue[SpaceContextOptions, SpaceBuildJobRead]):
+    """Runs at most one context build per space. A later start joins the running job."""
+
+    def __init__(self, work: SpaceBuildWork) -> None:
+        super().__init__(
+            work,
+            _read_space_job,
+            thread_prefix="space-build",
+            failure_log="space context build failed",
+            failure_message="space context build failed",
         )
 
 

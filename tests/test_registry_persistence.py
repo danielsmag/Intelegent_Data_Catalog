@@ -49,6 +49,7 @@ from intelegent_data_catalog.registry.schemas import (
     SourceRef,
     SourceSnapshot,
     SpaceCreate,
+    SpaceUpdate,
 )
 from intelegent_data_catalog.registry.service import RegistryService
 
@@ -66,6 +67,7 @@ _CORE_TABLES: frozenset[str] = frozenset(
         "asset_engine_bindings",
         "metadata_sync_runs",
         "scope_knowledge_contexts",
+        "space_knowledge_contexts",
     }
 )
 
@@ -140,6 +142,39 @@ def test_scope_migration_allows_llm_origin_after_upgrade(tmp_path: Path) -> None
         session.close()
         engine.dispose()
         database.dispose()
+
+
+def test_space_migration_adds_context_and_the_snapshot_table(tmp_path: Path) -> None:
+    """Revision 0006 adds space context columns and the snapshot on an older database."""
+    url: str = f"sqlite:///{tmp_path / 'catalog.db'}"
+    upgrade_database(url)
+    config: Config = Config()
+    script: Path = Path(migrate_module.__file__).resolve().parent / "migrations"
+    config.set_main_option("script_location", str(script))
+    config.set_main_option("sqlalchemy.url", url)
+    command.downgrade(config, "20261010_0005")
+    database: CatalogDatabase = CatalogDatabase(url)
+    engine: Engine = _engine(database)
+    try:
+        names: set[str] = set(inspect(engine).get_table_names())
+        columns: set[str] = {column["name"] for column in inspect(engine).get_columns("spaces")}
+        assert "space_knowledge_contexts" not in names
+        assert "context" not in columns
+    finally:
+        engine.dispose()
+        database.dispose()
+    command.upgrade(config, "head")
+    upgraded: CatalogDatabase = CatalogDatabase(url)
+    upgraded_engine: Engine = _engine(upgraded)
+    try:
+        names = set(inspect(upgraded_engine).get_table_names())
+        columns = {column["name"] for column in inspect(upgraded_engine).get_columns("spaces")}
+        assert "space_knowledge_contexts" in names
+        assert "context" in columns
+        assert "context_origin" in columns
+    finally:
+        upgraded_engine.dispose()
+        upgraded.dispose()
 
 
 def test_space_delete_is_restricted_while_a_scope_exists(tmp_path: Path) -> None:
@@ -267,6 +302,10 @@ def test_manual_context_records_user_origin_and_clearing_resets_it(tmp_path: Pat
         written = service.update_scope(scope_id, ScopeUpdate(context="  Checkout scope.  "))
         assert written.context == "Checkout scope."
         assert written.context_origin is ContextOrigin.USER
+        space_id: UUID = service.create_space(SpaceCreate(name="Retail")).id
+        space_written = service.update_space(space_id, SpaceUpdate(context="  Retail space.  "))
+        assert space_written.context == "Retail space."
+        assert space_written.context_origin is ContextOrigin.USER
         cleared = service.update_scope(scope_id, ScopeUpdate(context="   "))
         assert cleared.context is None
         assert cleared.context_origin is None

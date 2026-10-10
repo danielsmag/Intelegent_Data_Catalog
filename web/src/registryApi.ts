@@ -5,6 +5,8 @@ export type SpaceRecord = {
   name: string
   slug: string
   description: string | null
+  context: string | null
+  context_origin: "USER" | "LLM" | null
 }
 
 export type ScopeRecord = {
@@ -419,6 +421,10 @@ export async function fetchScopeGraph(scopeId: string, signal: AbortSignal): Pro
   return readJson<GraphViewRecord>(`/api/v1/scopes/${scopeId}/graph`, signal)
 }
 
+export async function fetchSpaceGraph(spaceId: string, signal: AbortSignal): Promise<GraphViewRecord> {
+  return readJson<GraphViewRecord>(`/api/v1/spaces/${spaceId}/graph`, signal)
+}
+
 export async function fetchScopeKnowledgeContext(
   scopeId: string,
   signal: AbortSignal,
@@ -481,9 +487,103 @@ export async function fetchLatestScopeBuild(
   return (await response.json()) as ScopeBuildJob
 }
 
-export type ContextSubjectKind = "scope" | "table" | "table_columns" | "column"
+export type SpaceScopeTable = {
+  id: string
+  name: string
+  display_name: string | null
+  columns: { id: string; name: string }[]
+}
 
-export type ContextEntityKind = "scope" | "table" | "column"
+export type SpaceScopeSummary = {
+  id: string
+  name: string
+  tables: SpaceScopeTable[]
+}
+
+export type SpaceTableLink = {
+  source_table_id: string
+  target_table_id: string
+  source_column_id: string
+  target_column_id: string
+  kind: string
+  reason: string
+}
+
+export type SpaceKnowledgeContext = {
+  space: { id: string; name: string; description: string | null }
+  scopes: SpaceScopeSummary[]
+  existing_relationships: { id: string; relationship_type: string; origin: string }[]
+  table_links: SpaceTableLink[]
+  summary: string | null
+  scopes_without_context: string[]
+  previous_links_kept: number
+}
+
+export async function fetchSpaceKnowledgeContext(
+  spaceId: string,
+  signal: AbortSignal,
+): Promise<SpaceKnowledgeContext | null> {
+  const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context`, { signal })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as SpaceKnowledgeContext
+}
+
+export type SpaceBuildJob = {
+  id: string
+  space_id: string
+  space_name: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+}
+
+export async function startSpaceBuild(spaceId: string): Promise<SpaceBuildJob> {
+  const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      include_scope_knowledge: true,
+      include_previous: true,
+      include_summary: true,
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as SpaceBuildJob
+}
+
+export async function fetchSpaceBuild(jobId: string): Promise<SpaceBuildJob> {
+  const response: Response = await fetch(`/api/v1/space-builds/${jobId}`)
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as SpaceBuildJob
+}
+
+export async function fetchLatestSpaceBuild(
+  spaceId: string,
+  signal: AbortSignal,
+): Promise<SpaceBuildJob | null> {
+  const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context/build`, {
+    signal,
+  })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as SpaceBuildJob
+}
+
+export type ContextSubjectKind = "space" | "scope" | "table" | "table_columns" | "column"
+
+export type ContextEntityKind = "space" | "scope" | "table" | "column"
 
 export type ContextGenerationJob = {
   id: string
@@ -545,6 +645,8 @@ export async function updateEntityContext(
 
 function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
   switch (kind) {
+    case "space":
+      return `/api/v1/spaces/${id}/context/generate`
     case "scope":
       return `/api/v1/scopes/${id}/context/generate`
     case "table":
@@ -558,6 +660,8 @@ function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
 
 function contextLatestPath(kind: ContextSubjectKind, id: string): string {
   switch (kind) {
+    case "space":
+      return `/api/v1/spaces/${id}/context/generation`
     case "scope":
       return `/api/v1/scopes/${id}/context/generation`
     case "table":
@@ -571,6 +675,8 @@ function contextLatestPath(kind: ContextSubjectKind, id: string): string {
 
 function contextPatchPath(kind: ContextEntityKind, id: string): string {
   switch (kind) {
+    case "space":
+      return `/api/v1/spaces/${id}`
     case "scope":
       return `/api/v1/scopes/${id}`
     case "table":

@@ -149,6 +149,48 @@ def test_build_context_refuses_physical_profile_without_a_profiler(tmp_path: Pat
         database.dispose()
 
 
+def test_space_context_is_missing_until_started_and_a_patch_stores_user_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A space with no snapshot is 404. Starting a build returns 202. A patch is USER."""
+
+    def _skip(self: RequestPlatform, space_id: object, options: object) -> None:
+        del self, space_id, options
+
+    monkeypatch.setattr(RequestPlatform, "build_space_context", _skip)
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        space: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
+        assert space.status_code == 201
+        space_id: str = _text(_object(space), "id")
+        missing: httpx.Response = _send(app, "GET", f"/api/v1/spaces/{space_id}/knowledge-context")
+        assert missing.status_code == 404
+        started: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/spaces/{space_id}/knowledge-context",
+            {},
+        )
+        assert started.status_code == 202
+        finished: dict[str, object] = _wait_for_space_build(app, _text(_object(started), "id"))
+        assert finished["status"] == "succeeded"
+        patched: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/spaces/{space_id}",
+            {"context": "Commerce covers sales."},
+        )
+        assert patched.status_code == 200
+        body: dict[str, object] = _object(patched)
+        assert body["context"] == "Commerce covers sales."
+        assert body["context_origin"] == "USER"
+    finally:
+        database.dispose()
+
+
 def test_generate_table_context_returns_a_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -275,6 +317,20 @@ def _wait_for_build(app: FastAPI, job_id: str) -> dict[str, object]:
             return body
         time.sleep(0.05)
     raise AssertionError("knowledge build did not finish")
+
+
+def _wait_for_space_build(app: FastAPI, job_id: str) -> dict[str, object]:
+    """Poll until the background space build leaves the running state."""
+    attempt: int
+    for attempt in range(50):
+        del attempt
+        current: httpx.Response = _send(app, "GET", f"/api/v1/space-builds/{job_id}")
+        assert current.status_code == 200
+        body: dict[str, object] = _object(current)
+        if body["status"] != "running":
+            return body
+        time.sleep(0.05)
+    raise AssertionError("space build did not finish")
 
 
 def _wait_for_generation(app: FastAPI, job_id: str) -> dict[str, object]:

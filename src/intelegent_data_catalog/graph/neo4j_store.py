@@ -96,6 +96,8 @@ class Neo4jProjection:
             return self._read_owned(_KNOWLEDGE_NODES, _KNOWLEDGE_EDGES, owner_id)
         if owner_property == "owner_scope_id":
             return self._read_owned(_SCOPE_NODES, _SCOPE_EDGES, owner_id)
+        if owner_property == "owner_space_id":
+            return self._read_owned(_SPACE_NODES, _SPACE_EDGES, owner_id)
         raise GraphUnavailableError("unknown knowledge owner")
 
     def _read_owned(
@@ -171,6 +173,19 @@ _SCOPE_EDGES: LiteralString = (
     "RETURN source.node_id AS source, target.node_id AS target, "
     "type(rel) AS kind, rel.reason AS reason"
 )
+_SPACE_NODES: LiteralString = (
+    "MATCH (n) "
+    "WHERE n.projection = 'knowledge' AND n.owner_space_id = $owner "
+    "RETURN n.node_id AS node_id, n.catalog_id AS catalog_id, n.name AS name, "
+    "n.resolved AS resolved, labels(n) AS labels"
+)
+_SPACE_EDGES: LiteralString = (
+    "MATCH (source)-[rel]->(target) "
+    "WHERE source.projection = 'knowledge' AND source.owner_space_id = $owner "
+    "AND target.projection = 'knowledge' AND target.owner_space_id = $owner "
+    "RETURN source.node_id AS source, target.node_id AS target, "
+    "type(rel) AS kind, rel.reason AS reason"
+)
 
 
 class Neo4jColumnSubgraph:
@@ -181,6 +196,17 @@ class Neo4jColumnSubgraph:
 
     def write(self, document: KnowledgeSubgraphWrite) -> None:
         """Replace the knowledge subgraph owned by ``document.owner_table_id``."""
+        self._projection.replace_knowledge(document)
+
+
+class Neo4jSpaceSubgraph:
+    """Writes the scope-and-table subgraph for one space context build."""
+
+    def __init__(self, projection: Neo4jProjection) -> None:
+        self._projection: Neo4jProjection = projection
+
+    def write(self, document: KnowledgeSubgraphWrite) -> None:
+        """Replace the knowledge subgraph owned by the space id on ``document``."""
         self._projection.replace_knowledge(document)
 
 

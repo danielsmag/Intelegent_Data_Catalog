@@ -4,6 +4,7 @@ import type { GraphEdgeRecord, GraphNodeRecord, GraphViewRecord } from "./regist
 
 const VIEW_WIDTH: number = 1000
 const VIEW_HEIGHT: number = 640
+const SCOPE_RADIUS: number = 34
 const TABLE_RADIUS: number = 28
 const COLUMN_RADIUS: number = 20
 
@@ -129,6 +130,7 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string | 
   )
   const selectedNode: GraphNodeRecord | null =
     selected === null ? null : (nodesById.get(selected) ?? null)
+  const scopeCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "scope").length
   const tableCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "table").length
   const columnCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "column").length
   const kinds: string[] = [...new Set(graph.edges.map((edge: GraphEdgeRecord) => edge.kind))]
@@ -201,6 +203,11 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string | 
     <div className="subgraph">
       <div className="subgraph-stage">
         <div className="subgraph-legend" aria-label="Subgraph legend">
+          {scopeCount > 0 ? (
+            <span>
+              <i className="swatch swatch-scope" /> Scope {scopeCount}
+            </span>
+          ) : null}
           <span>
             <i className="swatch swatch-table" /> Table {tableCount}
           </span>
@@ -338,7 +345,7 @@ function NodeDetails(props: {
   return (
     <aside className="subgraph-details" aria-label="Node details">
       <h2>Node details</h2>
-      <span className={node.kind === "table" ? "badge badge-table" : "badge badge-column"}>{node.kind}</span>
+      <span className={badgeClass(node.kind)}>{node.kind}</span>
       <dl className="facts">
         <dt>name</dt>
         <dd>{node.label}</dd>
@@ -349,6 +356,11 @@ function NodeDetails(props: {
         <dt>resolved</dt>
         <dd>{node.resolved ? "true" : "false"}</dd>
       </dl>
+      {node.kind === "scope" && node.catalog_id !== null ? (
+        <Link className="subgraph-open" to={`/scopes/${node.catalog_id}`}>
+          Open scope
+        </Link>
+      ) : null}
       {node.kind === "table" && node.catalog_id !== null ? (
         <Link className="subgraph-open" to={`/registry/tables/${node.catalog_id}`}>
           Open table
@@ -379,8 +391,24 @@ function NodeDetails(props: {
   )
 }
 
+function badgeClass(kind: string): string {
+  if (kind === "scope") {
+    return "badge badge-scope"
+  }
+  if (kind === "table") {
+    return "badge badge-table"
+  }
+  return "badge badge-column"
+}
+
 function radiusFor(node: GraphNodeRecord): number {
-  return node.kind === "table" ? TABLE_RADIUS : COLUMN_RADIUS
+  if (node.kind === "scope") {
+    return SCOPE_RADIUS
+  }
+  if (node.kind === "table") {
+    return TABLE_RADIUS
+  }
+  return COLUMN_RADIUS
 }
 
 function shortName(name: string): string {
@@ -404,7 +432,7 @@ function simulateGraph(nodes: GraphNodeRecord[], edges: GraphEdgeRecord[]): Body
   const placed: Array<{ id: string; x: number; y: number; vx: number; vy: number }> = nodes.map(
     (node: GraphNodeRecord, index: number) => {
       const angle: number = (Math.PI * 2 * index) / Math.max(nodes.length, 1)
-      const ring: number = node.kind === "table" ? 80 : 180
+      const ring: number = node.kind === "scope" ? 40 : node.kind === "table" ? 120 : 200
       return {
         id: node.id,
         x: VIEW_WIDTH / 2 + Math.cos(angle) * ring,

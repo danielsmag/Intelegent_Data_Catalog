@@ -20,6 +20,7 @@ from intelegent_data_catalog.jobs.queue import (
     ContextGenerationQueue,
     KnowledgeBuildQueue,
     ScopeBuildQueue,
+    SpaceBuildQueue,
 )
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.service import RegistryService
@@ -149,6 +150,17 @@ def get_scope_builds(request: Request) -> ScopeBuildQueue:
 
 
 ScopeBuildDep = Annotated[ScopeBuildQueue, Depends(get_scope_builds)]
+
+
+def get_space_builds(request: Request) -> SpaceBuildQueue:
+    """Return the process-wide space queue created with the application."""
+    queue: object = getattr(request.app.state, "space_builds", None)
+    if not isinstance(queue, SpaceBuildQueue):
+        raise RuntimeError("space builds are not configured")
+    return queue
+
+
+SpaceBuildDep = Annotated[SpaceBuildQueue, Depends(get_space_builds)]
 
 
 def get_context_generations(request: Request) -> ContextGenerationQueue:

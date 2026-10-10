@@ -4,13 +4,16 @@ import {
   fetchContextGeneration,
   fetchKnowledgeBuild,
   fetchScopeBuild,
+  fetchSpaceBuild,
   startContextGeneration,
   startKnowledgeBuild,
   startScopeBuild,
+  startSpaceBuild,
   type ContextGenerationJob,
   type ContextSubjectKind,
   type KnowledgeBuildJob,
   type ScopeBuildJob,
+  type SpaceBuildJob,
 } from "./registryApi"
 
 type BuildStatus = {
@@ -133,6 +136,31 @@ export async function requestScopeBuild(scopeId: string): Promise<ScopeBuildJob>
 
 export function followScopeBuild(job: ScopeBuildJob): void {
   scopeBuilds.follow(job)
+}
+
+const spaceBuilds: BuildFollower<SpaceBuildJob> = createFollower(
+  fetchSpaceBuild,
+  (job: SpaceBuildJob): string => {
+    const detail: string = job.error ?? "Build failed."
+    if (job.status === "succeeded") {
+      return `Space context for ${job.space_name} is ready.`
+    }
+    return `Space context for ${job.space_name} failed. ${detail}`
+  },
+)
+
+export function onSpaceBuildFinished(handler: FinishedHandler<SpaceBuildJob>): () => void {
+  return spaceBuilds.onFinished(handler)
+}
+
+export async function requestSpaceBuild(spaceId: string): Promise<SpaceBuildJob> {
+  const job: SpaceBuildJob = await startSpaceBuild(spaceId)
+  spaceBuilds.follow(job)
+  return job
+}
+
+export function followSpaceBuild(job: SpaceBuildJob): void {
+  spaceBuilds.follow(job)
 }
 
 const contextGenerations: BuildFollower<ContextGenerationJob> = createFollower(

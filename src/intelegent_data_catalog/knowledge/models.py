@@ -87,6 +87,7 @@ class SpaceSummary(BaseModel):
     name: str
     slug: str
     description: str | None
+    context: str | None = None
 
 
 class TagSummary(BaseModel):
@@ -448,7 +449,99 @@ class ScopeAnalysisContext(BaseModel):
     previous_links_kept: int = Field(default=0, ge=0)
 
 
-ContextSubjectKind = Literal["scope", "table", "table_columns", "column"]
+class ScopeGraphEdge(BaseModel):
+    """Table-level edge from a scope knowledge subgraph. Scope nodes carry no column ids."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_table_id: UUID
+    target_table_id: UUID
+    kind: TableLinkKind
+    reason: str = Field(default="", max_length=280)
+
+
+class ScopeKnowledgeInput(BaseModel):
+    """What the scope agent already stored: column links plus the drawn table graph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope_id: UUID
+    summary: str | None
+    links: list[TableLink] = Field(default_factory=list)
+    graph: list[ScopeGraphEdge] = Field(default_factory=list)
+    source: Literal["postgres", "neo4j", "both"]
+
+
+class SpaceScopeSummary(BaseModel):
+    """One scope inside a space, with the tables the space agent may link."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    name: str
+    slug: str
+    description: str | None
+    context: str | None = None
+    tables: list[ScopeTableSummary]
+
+
+class PreviousSpaceFindings(BaseModel):
+    """Summary and links from the last space build. The model may revise them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str | None
+    links: list[TableLink]
+    built_at: datetime | None
+
+
+class SpaceCatalogContext(BaseModel):
+    """Everything known about one space before the space agent proposes links."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    space: SpaceSummary
+    scopes: list[SpaceScopeSummary]
+    relationships: list[TableRelation]
+    scope_knowledge: list[ScopeKnowledgeInput]
+    scopes_without_context: list[UUID]
+    previous: PreviousSpaceFindings | None
+
+
+class SpaceContextOptions(BaseModel):
+    """Which parts of space context to load."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_scope_knowledge: bool = True
+    include_previous: bool = True
+    include_summary: bool = True
+
+
+class SpaceProposal(BaseModel):
+    """Links and summary the space model selected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(default="", max_length=1200)
+    links: list[TableLink] = Field(default_factory=list, max_length=60)
+
+
+class SpaceAnalysisContext(BaseModel):
+    """Space metadata, catalog relationships, accepted links, and the written summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    space: SpaceSummary
+    scopes: list[SpaceScopeSummary]
+    existing_relationships: list[TableRelation]
+    table_links: list[TableLink] = Field(default_factory=list)
+    summary: str | None = None
+    scopes_without_context: list[UUID] = Field(default_factory=list)
+    previous_links_kept: int = Field(default=0, ge=0)
+
+
+ContextSubjectKind = Literal["space", "scope", "table", "table_columns", "column"]
 
 _CONTEXT_LIMIT: int = 1200
 
@@ -516,6 +609,10 @@ class TableColumnsContextProposal(BaseModel):
 
 class ScopeContextProposal(_ContextText):
     """Business meaning the model wrote for one scope."""
+
+
+class SpaceContextProposal(_ContextText):
+    """Business meaning the model wrote for one space."""
 
 
 class TableContextInput(BaseModel):

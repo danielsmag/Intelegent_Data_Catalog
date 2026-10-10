@@ -165,6 +165,7 @@ def _space_summary(space: SpaceRow) -> SpaceSummary:
         name=space.name,
         slug=space.slug,
         description=space.description,
+        context=space.context,
     )
 
 

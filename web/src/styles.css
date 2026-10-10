@@ -1424,6 +1424,10 @@ a.tree-row {
   background: #d2e57a;
 }
 
+.swatch-scope {
+  background: #8fd4c1;
+}
+
 .swatch-column {
   background: #f0a3ad;
 }
@@ -1492,6 +1496,10 @@ a.tree-row {
   fill: #d2e57a;
 }
 
+.node-scope {
+  fill: #8fd4c1;
+}
+
 .node-column {
   fill: #f0a3ad;
 }
@@ -1529,6 +1537,11 @@ a.tree-row {
 
 .badge-table {
   background: #d2e57a;
+  color: #1c140f;
+}
+
+.badge-scope {
+  background: #8fd4c1;
   color: #1c140f;
 }
 

@@ -2,21 +2,23 @@
 
 from typing import Literal, LiteralString
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from intelegent_data_catalog.exceptions import GraphUnavailableError
 from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView, edge_style
 
 _KNOWLEDGE_EDGE_TYPES: dict[str, LiteralString] = {
     "HAS_COLUMN": "HAS_COLUMN",
+    "HAS_TABLE": "HAS_TABLE",
     "REFERENCES": "REFERENCES",
     "JOINS_ON": "JOINS_ON",
     "DERIVED_FROM": "DERIVED_FROM",
     "SAME_MEANING": "SAME_MEANING",
 }
-_OWNER_PROPERTIES: dict[Literal["table", "scope"], LiteralString] = {
+_OWNER_PROPERTIES: dict[Literal["table", "scope", "space"], LiteralString] = {
     "table": "owner_table_id",
     "scope": "owner_scope_id",
+    "space": "owner_space_id",
 }
 
 
@@ -46,12 +48,14 @@ class KnowledgeSubgraphWrite(BaseModel):
 
     ``owner_table_id`` is the catalog id of the owner. A scope subgraph stores the
     scope id there and sets ``owner_kind`` to ``scope``, which writes ``owner_scope_id``.
+    A space subgraph stores the space id and sets ``owner_kind`` to ``space``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     owner_table_id: str
-    owner_kind: Literal["table", "scope"] = "table"
+    owner_kind: Literal["table", "scope", "space"] = "table"
+    scopes: list[KnowledgeNodeWrite] = Field(default_factory=list)
     tables: list[KnowledgeNodeWrite]
     columns: list[KnowledgeNodeWrite]
     edges: list[KnowledgeEdgeWrite]
@@ -79,6 +83,14 @@ def knowledge_statements(
             {"owner": owner, "tables": [_node_row(node) for node in document.tables]},
         ),
         (
+            "UNWIND $scopes AS node "
+            "CREATE (n:Scope {node_id: node.node_id, catalog_id: node.catalog_id, "
+            "name: node.name, resolved: true, projection: 'knowledge', "
+            + owner_property
+            + ": $owner})",
+            {"owner": owner, "scopes": [_node_row(node) for node in document.scopes]},
+        ),
+        (
             "UNWIND $columns AS node "
             "CREATE (n:Column {node_id: node.node_id, catalog_id: node.catalog_id, "
             "name: node.name, resolved: true, projection: 'knowledge', "
@@ -103,7 +115,7 @@ def knowledge_statements(
     return statements
 
 
-def _owner_property(kind: Literal["table", "scope"]) -> LiteralString:
+def _owner_property(kind: Literal["table", "scope", "space"]) -> LiteralString:
     return _OWNER_PROPERTIES[kind]
 
 
@@ -134,7 +146,7 @@ class KnowledgeGraphNode(BaseModel):
     node_id: str
     catalog_id: str | None
     name: str
-    kind: Literal["table", "column"]
+    kind: Literal["scope", "table", "column"]
     resolved: bool = True
 
 
@@ -158,7 +170,7 @@ def knowledge_node_from_row(
 ) -> KnowledgeGraphNode | None:
     """Map one Neo4j row onto a subgraph node. Unknown labels are skipped."""
     identity: str | None = _text(node_id)
-    kind: Literal["table", "column"] | None = _kind(labels)
+    kind: Literal["scope", "table", "column"] | None = _kind(labels)
     if identity is None or kind is None:
         return None
     label: str | None = _text(name)
@@ -212,7 +224,7 @@ def knowledge_graph_view(
                 resolved=node.resolved,
             )
         )
-    graph_nodes.sort(key=lambda item: (0 if item.kind == "table" else 1, item.label))
+    graph_nodes.sort(key=lambda item: (_kind_order(item.kind), item.label))
     seen_edges: set[tuple[str, str, str]] = set()
     edges: list[GraphEdge] = []
     link: KnowledgeGraphLink
@@ -233,15 +245,27 @@ def knowledge_graph_view(
     return GraphView(nodes=graph_nodes, edges=edges, truncated=False)
 
 
-def _kind(labels: object) -> Literal["table", "column"] | None:
+def _kind(labels: object) -> Literal["scope", "table", "column"] | None:
     if isinstance(labels, str) or not isinstance(labels, (list, tuple)):
         return None
     names: list[str] = [item for item in labels if isinstance(item, str)]
+    if "Scope" in names:
+        return "scope"
     if "Table" in names:
         return "table"
     if "Column" in names:
         return "column"
     return None
+
+
+def _kind_order(kind: str) -> int:
+    match kind:
+        case "scope":
+            return 0
+        case "table":
+            return 1
+        case _:
+            return 2
 
 
 def _text(value: object) -> str | None:

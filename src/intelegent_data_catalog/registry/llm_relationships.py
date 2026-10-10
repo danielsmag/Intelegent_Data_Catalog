@@ -1,4 +1,4 @@
-"""Replace relationships the scope agent proposed. Other origins stay in place."""
+"""Replace relationships an agent proposed. Other origins stay in place."""
 
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -17,7 +17,7 @@ from intelegent_data_catalog.registry.repository import RegistryRepository
 
 
 class LlmRelationshipStore:
-    """Writes ``origin=LLM`` relationships for one scope and drops the previous set."""
+    """Writes ``origin=LLM`` relationships and drops the previous set for that agent."""
 
     def __init__(self, session: Session) -> None:
         self._repository: RegistryRepository = RegistryRepository(session)
@@ -33,6 +33,28 @@ class LlmRelationshipStore:
                 continue
             self._repository.delete_mappings(row.id)
             self._repository.delete(row)
+        self._insert(links)
+        self._repository.commit()
+
+    def replace_across_scopes(self, scope_of: dict[UUID, UUID], links: list[TableLink]) -> None:
+        """Delete prior cross-scope LLM rows, then insert ``links``. Intra-scope rows stay."""
+        table_ids: set[UUID] = set(scope_of)
+        existing: list[RelationshipRow] = self._repository.list_relationships_between(table_ids)
+        row: RelationshipRow
+        for row in existing:
+            if row.origin != RelationshipOrigin.LLM.value:
+                continue
+            source_scope: UUID | None = scope_of.get(row.source_table_id)
+            target_scope: UUID | None = scope_of.get(row.target_table_id)
+            if source_scope is None or target_scope is None or source_scope == target_scope:
+                continue
+            self._repository.delete_mappings(row.id)
+            self._repository.delete(row)
+        self._insert(links)
+        self._repository.commit()
+
+    def _insert(self, links: list[TableLink]) -> None:
+        """Insert one relationship and one column mapping per link."""
         link: TableLink
         for link in links:
             relationship_type: RelationshipType = (
@@ -63,4 +85,3 @@ class LlmRelationshipStore:
                     position=0,
                 )
             )
-        self._repository.commit()

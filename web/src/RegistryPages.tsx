@@ -8,17 +8,22 @@ import { CreateRecordForm } from "./CreateRecordForm"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { ContextEditor } from "./ContextEditor"
 import { ScopeContextPanel } from "./ScopeContextPanel"
+import { SpaceContextPanel } from "./SpaceContextPanel"
+import { SpaceScopesDigest } from "./SpaceScopesDigest"
 import { SubgraphView } from "./SubgraphView"
 import {
   followContextGeneration,
   followKnowledgeBuild,
   followScopeBuild,
+  followSpaceBuild,
   onContextGenerationFinished,
   onKnowledgeBuildFinished,
   onScopeBuildFinished,
+  onSpaceBuildFinished,
   requestContextGeneration,
   requestKnowledgeBuild,
   requestScopeBuild,
+  requestSpaceBuild,
 } from "./knowledgeBuild"
 import { HierarchyTree } from "./HierarchyTree"
 import { PanelChevron, PlusIcon } from "./icons"
@@ -28,9 +33,12 @@ import {
   fetchKnowledgeContext,
   fetchLatestKnowledgeBuild,
   fetchLatestScopeBuild,
+  fetchLatestSpaceBuild,
   fetchLatestContextGeneration,
   fetchScopeGraph,
   fetchScopeKnowledgeContext,
+  fetchSpaceGraph,
+  fetchSpaceKnowledgeContext,
   createScope,
   createSpace,
   fetchBindings,
@@ -61,6 +69,8 @@ import {
   type ScopeKnowledgeContext,
   type ScopeRecord,
   type SearchHitRecord,
+  type SpaceBuildJob,
+  type SpaceKnowledgeContext,
   type SpaceRecord,
   type SparkQueryAvailability,
   type TableRelationships,
@@ -268,33 +278,140 @@ export function SpacesPage(): ReactElement {
   )
 }
 
+const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "graph"]
+
+type SpaceTab = "overview" | "scopes" | "graph"
+
 export function SpacePage(): ReactElement {
   const spaceId: string = useParams().spaceId ?? ""
   const revision: number = useCatalogRevision()
+  const [tab, selectTab] = useTabParam<SpaceTab>(SPACE_TABS, "overview")
   const [space, setSpace] = useState<SpaceRecord | null>(null)
   const [scopes, setScopes] = useState<ScopeRecord[] | null>(null)
+  const [scopeTables, setScopeTables] = useState<Map<string, number> | null>(null)
+  const [spaceGraph, setSpaceGraph] = useState<GraphViewRecord | null>(null)
+  const [graphError, setGraphError] = useState<string | null>(null)
+  const [knowledge, setKnowledge] = useState<SpaceKnowledgeContext | null>(null)
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
+  const [building, setBuilding] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<boolean>(false)
   useEffect(() => {
     setCreating(false)
+    setBuilding(false)
+    setKnowledge(null)
+    setSpaceGraph(null)
+    setScopeTables(null)
   }, [spaceId])
   useEffect(() => {
     const controller: AbortController = new AbortController()
     void Promise.all([fetchSpace(spaceId, controller.signal), fetchScopes(spaceId, controller.signal)])
-      .then(([loadedSpace, loadedScopes]: [SpaceRecord, ScopeRecord[]]) => {
+      .then(async ([loadedSpace, loadedScopes]: [SpaceRecord, ScopeRecord[]]) => {
         setSpace(loadedSpace)
         setScopes(loadedScopes)
         setError(null)
+        const pairs: Array<[string, number]> = await Promise.all(
+          loadedScopes.map(async (scope: ScopeRecord): Promise<[string, number]> => {
+            const tables: CatalogTableRecord[] = await fetchScopeTables(scope.id, controller.signal)
+            return [scope.id, tables.length]
+          }),
+        )
+        if (!controller.signal.aborted) {
+          setScopeTables(new Map(pairs))
+        }
       })
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
           setError(errorMessage(err))
         }
       })
+    setKnowledge(null)
+    setKnowledgeError(null)
+    void fetchSpaceKnowledgeContext(spaceId, controller.signal)
+      .then((loaded: SpaceKnowledgeContext | null) => {
+        setKnowledge(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledge(null)
+          setKnowledgeError(errorMessage(err))
+        }
+      })
+    setSpaceGraph(null)
+    setGraphError(null)
+    void fetchSpaceGraph(spaceId, controller.signal)
+      .then((loaded: GraphViewRecord) => {
+        setSpaceGraph(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setSpaceGraph({ nodes: [], edges: [], truncated: false })
+          setGraphError(errorMessage(err))
+        }
+      })
+    void fetchLatestSpaceBuild(spaceId, controller.signal)
+      .then((job: SpaceBuildJob | null) => {
+        if (controller.signal.aborted || job === null || job.status !== "running") {
+          return
+        }
+        setBuilding(true)
+        followSpaceBuild(job)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledgeError(errorMessage(err))
+        }
+      })
     return () => {
       controller.abort()
     }
   }, [spaceId, revision])
+  useEffect(() => {
+    return onSpaceBuildFinished((job: SpaceBuildJob) => {
+      if (job.space_id !== spaceId) {
+        return
+      }
+      setBuilding(false)
+      if (job.status === "failed") {
+        setKnowledgeError(job.error ?? "Space context build failed.")
+        return
+      }
+      const controller: AbortController = new AbortController()
+      void fetchSpaceKnowledgeContext(spaceId, controller.signal)
+        .then((loaded: SpaceKnowledgeContext | null) => {
+          setKnowledge(loaded)
+          setKnowledgeError(null)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setKnowledgeError(errorMessage(err))
+          }
+        })
+      void fetchSpaceGraph(spaceId, controller.signal)
+        .then((loaded: GraphViewRecord) => {
+          setSpaceGraph(loaded)
+          setGraphError(null)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setSpaceGraph({ nodes: [], edges: [], truncated: false })
+            setGraphError(errorMessage(err))
+          }
+        })
+    })
+  }, [spaceId])
+  function runBuildContext(): void {
+    setBuilding(true)
+    setKnowledgeError(null)
+    void requestSpaceBuild(spaceId)
+      .then((job: SpaceBuildJob) => {
+        setBuilding(job.status === "running")
+      })
+      .catch((err: unknown) => {
+        setBuilding(false)
+        setKnowledgeError(errorMessage(err))
+      })
+  }
   const loading: boolean = space === null && error === null
   const cards: EntityCardItem[] = (scopes ?? []).map((scope: ScopeRecord): EntityCardItem => ({
     id: scope.id,
@@ -308,9 +425,13 @@ export function SpacePage(): ReactElement {
     space?.description !== null && space?.description !== undefined && space.description !== ""
       ? space.description
       : "Scopes collected inside this space."
+  const tableTotal: number | null =
+    scopeTables === null
+      ? null
+      : [...scopeTables.values()].reduce((sum: number, count: number) => sum + count, 0)
   return (
     <Shell status={space?.name ?? "Space"} tree>
-      <section className="catalog-page">
+      <section className={tab === "graph" ? "catalog-page catalog-page-graph" : "catalog-page"}>
         <header className="catalog-hero">
           <div className="catalog-hero-top">
             <div className="catalog-hero-copy">
@@ -324,12 +445,25 @@ export function SpacePage(): ReactElement {
               <span className="catalog-count">{countLabel(scopes.length, "scope", "scopes")}</span>
             ) : null}
             <button
+              className="button secondary"
+              type="button"
+              disabled={space === null || building}
+              onClick={runBuildContext}
+            >
+              {building
+                ? "Building space context…"
+                : knowledge === null
+                  ? "Build space context"
+                  : "Rebuild space context"}
+            </button>
+            <button
               type="button"
               className="button with-icon"
               aria-expanded={creating}
               disabled={space === null}
               onClick={() => {
                 setCreating((open: boolean) => !open)
+                selectTab("scopes")
               }}
             >
               {creating ? null : <PlusIcon />}
@@ -339,35 +473,111 @@ export function SpacePage(): ReactElement {
           </div>
           <p className="catalog-lead">{lead}</p>
         </header>
-        {creating ? (
-          <div className="catalog-panel">
-            <CreateRecordForm
-              idPrefix="page-scope"
-              nameLabel="Scope name"
-              submitLabel="Add scope"
-              onCancel={() => {
-                setCreating(false)
-              }}
-              onCreate={async (input) => {
-                await createScope(spaceId, input)
-                setCreating(false)
-                bumpCatalogRevision()
-              }}
-            />
-          </div>
+        {building ? (
+          <p className="comment">
+            Building in the background. Keep using the catalog. An alert appears when it finishes.
+          </p>
         ) : null}
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
-        {loading ? <EntitySkeletonGrid /> : null}
-        {scopes !== null && scopes.length === 0 ? (
-          <div className="catalog-empty">
-            <span className="entity-mark tone-b" aria-hidden="true">
-              Sc
-            </span>
-            <h2>No scopes yet</h2>
-            <p>Add a scope to attach catalogs and tables to this space.</p>
-          </div>
+        {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
+        <div className="tabs" role="tablist">
+          {SPACE_TABS.map((name: SpaceTab) => (
+            <button
+              key={name}
+              type="button"
+              className={tab === name ? "tab selected" : "tab"}
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => {
+                selectTab(name)
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+        {tab === "overview" ? (
+          <>
+            {space !== null ? (
+              <dl className="facts">
+                <dt>Scopes</dt>
+                <dd>{scopes === null ? "…" : scopes.length}</dd>
+                <dt>Tables</dt>
+                <dd>{tableTotal === null ? "…" : tableTotal}</dd>
+                <dt>Description</dt>
+                <dd>
+                  {space.description !== null && space.description !== "" ? space.description : "None"}
+                </dd>
+              </dl>
+            ) : null}
+            {space !== null ? (
+              <ContextEditor
+                kind="space"
+                id={space.id}
+                name={space.name}
+                context={space.context}
+                origin={space.context_origin}
+                onChanged={() => {
+                  const controller: AbortController = new AbortController()
+                  void fetchSpace(spaceId, controller.signal)
+                    .then((loaded: SpaceRecord) => {
+                      setSpace(loaded)
+                    })
+                    .catch((err: unknown) => {
+                      if (!isAbortError(err)) {
+                        setError(errorMessage(err))
+                      }
+                    })
+                }}
+              />
+            ) : null}
+            {scopes !== null ? <SpaceScopesDigest scopes={scopes} tableCounts={scopeTables} /> : null}
+            {knowledge !== null ? (
+              <SpaceContextPanel context={knowledge} />
+            ) : (
+              <p className="note">Build space context to get a summary and cross-scope links.</p>
+            )}
+          </>
         ) : null}
-        {cards.length > 0 ? <EntityGrid items={cards} /> : null}
+        {tab === "scopes" ? (
+          <>
+            {creating ? (
+              <div className="catalog-panel">
+                <CreateRecordForm
+                  idPrefix="page-scope"
+                  nameLabel="Scope name"
+                  submitLabel="Add scope"
+                  onCancel={() => {
+                    setCreating(false)
+                  }}
+                  onCreate={async (input) => {
+                    await createScope(spaceId, input)
+                    setCreating(false)
+                    bumpCatalogRevision()
+                  }}
+                />
+              </div>
+            ) : null}
+            {loading ? <EntitySkeletonGrid /> : null}
+            {scopes !== null && scopes.length === 0 ? (
+              <div className="catalog-empty">
+                <span className="entity-mark tone-b" aria-hidden="true">
+                  Sc
+                </span>
+                <h2>No scopes yet</h2>
+                <p>Add a scope to attach catalogs and tables to this space.</p>
+              </div>
+            ) : null}
+            {cards.length > 0 ? <EntityGrid items={cards} /> : null}
+          </>
+        ) : null}
+        {tab === "graph" ? (
+          <SubgraphView
+            graph={spaceGraph}
+            error={graphError}
+            emptyMessage="No scopes in this space."
+          />
+        ) : null}
       </section>
     </Shell>
   )

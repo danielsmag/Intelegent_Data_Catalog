@@ -9,6 +9,7 @@ from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.knowledge.models import (
     ContextGenerationOptions,
     ScopeContextOptions,
+    SpaceContextOptions,
     TableContextOptions,
 )
 from intelegent_data_catalog.persistence.database import CatalogDatabase
@@ -56,6 +57,30 @@ class CatalogScopeBuild:
                 self._container.query_service(),
             )
             platform.build_scope_context(subject_id, options)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+
+class CatalogSpaceBuild:
+    """Adapter from the space job queue to ``RequestPlatform``."""
+
+    def __init__(self, container: AppContainer) -> None:
+        self._container: AppContainer = container
+
+    def run(self, subject_id: UUID, options: SpaceContextOptions) -> None:
+        """Build and save a space context. The request session is already closed."""
+        database: CatalogDatabase = self._container.database()
+        session: Session = database.session()
+        try:
+            platform: RequestPlatform = RequestPlatform(
+                session,
+                self._container.settings(),
+                self._container.query_service(),
+            )
+            platform.build_space_context(subject_id, options)
         except Exception:
             session.rollback()
             raise

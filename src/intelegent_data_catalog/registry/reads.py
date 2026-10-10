@@ -88,6 +88,8 @@ def space_read(row: SpaceRow) -> SpaceRead:
         name=row.name,
         slug=row.slug,
         description=row.description,
+        context=row.context,
+        context_origin=_context_origin(row.context_origin),
         created_at=_aware(row.created_at),
         updated_at=_aware(row.updated_at),
     )

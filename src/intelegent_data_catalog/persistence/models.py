@@ -56,11 +56,20 @@ class SpaceRow(Base):
     """Business space. Not a Trino catalog."""
 
     __tablename__: str = "spaces"
+    __table_args__: tuple[CheckConstraint, ...] = (
+        _enum_check(
+            "context_origin",
+            tuple(item.value for item in ContextOrigin),
+            "ck_spaces_context_origin",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -518,6 +527,25 @@ class TableKnowledgeContextRow(Base):
     table_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("catalog_tables.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SpaceKnowledgeContextRow(Base):
+    """Latest built analysis context for one catalog space."""
+
+    __tablename__: str = "space_knowledge_contexts"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("space_id", name="uq_space_knowledge_contexts_space"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("spaces.id", ondelete="CASCADE"),
         nullable=False,
     )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)

@@ -11,6 +11,7 @@ from intelegent_data_catalog.api.dependencies import (
     KnowledgeBuildDep,
     PlatformDep,
     ScopeBuildDep,
+    SpaceBuildDep,
 )
 from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
@@ -19,12 +20,15 @@ from intelegent_data_catalog.jobs.models import (
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     ScopeBuildJobRead,
+    SpaceBuildJobRead,
 )
 from intelegent_data_catalog.knowledge.models import (
     ContextGenerationOptions,
     ContextSubjectKind,
     ScopeAnalysisContext,
     ScopeContextOptions,
+    SpaceAnalysisContext,
+    SpaceContextOptions,
     TableAnalysisContext,
     TableContextOptions,
 )
@@ -72,6 +76,16 @@ class ScopeContextRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     include_table_knowledge: bool = True
+    include_previous: bool = True
+    include_summary: bool = True
+
+
+class SpaceContextRequest(BaseModel):
+    """Which slices a space build should load."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_scope_knowledge: bool = True
     include_previous: bool = True
     include_summary: bool = True
 
@@ -246,6 +260,12 @@ def read_scope_graph(scope_id: UUID, platform: PlatformDep) -> GraphView:
     return platform.graph.scope_overview(scope_id)
 
 
+@router.get("/spaces/{space_id}/graph", response_model=GraphView)
+def read_space_graph(space_id: UUID, platform: PlatformDep) -> GraphView:
+    """Return scopes, tables, and catalog relationships in one space."""
+    return platform.graph.space_overview(space_id)
+
+
 @router.get("/scopes/{scope_id}/knowledge-graph", response_model=GraphView)
 def read_scope_knowledge_graph(scope_id: UUID, platform: PlatformDep) -> GraphView:
     """Return the Neo4j table subgraph owned by this scope."""
@@ -302,6 +322,88 @@ def read_latest_scope_build(scope_id: UUID, builds: ScopeBuildDep) -> ScopeBuild
     if job is None:
         raise EntityNotFoundError("scope build", str(scope_id))
     return job
+
+
+@router.get("/spaces/{space_id}/knowledge-graph", response_model=GraphView)
+def read_space_knowledge_graph(space_id: UUID, platform: PlatformDep) -> GraphView:
+    """Return the Neo4j subgraph owned by this space."""
+    return platform.graph.space_knowledge_subgraph(space_id)
+
+
+@router.get("/spaces/{space_id}/knowledge-context", response_model=SpaceAnalysisContext)
+def read_space_knowledge_context(space_id: UUID, platform: PlatformDep) -> SpaceAnalysisContext:
+    """Return the context last built for this space."""
+    return platform.read_space_context(space_id)
+
+
+@router.post(
+    "/spaces/{space_id}/knowledge-context",
+    response_model=SpaceBuildJobRead,
+    status_code=202,
+)
+def build_space_knowledge_context(
+    space_id: UUID,
+    platform: PlatformDep,
+    builds: SpaceBuildDep,
+    body: SpaceContextRequest | None = None,
+) -> SpaceBuildJobRead:
+    """Start a space build and return before the model finishes.
+
+    Accepted links replace prior cross-scope LLM relationships in this space.
+    """
+    space_name: str = platform.registry.get_space(space_id).name
+    selected: SpaceContextRequest = body if body is not None else SpaceContextRequest()
+    options: SpaceContextOptions = SpaceContextOptions(
+        include_scope_knowledge=selected.include_scope_knowledge,
+        include_previous=selected.include_previous,
+        include_summary=selected.include_summary,
+    )
+    return builds.start(space_id, space_name, options)
+
+
+@router.get("/space-builds/{job_id}", response_model=SpaceBuildJobRead)
+def read_space_build(job_id: UUID, builds: SpaceBuildDep) -> SpaceBuildJobRead:
+    """Return one background space build."""
+    job: SpaceBuildJobRead | None = builds.get(job_id)
+    if job is None:
+        raise EntityNotFoundError("space build", str(job_id))
+    return job
+
+
+@router.get(
+    "/spaces/{space_id}/knowledge-context/build",
+    response_model=SpaceBuildJobRead,
+)
+def read_latest_space_build(space_id: UUID, builds: SpaceBuildDep) -> SpaceBuildJobRead:
+    """Return the newest context build for a space."""
+    job: SpaceBuildJobRead | None = builds.latest(space_id)
+    if job is None:
+        raise EntityNotFoundError("space build", str(space_id))
+    return job
+
+
+@router.post(
+    "/spaces/{space_id}/context/generate",
+    response_model=ContextGenerationJobRead,
+    status_code=202,
+)
+def generate_space_context(
+    space_id: UUID,
+    platform: PlatformDep,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Start a space context write and return before the model finishes."""
+    space_name: str = platform.registry.get_space(space_id).name
+    return _start_context(builds, space_id, space_name, "space")
+
+
+@router.get("/spaces/{space_id}/context/generation", response_model=ContextGenerationJobRead)
+def read_latest_space_context_generation(
+    space_id: UUID,
+    builds: ContextGenerationDep,
+) -> ContextGenerationJobRead:
+    """Return the newest space context generation."""
+    return _latest_context(builds, space_id, "space")
 
 
 @router.post(
