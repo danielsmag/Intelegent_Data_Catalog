@@ -257,6 +257,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            thinking=False,
         )
         self._columns: ModelCall[_ColumnsDeps, _NamedColumns] = ModelCall(
             _columns_context_agent(model),
@@ -265,6 +266,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            thinking=False,
         )
         self._column: ModelCall[ColumnContextInput, ColumnContextProposal] = ModelCall(
             _column_context_agent(model),
@@ -273,6 +275,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            thinking=False,
         )
 
     def run(self, instruction: str, source: TableToolSource, instructions: str) -> str:
@@ -319,7 +322,7 @@ def _table_context_agent(model: Model) -> Agent[TableContextInput, TableContextP
     agent: Agent[TableContextInput, TableContextProposal] = Agent(
         model,
         deps_type=TableContextInput,
-        output_type=TableContextProposal,
+        output_type=_structured_output(model, TableContextProposal),
         name="table-context",
         instructions=_TABLE_INSTRUCTIONS,
         retries=2,
@@ -329,15 +332,10 @@ def _table_context_agent(model: Model) -> Agent[TableContextInput, TableContextP
 
 def _columns_context_agent(model: Model) -> Agent[_ColumnsDeps, _NamedColumns]:
     """Ask for column names, not ids. Ollama grammar-constrains the JSON when it can."""
-    output_type: NativeOutput[_NamedColumns] | type[_NamedColumns]
-    if bool(model.profile.get("supports_json_schema_output", False)):
-        output_type = NativeOutput(_NamedColumns)
-    else:
-        output_type = _NamedColumns
     agent: Agent[_ColumnsDeps, _NamedColumns] = Agent(
         model,
         deps_type=_ColumnsDeps,
-        output_type=output_type,
+        output_type=_structured_output(model, _NamedColumns),
         name="table-columns-context",
         instructions=_COLUMNS_INSTRUCTIONS,
         retries=2,
@@ -350,12 +348,22 @@ def _column_context_agent(model: Model) -> Agent[ColumnContextInput, ColumnConte
     agent: Agent[ColumnContextInput, ColumnContextProposal] = Agent(
         model,
         deps_type=ColumnContextInput,
-        output_type=ColumnContextProposal,
+        output_type=_structured_output(model, ColumnContextProposal),
         name="column-context",
         instructions=_COLUMN_INSTRUCTIONS,
         retries=2,
     )
     return agent
+
+
+def _structured_output[OutputT](
+    model: Model,
+    output: type[OutputT],
+) -> NativeOutput[OutputT] | type[OutputT]:
+    """Prefer JSON schema. A tool call lets Qwen think until the answer is empty."""
+    if bool(model.profile.get("supports_json_schema_output", False)):
+        return NativeOutput(output)
+    return output
 
 
 def _accept_columns(

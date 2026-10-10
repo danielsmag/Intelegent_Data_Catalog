@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from pydantic_ai import Agent
+from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models import Model
 
 from intelegent_data_catalog.knowledge.models import (
@@ -79,6 +79,7 @@ class ScopeContextAgent(ProposalAgent[ScopeCatalogContext, ScopeContextProposal]
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            thinking=False,
         )
 
     def propose(self, context: ScopeCatalogContext) -> ScopeContextProposal:
@@ -87,10 +88,16 @@ class ScopeContextAgent(ProposalAgent[ScopeCatalogContext, ScopeContextProposal]
 
 
 def _scope_agent(model: Model) -> Agent[ScopeCatalogContext, ScopeContextProposal]:
+    """JSON schema. A tool call lets Qwen think until the answer is empty."""
+    output_type: NativeOutput[ScopeContextProposal] | type[ScopeContextProposal]
+    if bool(model.profile.get("supports_json_schema_output", False)):
+        output_type = NativeOutput(ScopeContextProposal)
+    else:
+        output_type = ScopeContextProposal
     agent: Agent[ScopeCatalogContext, ScopeContextProposal] = Agent(
         model,
         deps_type=ScopeCatalogContext,
-        output_type=ScopeContextProposal,
+        output_type=output_type,
         name="scope-context",
         instructions=_INSTRUCTIONS,
         retries=2,
