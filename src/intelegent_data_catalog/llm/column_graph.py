@@ -21,6 +21,7 @@ from intelegent_data_catalog.knowledge.models import (
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.structured import structured_output
 
 _INSTRUCTIONS: str = (
     "You build a column subgraph for one catalog table. "
@@ -147,12 +148,14 @@ class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelati
 
 
 def _column_agent(model: Model) -> Agent[ColumnGraphDeps, ColumnRelationSet]:
+    """JSON schema. A tool call lets Qwen think until the answer is empty."""
     agent: Agent[ColumnGraphDeps, ColumnRelationSet] = Agent(
         model,
         deps_type=ColumnGraphDeps,
-        output_type=ColumnRelationSet,
+        output_type=structured_output(model, ColumnRelationSet),
         name="column-subgraph",
         instructions=_INSTRUCTIONS,
+        retries=2,
     )
     agent.output_validator(_accept_output)
     return agent

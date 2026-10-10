@@ -10,7 +10,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic_ai import Agent, ModelRetry, NativeOutput, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
 
 from intelegent_data_catalog.exceptions import ValidationAppError
@@ -33,6 +33,7 @@ from intelegent_data_catalog.knowledge.models import (
 )
 from intelegent_data_catalog.llm.agent import TableModelAgent
 from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.structured import structured_output
 from intelegent_data_catalog.llm.tools.table import (
     TableToolSource,
     compare_columns,
@@ -322,7 +323,7 @@ def _table_context_agent(model: Model) -> Agent[TableContextInput, TableContextP
     agent: Agent[TableContextInput, TableContextProposal] = Agent(
         model,
         deps_type=TableContextInput,
-        output_type=_structured_output(model, TableContextProposal),
+        output_type=structured_output(model, TableContextProposal),
         name="table-context",
         instructions=_TABLE_INSTRUCTIONS,
         retries=2,
@@ -335,7 +336,7 @@ def _columns_context_agent(model: Model) -> Agent[_ColumnsDeps, _NamedColumns]:
     agent: Agent[_ColumnsDeps, _NamedColumns] = Agent(
         model,
         deps_type=_ColumnsDeps,
-        output_type=_structured_output(model, _NamedColumns),
+        output_type=structured_output(model, _NamedColumns),
         name="table-columns-context",
         instructions=_COLUMNS_INSTRUCTIONS,
         retries=2,
@@ -348,22 +349,12 @@ def _column_context_agent(model: Model) -> Agent[ColumnContextInput, ColumnConte
     agent: Agent[ColumnContextInput, ColumnContextProposal] = Agent(
         model,
         deps_type=ColumnContextInput,
-        output_type=_structured_output(model, ColumnContextProposal),
+        output_type=structured_output(model, ColumnContextProposal),
         name="column-context",
         instructions=_COLUMN_INSTRUCTIONS,
         retries=2,
     )
     return agent
-
-
-def _structured_output[OutputT](
-    model: Model,
-    output: type[OutputT],
-) -> NativeOutput[OutputT] | type[OutputT]:
-    """Prefer JSON schema. A tool call lets Qwen think until the answer is empty."""
-    if bool(model.profile.get("supports_json_schema_output", False)):
-        return NativeOutput(output)
-    return output
 
 
 def _accept_columns(

@@ -1,5 +1,6 @@
 """Space model output and the cross-scope LLM rows it replaces."""
 
+import json
 from pathlib import Path
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
     RetryPromptPart,
-    ToolCallPart,
+    TextPart,
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -88,49 +89,41 @@ def test_space_agent_retries_a_same_scope_link() -> None:
     prompts: list[str] = []
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
         prompts.append(_user_text(messages))
-        tool_name: str = info.output_tools[0].name
         if _feedback(messages) == "":
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name=tool_name,
-                        args={
-                            "summary": "Not yet.",
-                            "links": [
-                                {
-                                    "source_table_id": str(orders.id),
-                                    "target_table_id": str(invoices.id),
-                                    "source_column_id": str(orders.columns[1].id),
-                                    "target_column_id": str(invoices.columns[0].id),
-                                    "kind": "JOINS_ON",
-                                    "reason": "same scope",
-                                }
-                            ],
-                        },
-                    )
-                ]
+            body: str = json.dumps(
+                {
+                    "summary": "Not yet.",
+                    "links": [
+                        {
+                            "source_table_id": str(orders.id),
+                            "target_table_id": str(invoices.id),
+                            "source_column_id": str(orders.columns[1].id),
+                            "target_column_id": str(invoices.columns[0].id),
+                            "kind": "JOINS_ON",
+                            "reason": "same scope",
+                        }
+                    ],
+                }
             )
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name=tool_name,
-                    args={
-                        "summary": "Orders and customers share a region.",
-                        "links": [
-                            {
-                                "source_table_id": str(kept.source_table_id),
-                                "target_table_id": str(kept.target_table_id),
-                                "source_column_id": str(kept.source_column_id),
-                                "target_column_id": str(kept.target_column_id),
-                                "kind": "JOINS_ON",
-                                "reason": "shared region",
-                            }
-                        ],
-                    },
-                )
-            ]
+            return ModelResponse(parts=[TextPart(content=body)])
+        accepted: str = json.dumps(
+            {
+                "summary": "Orders and customers share a region.",
+                "links": [
+                    {
+                        "source_table_id": str(kept.source_table_id),
+                        "target_table_id": str(kept.target_table_id),
+                        "source_column_id": str(kept.source_column_id),
+                        "target_column_id": str(kept.target_column_id),
+                        "kind": "JOINS_ON",
+                        "reason": "shared region",
+                    }
+                ],
+            }
         )
+        return ModelResponse(parts=[TextPart(content=accepted)])
 
     agent: SpaceSubgraphAgent = SpaceSubgraphAgent(
         FunctionModel(respond),

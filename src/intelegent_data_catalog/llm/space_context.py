@@ -14,6 +14,7 @@ from intelegent_data_catalog.knowledge.models import (
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.structured import structured_output
 
 _INSTRUCTIONS: str = (
     "You write business context for one business space. "
@@ -79,6 +80,7 @@ class SpaceContextAgent(ProposalAgent[SpaceCatalogContext, SpaceContextProposal]
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            thinking=False,
         )
 
     def propose(self, context: SpaceCatalogContext) -> SpaceContextProposal:
@@ -87,10 +89,11 @@ class SpaceContextAgent(ProposalAgent[SpaceCatalogContext, SpaceContextProposal]
 
 
 def _space_agent(model: Model) -> Agent[SpaceCatalogContext, SpaceContextProposal]:
+    """JSON schema. A tool call lets Qwen think until the answer is empty."""
     agent: Agent[SpaceCatalogContext, SpaceContextProposal] = Agent(
         model,
         deps_type=SpaceCatalogContext,
-        output_type=SpaceContextProposal,
+        output_type=structured_output(model, SpaceContextProposal),
         name="space-context",
         instructions=_INSTRUCTIONS,
         retries=2,

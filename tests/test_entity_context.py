@@ -103,10 +103,18 @@ def test_context_writers_disable_thinking() -> None:
         max_tokens=32,
         timeout_seconds=1.0,
     )
+    space: SpaceContextAgent = SpaceContextAgent(
+        model,
+        max_requests=1,
+        temperature=0.0,
+        max_tokens=32,
+        timeout_seconds=1.0,
+    )
     assert table._table._settings["thinking"] is False
     assert table._columns._settings["thinking"] is False
     assert table._column._settings["thinking"] is False
     assert scope._call._settings["thinking"] is False
+    assert space._call._settings["thinking"] is False
 
 
 def test_table_agent_retries_an_invented_column() -> None:

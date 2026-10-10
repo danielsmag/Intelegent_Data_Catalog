@@ -1,5 +1,6 @@
 """Column subgraph written when a table context is built."""
 
+import json
 import logging
 from pathlib import Path
 from typing import LiteralString
@@ -11,7 +12,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
     RetryPromptPart,
-    ToolCallPart,
+    TextPart,
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -351,45 +352,37 @@ def test_model_retries_an_invented_column_then_returns_the_link() -> None:
     prompts: list[str] = []
 
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
         prompts.append(_user_text(messages))
-        tool_name: str = info.output_tools[0].name
         feedback: str = _feedback(messages)
         if feedback == "":
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name=tool_name,
-                        args={
-                            "relations": [
-                                {
-                                    "source_column_id": str(uuid4()),
-                                    "target_column_id": str(target),
-                                    "kind": "REFERENCES",
-                                    "reason": "invented source",
-                                }
-                            ]
-                        },
-                    )
-                ]
+            body: str = json.dumps(
+                {
+                    "relations": [
+                        {
+                            "source_column_id": str(uuid4()),
+                            "target_column_id": str(target),
+                            "kind": "REFERENCES",
+                            "reason": "invented source",
+                        }
+                    ]
+                }
             )
+            return ModelResponse(parts=[TextPart(content=body)])
         assert "unknown column" in feedback
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name=tool_name,
-                    args={
-                        "relations": [
-                            {
-                                "source_column_id": str(source),
-                                "target_column_id": str(target),
-                                "kind": "REFERENCES",
-                                "reason": "customer_id points at the customer key",
-                            }
-                        ]
-                    },
-                )
-            ]
+        accepted: str = json.dumps(
+            {
+                "relations": [
+                    {
+                        "source_column_id": str(source),
+                        "target_column_id": str(target),
+                        "kind": "REFERENCES",
+                        "reason": "customer_id points at the customer key",
+                    }
+                ]
+            }
         )
+        return ModelResponse(parts=[TextPart(content=accepted)])
 
     agent: ColumnSubgraphAgent = ColumnSubgraphAgent(
         FunctionModel(respond),

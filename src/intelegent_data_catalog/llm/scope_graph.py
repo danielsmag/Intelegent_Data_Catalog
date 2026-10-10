@@ -20,6 +20,7 @@ from intelegent_data_catalog.knowledge.models import (
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.structured import structured_output
 
 _INSTRUCTIONS: str = (
     "You build a scope overview for one business scope. "
@@ -184,12 +185,14 @@ class ScopeSubgraphAgent(ProposalAgent[ScopeCatalogContext, ScopeProposal]):
 
 
 def _scope_agent(model: Model) -> Agent[ScopeCatalogContext, ScopeProposal]:
+    """JSON schema. A tool call lets Qwen think until the answer is empty."""
     agent: Agent[ScopeCatalogContext, ScopeProposal] = Agent(
         model,
         deps_type=ScopeCatalogContext,
-        output_type=ScopeProposal,
+        output_type=structured_output(model, ScopeProposal),
         name="scope-subgraph",
         instructions=_INSTRUCTIONS,
+        retries=2,
     )
     agent.output_validator(_accept_output)
     return agent

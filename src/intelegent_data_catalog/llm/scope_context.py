@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from pydantic_ai import Agent, NativeOutput
+from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
 from intelegent_data_catalog.knowledge.models import (
@@ -13,6 +13,7 @@ from intelegent_data_catalog.knowledge.models import (
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.structured import structured_output
 
 _INSTRUCTIONS: str = (
     "You write business context for one business scope. "
@@ -89,15 +90,10 @@ class ScopeContextAgent(ProposalAgent[ScopeCatalogContext, ScopeContextProposal]
 
 def _scope_agent(model: Model) -> Agent[ScopeCatalogContext, ScopeContextProposal]:
     """JSON schema. A tool call lets Qwen think until the answer is empty."""
-    output_type: NativeOutput[ScopeContextProposal] | type[ScopeContextProposal]
-    if bool(model.profile.get("supports_json_schema_output", False)):
-        output_type = NativeOutput(ScopeContextProposal)
-    else:
-        output_type = ScopeContextProposal
     agent: Agent[ScopeCatalogContext, ScopeContextProposal] = Agent(
         model,
         deps_type=ScopeCatalogContext,
-        output_type=output_type,
+        output_type=structured_output(model, ScopeContextProposal),
         name="scope-context",
         instructions=_INSTRUCTIONS,
         retries=2,

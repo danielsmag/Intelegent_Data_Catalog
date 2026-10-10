@@ -22,6 +22,7 @@ from intelegent_data_catalog.knowledge.models import (
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.structured import structured_output
 
 _INSTRUCTIONS: str = (
     "You build a space overview for one business space. "
@@ -203,12 +204,14 @@ class SpaceSubgraphAgent(ProposalAgent[SpaceCatalogContext, SpaceProposal]):
 
 
 def _space_agent(model: Model) -> Agent[SpaceCatalogContext, SpaceProposal]:
+    """JSON schema. A tool call lets Qwen think until the answer is empty."""
     agent: Agent[SpaceCatalogContext, SpaceProposal] = Agent(
         model,
         deps_type=SpaceCatalogContext,
-        output_type=SpaceProposal,
+        output_type=structured_output(model, SpaceProposal),
         name="space-subgraph",
         instructions=_INSTRUCTIONS,
+        retries=2,
     )
     agent.output_validator(_accept_output)
     return agent
