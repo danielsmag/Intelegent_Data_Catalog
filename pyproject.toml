@@ -73,3 +73,9 @@ pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
 extraPaths = ["src"]
+executionEnvironments = [
+    { root = "airflow", pythonVersion = "3.12", extraPaths = [
+        "airflow",
+        "airflow/.venv/lib/python3.12/site-packages",
+    ] },
+]

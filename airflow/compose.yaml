@@ -1,0 +1,146 @@
+# Standalone Airflow 3.3.2 for Iceberg write tests.
+# Not part of the catalog application. Start the catalog stack first so
+# Polaris, MinIO, and the sales tables exist, then:
+#   docker compose -f airflow/compose.yaml up --build -d
+name: airflow-iceberg
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: airflow-iceberg:3.3.2
+  env_file:
+    - ../.local/polaris/client.env
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+    AIRFLOW__CORE__FERNET_KEY: "PSA_O6ACUrSsjQvFWSVx692CUDlaIEWZHgPkR8cI-ek="
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: airflow_jwt_secret
+    AIRFLOW__API_AUTH__JWT_ISSUER: airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW_UID: "50000"
+    PYTHONPATH: /opt/airflow
+    PYTHONDONTWRITEBYTECODE: "1"
+    POLARIS_URI: http://polaris:8181/api/catalog
+    POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
+    S3_ENDPOINT: http://minio:9000
+    AWS_REGION: us-west-2
+    ICEBERG_NAMESPACE: sales
+  volumes:
+    - ./dags:/opt/airflow/dags:ro
+    - ./iceberg_target:/opt/airflow/iceberg_target:ro
+    - airflow_logs:/opt/airflow/logs
+    - airflow_auth:/opt/airflow/auth
+  user: "50000:0"
+  networks:
+    - default
+    - catalog
+  depends_on: &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: airflow-iceberg-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-iceberg-init
+    entrypoint: /bin/bash
+    user: "0:0"
+    restart: "no"
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+    command:
+      - -c
+      - |
+        set -euo pipefail
+        mkdir -p /opt/airflow/logs /opt/airflow/auth
+        if [[ ! -s /opt/airflow/auth/passwords.json ]]; then
+          printf '%s\n' '{"admin":"airflow"}' > /opt/airflow/auth/passwords.json
+        fi
+        chown -R "$${AIRFLOW_UID}:0" /opt/airflow/logs /opt/airflow/auth
+        exec /entrypoint airflow db migrate
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: airflow-iceberg-apiserver
+    command: api-server
+    ports:
+      - "${AIRFLOW_UI_PORT:-8082}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-iceberg-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: airflow-iceberg-dag-processor
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+networks:
+  catalog:
+    external: true
+    name: intelegent-data-catalog_default
+
+volumes:
+  airflow_postgres:
+  airflow_logs:
+  airflow_auth:

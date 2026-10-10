@@ -1,0 +1,2 @@
+--constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt"
+pyiceberg[pyarrow,s3fs]==0.12.0

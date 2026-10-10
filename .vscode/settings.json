@@ -2,10 +2,14 @@
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.analysis.extraPaths": [
     "src",
-    "scripts"
+    "scripts",
+    "airflow",
+    "airflow/.venv/lib/python3.12/site-packages"
   ],
   "cursorpyright.analysis.extraPaths": [
     "src",
-    "scripts"
+    "scripts",
+    "airflow",
+    "airflow/.venv/lib/python3.12/site-packages"
   ]
 }
