@@ -58,9 +58,9 @@ The seed job writes `sales.customers` and `sales.orders`, then builds `sales.cus
 SEED_FORCE=true docker compose up -d --force-recreate spark-lineage
 ```
 
-OpenObserve at http://localhost:5080 takes the catalog API logs and pydantic-ai spans. Sign in with `OPENOBSERVE_USER` and `OPENOBSERVE_PASSWORD` from `.env` (defaults `root@example.com` / `Local-observe-1`). Spans include prompts and tool arguments. A host `uv run` does not export until `CATALOG_OBSERVABILITY__ENABLED=true`.
+OpenObserve at http://localhost:5080 takes the catalog API logs and pydantic-ai spans. Sign in with `OPENOBSERVE_USER` and `OPENOBSERVE_PASSWORD` from `.env` (defaults `root@example.com` / `Local-observe-1`). Spans include prompts and tool arguments. A host `uv run` does not export until `CATALOG_OBSERVABILITY__ENABLED=true`. Vector ships every other Compose container's stdout into the `containers` log stream. OpenObserve itself and Vector are left out so the shipper does not collect its own traffic.
 
-`docker compose down` keeps volumes. `docker compose down -v` deletes Neo4j, Polaris, MinIO, Marquez, OpenObserve, and the Spark package cache.
+`docker compose down` keeps volumes. `docker compose down -v` deletes Neo4j, Polaris, MinIO, Marquez, OpenObserve, the Vector checkpoint, and the Spark package cache.
 
 ## Catalog UI
 

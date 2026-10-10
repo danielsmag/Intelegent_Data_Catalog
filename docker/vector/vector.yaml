@@ -1,0 +1,43 @@
+data_dir: /var/lib/vector
+
+sources:
+  docker_logs:
+    type: docker_logs
+    exclude_containers:
+      - intelegent-data-catalog-openobserve
+      - /intelegent-data-catalog-openobserve
+      - intelegent-data-catalog-vector
+      - /intelegent-data-catalog-vector
+
+transforms:
+  containers:
+    type: remap
+    inputs:
+      - docker_logs
+    source: |
+      name = to_string(.container_name) ?? "unknown"
+      name = replace(name, r'^/', "")
+      . = {
+        "container": name,
+        "image": to_string(.image) ?? "",
+        "stream": to_string(.stream) ?? "stdout",
+        "message": to_string(.message) ?? "",
+      }
+
+sinks:
+  openobserve:
+    type: http
+    inputs:
+      - containers
+    uri: http://openobserve:5080/api/default/containers/_json
+    method: post
+    auth:
+      strategy: basic
+      user: "${OPENOBSERVE_USER}"
+      password: "${OPENOBSERVE_PASSWORD}"
+    compression: gzip
+    encoding:
+      codec: json
+    healthcheck:
+      enabled: true
+      uri: http://openobserve:5080/healthz
