@@ -177,6 +177,63 @@ def test_space_migration_adds_context_and_the_snapshot_table(tmp_path: Path) -> 
         upgraded.dispose()
 
 
+def test_airflow_knowledge_migration_adds_attachments_and_widens_checks(tmp_path: Path) -> None:
+    """Revision 0012 adds attachment storage and allows LLM DAG links and airflow jobs."""
+    url: str = f"sqlite:///{tmp_path / 'catalog.db'}"
+    upgrade_database(url)
+    config: Config = Config()
+    script: Path = Path(migrate_module.__file__).resolve().parent / "migrations"
+    config.set_main_option("script_location", str(script))
+    config.set_main_option("sqlalchemy.url", url)
+    command.downgrade(config, "20261013_0011")
+    database: CatalogDatabase = CatalogDatabase(url)
+    engine: Engine = _engine(database)
+    try:
+        names: set[str] = set(inspect(engine).get_table_names())
+        columns: set[str] = {
+            column["name"] for column in inspect(engine).get_columns("airflow_instances")
+        }
+        assert "airflow_attachments" not in names
+        assert "airflow_instance_knowledge_contexts" not in names
+        assert "context" not in columns
+    finally:
+        engine.dispose()
+        database.dispose()
+    command.upgrade(config, "head")
+    upgraded: CatalogDatabase = CatalogDatabase(url)
+    upgraded_engine: Engine = _engine(upgraded)
+    try:
+        names = set(inspect(upgraded_engine).get_table_names())
+        columns = {
+            column["name"] for column in inspect(upgraded_engine).get_columns("airflow_instances")
+        }
+        assert "airflow_attachments" in names
+        assert "airflow_instance_knowledge_contexts" in names
+        assert "context" in columns
+        origin: str = _check_sql(
+            upgraded_engine,
+            "airflow_dag_tables",
+            "ck_airflow_dag_tables_origin",
+        )
+        kind: str = _check_sql(upgraded_engine, "catalog_jobs", "ck_catalog_jobs_kind")
+        assert "LLM" in origin
+        assert "airflow" in kind
+    finally:
+        upgraded_engine.dispose()
+        upgraded.dispose()
+
+
+def _check_sql(engine: Engine, table: str, name: str) -> str:
+    check: dict[str, object]
+    for check in inspect(engine).get_check_constraints(table):
+        if check.get("name") != name:
+            continue
+        sqltext: object = check.get("sqltext")
+        assert isinstance(sqltext, str)
+        return sqltext
+    raise AssertionError(f"missing check {name}")
+
+
 def test_space_delete_is_restricted_while_a_scope_exists(tmp_path: Path) -> None:
     """A space row cannot disappear while a scope still points at it."""
     database: CatalogDatabase = _database(tmp_path)

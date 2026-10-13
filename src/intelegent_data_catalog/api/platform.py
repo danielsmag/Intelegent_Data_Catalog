@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.airflow.repository import AirflowRepository
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings
@@ -20,12 +21,21 @@ from intelegent_data_catalog.graph.neo4j_store import (
     Neo4jSpaceSubgraph,
 )
 from intelegent_data_catalog.graph.service import GraphService
+from intelegent_data_catalog.knowledge.context.airflow_catalog import (
+    PostgresAirflowCatalogContextProvider,
+)
+from intelegent_data_catalog.knowledge.context.airflow_graph import AirflowGraphBuilder
 from intelegent_data_catalog.knowledge.context.column_graph import (
     ColumnSubgraphBuilder,
     KnowledgeSubgraphWriter,
     ScopeColumnCatalog,
 )
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
+from intelegent_data_catalog.knowledge.context.pipelines import (
+    AttachedPipelineReader,
+    AttachedPipelineRunner,
+    AttachedPipelineSource,
+)
 from intelegent_data_catalog.knowledge.context.scope_catalog import (
     MergedTableKnowledgeReader,
     Neo4jTableKnowledgeReader,
@@ -49,6 +59,10 @@ from intelegent_data_catalog.knowledge.context.space_graph import (
     SpaceGraphAppender,
     SpaceGraphBuilder,
 )
+from intelegent_data_catalog.knowledge.factories.airflow_agent_factory import (
+    AirflowAgentFactory,
+    build_airflow_agent_factory,
+)
 from intelegent_data_catalog.knowledge.factories.scope_agent_factory import (
     ScopeAgentFactory,
     build_scope_agent_factory,
@@ -62,6 +76,8 @@ from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     build_table_agent_factory,
 )
 from intelegent_data_catalog.knowledge.models import (
+    AirflowAnalysisContext,
+    AirflowContextOptions,
     ColumnRelation,
     ContextGenerationOptions,
     ScopeAnalysisContext,
@@ -71,17 +87,21 @@ from intelegent_data_catalog.knowledge.models import (
     TableAnalysisContext,
     TableContextOptions,
 )
+from intelegent_data_catalog.knowledge.operations.airflow_operation import AirflowInstanceAgent
 from intelegent_data_catalog.knowledge.operations.scope_operation import ScopeAgent
 from intelegent_data_catalog.knowledge.operations.space_operation import SpaceAgent
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
 from intelegent_data_catalog.knowledge.store import (
+    AirflowKnowledgeContextStore,
     KnowledgeContextStore,
     ScopeKnowledgeContextStore,
     SemanticContextStore,
     SpaceKnowledgeContextStore,
 )
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
+from intelegent_data_catalog.llm.airflow_analysis import AirflowAnalysisAgent
+from intelegent_data_catalog.llm.airflow_context import AirflowContextAgent
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
 from intelegent_data_catalog.llm.factory import build_model, build_table_operation_agent
@@ -89,7 +109,7 @@ from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
 from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
 from intelegent_data_catalog.llm.space_context import SpaceContextAgent
 from intelegent_data_catalog.llm.space_graph import SpaceSubgraphAgent
-from intelegent_data_catalog.persistence.models import ColumnRow
+from intelegent_data_catalog.persistence.models import AirflowInstanceRow, ColumnRow
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
 from intelegent_data_catalog.registry.repository import RegistryRepository
@@ -178,6 +198,20 @@ class RequestPlatform:
             timeout_seconds=scope_timeout,
         )
         self._space_describer: SpaceContextAgent = SpaceContextAgent(
+            build_model(settings.llm),
+            max_requests=settings.llm.max_tool_steps,
+            temperature=settings.llm.temperature,
+            max_tokens=settings.llm.max_tokens,
+            timeout_seconds=scope_timeout,
+        )
+        self._airflow_proposer: AirflowAnalysisAgent = AirflowAnalysisAgent(
+            build_model(settings.llm),
+            max_requests=settings.llm.max_tool_steps,
+            temperature=settings.llm.temperature,
+            max_tokens=settings.llm.max_tokens,
+            timeout_seconds=scope_timeout,
+        )
+        self._airflow_describer: AirflowContextAgent = AirflowContextAgent(
             build_model(settings.llm),
             max_requests=settings.llm.max_tool_steps,
             temperature=settings.llm.temperature,
@@ -316,6 +350,8 @@ class RequestPlatform:
                 self._space_factory(None).create(subject_id).describe()
             case "scope":
                 self._scope_factory(None).create(subject_id).describe()
+            case "airflow":
+                self._airflow_factory(None).create(subject_id).describe()
             case "table":
                 self._table_factory(None).create(subject_id).describe_table()
             case "table_columns":
@@ -351,6 +387,7 @@ class RequestPlatform:
                 RegistryRepository(self._session),
                 MergedTableKnowledgeReader(readers),
                 ScopeKnowledgeContextStore(self._session),
+                pipelines=self._pipelines(graph_builder is not None),
             ),
             graph_builder,
             describer=self._scope_describer,
@@ -368,11 +405,77 @@ class RequestPlatform:
                 RegistryRepository(self._session),
                 MergedScopeKnowledgeReader(readers),
                 SpaceKnowledgeContextStore(self._session),
+                pipelines=self._pipelines(graph_builder is not None),
             ),
             graph_builder,
             describer=self._space_describer,
             context_writer=SemanticContextStore(self._session),
         )
+
+    def build_airflow_context(
+        self,
+        instance_id: UUID,
+        options: AirflowContextOptions,
+    ) -> AirflowAnalysisContext:
+        """Build one Airflow instance context and store it.
+
+        One model call covers the synced DAGs of this instance. Accepted links
+        replace prior LLM DAG mappings for those DAGs.
+        """
+        logger.info("build airflow context start instance_id=%s", instance_id)
+        repository: AirflowRepository = AirflowRepository(self._session)
+        builder: AirflowGraphBuilder = AirflowGraphBuilder(self._airflow_proposer, repository)
+        agent: AirflowInstanceAgent = self._airflow_factory(builder).create(instance_id)
+        built: AirflowAnalysisContext = agent.build_context(options)
+        AirflowKnowledgeContextStore(self._session).save(built)
+        logger.info(
+            "build airflow context done instance_id=%s dags=%s",
+            instance_id,
+            built.dags_analyzed,
+        )
+        return built
+
+    def read_airflow_context(self, instance_id: UUID) -> AirflowAnalysisContext:
+        """Return the last context saved for this Airflow instance."""
+        saved: AirflowAnalysisContext | None = AirflowKnowledgeContextStore(self._session).get(
+            instance_id,
+        )
+        if saved is None:
+            raise EntityNotFoundError("knowledge context", str(instance_id))
+        return saved
+
+    def airflow_instance_name(self, instance_id: UUID) -> str:
+        """Return the instance name, or raise when the id is unknown."""
+        row: AirflowInstanceRow | None = AirflowRepository(self._session).get_instance(instance_id)
+        if row is None:
+            raise EntityNotFoundError("airflow instance", str(instance_id))
+        return row.name
+
+    def _airflow_factory(self, graph_builder: AirflowGraphBuilder | None) -> AirflowAgentFactory:
+        return build_airflow_agent_factory(
+            PostgresAirflowCatalogContextProvider(
+                AirflowRepository(self._session),
+                RegistryRepository(self._session),
+                AirflowKnowledgeContextStore(self._session),
+            ),
+            graph_builder,
+            describer=self._airflow_describer,
+            context_writer=SemanticContextStore(self._session),
+        )
+
+    def _pipelines(self, analyze: bool) -> AttachedPipelineSource:
+        repository: AirflowRepository = AirflowRepository(self._session)
+        snapshots: AirflowKnowledgeContextStore = AirflowKnowledgeContextStore(self._session)
+        if not analyze:
+            reader: AttachedPipelineReader = AttachedPipelineReader(repository, snapshots)
+            return reader
+        builder: AirflowGraphBuilder = AirflowGraphBuilder(self._airflow_proposer, repository)
+        runner: AttachedPipelineRunner = AttachedPipelineRunner(
+            repository,
+            self._airflow_factory(builder),
+            snapshots,
+        )
+        return runner
 
 
 class _TableSubgraph:

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.knowledge.models import (
+    AirflowContextOptions,
     ContextGenerationOptions,
     ScopeContextOptions,
     SpaceContextOptions,
@@ -81,6 +82,30 @@ class CatalogSpaceBuild:
                 self._container.query_service(),
             )
             platform.build_space_context(subject_id, options)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+
+class CatalogAirflowBuild:
+    """Adapter from the Airflow job queue to ``RequestPlatform``."""
+
+    def __init__(self, container: AppContainer) -> None:
+        self._container: AppContainer = container
+
+    def run(self, subject_id: UUID, options: AirflowContextOptions) -> None:
+        """Build and save an Airflow context. The request session is already closed."""
+        database: CatalogDatabase = self._container.database()
+        session: Session = database.session()
+        try:
+            platform: RequestPlatform = RequestPlatform(
+                session,
+                self._container.settings(),
+                self._container.query_service(),
+            )
+            platform.build_airflow_context(subject_id, options)
         except Exception:
             session.rollback()
             raise

@@ -10,6 +10,7 @@ from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.scope_graph import accept_table_links
 from intelegent_data_catalog.knowledge.models import (
     ColumnMetadata,
+    PipelineInput,
     PreviousScopeFindings,
     ScopeCatalogContext,
     ScopeProposal,
@@ -39,6 +40,9 @@ _INSTRUCTIONS: str = (
     "Treat previous_findings as a draft: keep a justified link, drop the rest, or add one. "
     "summary is two to four sentences on what this scope describes and how the tables join. "
     "Mention a table without context only when that gap matters. "
+    "pipelines lists Airflow DAGs attached to this scope and the tables each DAG reads or writes. "
+    "Tables written by one pipeline from the same inputs usually share keys. "
+    "Use pipelines to find joins and to describe the business process. "
     "reason is one short sentence grounded in the names, types, keys, or findings. "
     "Return no links when nothing is important. "
     "Do not invent table ids or column ids."
@@ -139,6 +143,19 @@ class _PromptPrevious(BaseModel):
     links: list[_PromptLink]
 
 
+class _PromptPipeline(BaseModel):
+    """One attached DAG sent to the scope model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_id: str
+    instance_name: str
+    summary: str | None
+    schedule: str | None
+    reads: list[UUID]
+    writes: list[UUID]
+
+
 class _ScopeGraphPrompt(BaseModel):
     """User message for one scope-subgraph call."""
 
@@ -152,6 +169,7 @@ class _ScopeGraphPrompt(BaseModel):
     tables: list[_PromptTable]
     existing_relationships: list[_PromptRelationship]
     table_knowledge: list[_PromptTableKnowledge]
+    pipelines: list[_PromptPipeline]
     previous_findings: _PromptPrevious | None
 
 
@@ -283,10 +301,22 @@ def _prompt(context: ScopeCatalogContext) -> str:
         tables=tables,
         existing_relationships=relationships,
         table_knowledge=knowledge,
+        pipelines=[_pipeline(item) for item in context.pipelines],
         previous_findings=_previous(context.previous),
     )
     rendered: str = payload.model_dump_json(exclude_none=True)
     return rendered
+
+
+def _pipeline(item: PipelineInput) -> _PromptPipeline:
+    return _PromptPipeline(
+        dag_id=item.dag_id,
+        instance_name=item.instance_name,
+        summary=item.summary,
+        schedule=item.schedule,
+        reads=list(item.reads),
+        writes=list(item.writes),
+    )
 
 
 def _previous(previous: PreviousScopeFindings | None) -> _PromptPrevious | None:

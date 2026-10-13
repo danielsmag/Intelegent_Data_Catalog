@@ -17,6 +17,7 @@ from intelegent_data_catalog.airflow.mapping import (
     match_dag_tables,
 )
 from intelegent_data_catalog.airflow.reads import (
+    _aware,
     dag_detail,
     dag_read,
     instance_read,
@@ -26,10 +27,16 @@ from intelegent_data_catalog.airflow.reads import (
 )
 from intelegent_data_catalog.airflow.repository import (
     AirflowRepository,
+    AttachedDag,
     DagWrite,
     MappingWrite,
 )
 from intelegent_data_catalog.airflow.schemas import (
+    AirflowAttachedDagRead,
+    AirflowAttachmentCreate,
+    AirflowAttachmentRead,
+    AirflowAttachmentTargetKind,
+    AirflowAttachmentVia,
     AirflowConnectionTest,
     AirflowConnectionTestRequest,
     AirflowDagDetail,
@@ -57,13 +64,17 @@ from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
     ValidationAppError,
 )
+from intelegent_data_catalog.knowledge.models import AirflowAnalysisContext, DagFinding
+from intelegent_data_catalog.knowledge.store import AirflowKnowledgeContextStore
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
     AirflowInstanceStatus,
     AirflowMappingOrigin,
+    ContextOrigin,
     SyncRunStatus,
 )
 from intelegent_data_catalog.persistence.models import (
+    AirflowAttachmentRow,
     AirflowDagRow,
     AirflowDagTableRow,
     AirflowInstanceRow,
@@ -71,6 +82,7 @@ from intelegent_data_catalog.persistence.models import (
     CatalogTableRow,
 )
 from intelegent_data_catalog.registry.identifiers import slugify
+from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.sources.airflow.client import AirflowClient
 from intelegent_data_catalog.sources.airflow.models import (
     AirflowAsset,
@@ -105,6 +117,8 @@ class AirflowService:
         logger: logging.Logger,
     ) -> None:
         self._repo: AirflowRepository = AirflowRepository(session)
+        self._registry: RegistryRepository = RegistryRepository(session)
+        self._knowledge: AirflowKnowledgeContextStore = AirflowKnowledgeContextStore(session)
         self._http: httpx.Client = http_client
         self._settings: AirflowSettings = settings
         self._logger: logging.Logger = logger
@@ -165,6 +179,8 @@ class AirflowService:
             row.verify_tls = _required(patch.verify_tls, "verify_tls")
         if "description" in changes:
             row.description = patch.description
+        if "context" in changes:
+            _apply_user_context(row, patch.context)
         if "status" in changes:
             status: AirflowInstanceStatus = _required(patch.status, "status")
             row.status = status.value
@@ -320,6 +336,113 @@ class AirflowService:
             raise ConflictError("only manual mappings can be removed")
         raise EntityNotFoundError("airflow dag table", str(table_id))
 
+    def attach(
+        self,
+        kind: AirflowAttachmentTargetKind,
+        target_id: UUID,
+        body: AirflowAttachmentCreate,
+    ) -> AirflowAttachmentRead:
+        """Attach an instance, or one of its DAGs, to a space or scope."""
+        self._require_target(kind, target_id)
+        instance: AirflowInstanceRow = self._instance(body.instance_id)
+        dag: AirflowDagRow | None = None
+        instance_id: UUID | None = instance.id
+        dag_row_id: UUID | None = None
+        if body.dag_id is not None:
+            dag = self._dag(instance.id, body.dag_id)
+            instance_id = None
+            dag_row_id = dag.id
+        space_id: UUID | None = target_id if kind == "space" else None
+        scope_id: UUID | None = target_id if kind == "scope" else None
+        existing: AirflowAttachmentRow | None = self._repo.find_attachment(
+            instance_id=instance_id,
+            dag_row_id=dag_row_id,
+            space_id=space_id,
+            scope_id=scope_id,
+        )
+        if existing is not None:
+            raise ConflictError("airflow attachment already exists")
+        row: AirflowAttachmentRow = self._repo.add_attachment(
+            instance_id=instance_id,
+            dag_row_id=dag_row_id,
+            space_id=space_id,
+            scope_id=scope_id,
+        )
+        self._repo.commit()
+        return _attachment_read(row, instance, dag)
+
+    def list_attachments(
+        self,
+        kind: AirflowAttachmentTargetKind,
+        target_id: UUID,
+    ) -> list[AirflowAttachmentRead]:
+        """List Airflow attachments on one space or scope."""
+        self._require_target(kind, target_id)
+        rows: list[AirflowAttachmentRow] = self._repo.list_attachments(
+            space_id=target_id if kind == "space" else None,
+            scope_id=target_id if kind == "scope" else None,
+        )
+        return [self._attachment_read(row) for row in rows]
+
+    def list_attached_dags(
+        self,
+        kind: AirflowAttachmentTargetKind,
+        target_id: UUID,
+    ) -> list[AirflowAttachedDagRead]:
+        """List DAGs reached by this target, including DAGs synced onto an attached instance."""
+        self._require_target(kind, target_id)
+        scope_ids: set[UUID] = set()
+        space_ids: set[UUID] = set()
+        if kind == "scope":
+            scope_ids.add(target_id)
+        else:
+            space_ids.add(target_id)
+            scope_ids = {row.id for row in self._registry.list_scopes(target_id)}
+        attached: list[AttachedDag] = self._repo.list_attached_dags(scope_ids, space_ids)
+        counts: dict[UUID, int] = {}
+        link: AirflowDagTableRow
+        for link in self._repo.list_mappings_for_dags({item.dag.id for item in attached}):
+            counts[link.dag_row_id] = counts.get(link.dag_row_id, 0) + 1
+        instance_ids: set[UUID] = {item.instance.id for item in attached}
+        summaries: dict[UUID, str] = self._finding_summaries(instance_ids)
+        reads: list[AirflowAttachedDagRead] = []
+        item: AttachedDag
+        for item in attached:
+            listed: AirflowDagRead = dag_read(item.dag, [])
+            via: AirflowAttachmentVia = "dag" if item.via == "dag" else "instance"
+            reads.append(
+                AirflowAttachedDagRead(
+                    attachment_id=item.attachment_id,
+                    dag_row_id=item.dag.id,
+                    instance_id=item.instance.id,
+                    instance_name=item.instance.name,
+                    dag_id=item.dag.dag_id,
+                    display_name=item.dag.display_name,
+                    description=item.dag.description,
+                    timetable_summary=item.dag.timetable_summary,
+                    is_paused=item.dag.is_paused,
+                    last_run=listed.last_run,
+                    table_count=counts.get(item.dag.id, 0),
+                    via=via,
+                    summary=summaries.get(item.dag.id),
+                )
+            )
+        return reads
+
+    def detach(
+        self,
+        kind: AirflowAttachmentTargetKind,
+        target_id: UUID,
+        attachment_id: UUID,
+    ) -> None:
+        """Remove one attachment. The Airflow snapshot stays."""
+        self._require_target(kind, target_id)
+        row: AirflowAttachmentRow | None = self._repo.get_attachment(attachment_id)
+        if row is None or not _attachment_targets(row, kind, target_id):
+            raise EntityNotFoundError("airflow attachment", str(attachment_id))
+        self._repo.delete(row)
+        self._repo.commit()
+
     def dags_for_table(self, table_id: UUID) -> list[AirflowTableDagRead]:
         """Return DAG links for one catalog table."""
         if self._repo.get_catalog_table(table_id) is None:
@@ -328,6 +451,44 @@ class AirflowService:
             table_dag_read(link, dag, instance)
             for link, dag, instance in self._repo.list_table_links(table_id)
         ]
+
+    def _require_target(self, kind: AirflowAttachmentTargetKind, target_id: UUID) -> None:
+        if kind == "scope":
+            if self._registry.get_scope(target_id) is None:
+                raise EntityNotFoundError("scope", str(target_id))
+            return
+        if self._registry.get_space(target_id) is None:
+            raise EntityNotFoundError("space", str(target_id))
+
+    def _attachment_read(self, row: AirflowAttachmentRow) -> AirflowAttachmentRead:
+        dag: AirflowDagRow | None = None
+        instance: AirflowInstanceRow | None
+        if row.dag_row_id is not None:
+            dag = self._repo.get_dag_row(row.dag_row_id)
+            if dag is None:
+                raise EntityNotFoundError("airflow dag", str(row.dag_row_id))
+            instance = self._repo.get_instance(dag.instance_id)
+        else:
+            instance_id: UUID | None = row.airflow_instance_id
+            instance = None if instance_id is None else self._repo.get_instance(instance_id)
+        if instance is None:
+            missing: str = str(row.airflow_instance_id or row.dag_row_id)
+            raise EntityNotFoundError("airflow instance", missing)
+        return _attachment_read(row, instance, dag)
+
+    def _finding_summaries(self, instance_ids: set[UUID]) -> dict[UUID, str]:
+        found: dict[UUID, str] = {}
+        instance_id: UUID
+        for instance_id in instance_ids:
+            saved: AirflowAnalysisContext | None = self._knowledge.get(instance_id)
+            if saved is None:
+                continue
+            finding: DagFinding
+            for finding in saved.findings:
+                text: str = finding.summary.strip()
+                if text != "":
+                    found[finding.dag_row_id] = text
+        return found
 
     def _sync_instance(self, row: AirflowInstanceRow, started: datetime) -> AirflowSyncRunRead:
         notes: list[str] = []
@@ -540,6 +701,47 @@ class AirflowService:
         finally:
             if owned is not None:
                 owned.close()
+
+
+def _attachment_read(
+    row: AirflowAttachmentRow,
+    instance: AirflowInstanceRow,
+    dag: AirflowDagRow | None,
+) -> AirflowAttachmentRead:
+    kind: AirflowAttachmentTargetKind = "scope" if row.scope_id is not None else "space"
+    target_id: UUID | None = row.scope_id if kind == "scope" else row.space_id
+    if target_id is None:
+        raise EntityNotFoundError("airflow attachment", str(row.id))
+    return AirflowAttachmentRead(
+        id=row.id,
+        target_kind=kind,
+        target_id=target_id,
+        instance_id=instance.id,
+        instance_name=instance.name,
+        instance_slug=instance.slug,
+        dag_row_id=None if dag is None else dag.id,
+        dag_id=None if dag is None else dag.dag_id,
+        dag_display_name=None if dag is None else dag.display_name,
+        created_at=_aware(row.created_at),
+    )
+
+
+def _attachment_targets(
+    row: AirflowAttachmentRow,
+    kind: AirflowAttachmentTargetKind,
+    target_id: UUID,
+) -> bool:
+    if kind == "scope":
+        return row.scope_id == target_id
+    return row.space_id == target_id
+
+
+def _apply_user_context(row: AirflowInstanceRow, value: str | None) -> None:
+    text: str | None = None if value is None else value.strip()
+    if text == "":
+        text = None
+    row.context = text
+    row.context_origin = None if text is None else ContextOrigin.USER.value
 
 
 def _slug_for(name: str) -> str:

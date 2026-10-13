@@ -1,6 +1,6 @@
 # Intelegent Data Catalog
 
-Python 3.14 application for an intelligent data catalog.
+Python 3.15 application for an intelligent data catalog.
 
 ## Setup
 

@@ -24,6 +24,7 @@ from intelegent_data_catalog.knowledge.models import (
     ScopeTableSummary,
     TableLink,
     TableRelation,
+    pipeline_summaries,
 )
 from intelegent_data_catalog.persistence.enums import RelationshipOrigin
 
@@ -133,6 +134,7 @@ class ScopeGraphBuilder(ScopeGraphAppender):
             summary=summary,
             tables_without_context=list(context.tables_without_context),
             previous_links_kept=_previous_links_kept(context, accepted),
+            pipelines=pipeline_summaries(context.pipelines),
         )
 
 

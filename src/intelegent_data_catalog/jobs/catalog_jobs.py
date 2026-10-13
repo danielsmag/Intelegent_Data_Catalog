@@ -11,6 +11,7 @@ from sqlalchemy.sql.selectable import Select
 
 from intelegent_data_catalog.exceptions import CatalogError, ConflictError, ValidationAppError
 from intelegent_data_catalog.jobs.models import (
+    AirflowBuildJobRead,
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
@@ -19,6 +20,7 @@ from intelegent_data_catalog.jobs.models import (
 )
 from intelegent_data_catalog.jobs.publisher import BuildJobPublisher
 from intelegent_data_catalog.knowledge.models import (
+    AirflowContextOptions,
     ContextGenerationOptions,
     ContextSubjectKind,
     ScopeContextOptions,
@@ -235,6 +237,30 @@ class CatalogJobs:
         """Return the newest space build."""
         return _space_read_optional(self._store.latest(CatalogJobKind.SPACE, subject_id, ""))
 
+    def start_airflow(
+        self,
+        subject_id: UUID,
+        subject_name: str,
+        options: AirflowContextOptions,
+    ) -> AirflowBuildJobRead:
+        """Start an Airflow instance build, or join the one already running."""
+        row: CatalogJobRow = self._start(
+            CatalogJobKind.AIRFLOW,
+            subject_id,
+            subject_name,
+            "",
+            options,
+        )
+        return _airflow_read(row)
+
+    def get_airflow(self, job_id: UUID) -> AirflowBuildJobRead | None:
+        """Return one Airflow build."""
+        return _airflow_read_optional(self._typed(job_id, CatalogJobKind.AIRFLOW))
+
+    def latest_airflow(self, subject_id: UUID) -> AirflowBuildJobRead | None:
+        """Return the newest Airflow build."""
+        return _airflow_read_optional(self._store.latest(CatalogJobKind.AIRFLOW, subject_id, ""))
+
     def start_context(
         self,
         subject_id: UUID,
@@ -311,7 +337,7 @@ def _job_status(value: str) -> KnowledgeBuildState:
 
 def _subject_kind(lane: str) -> ContextSubjectKind:
     match lane:
-        case "space" | "scope" | "table" | "table_columns" | "column":
+        case "space" | "scope" | "table" | "table_columns" | "column" | "airflow":
             return lane
         case _:
             raise ValidationAppError(f"unknown context lane: {lane}")
@@ -363,6 +389,22 @@ def _space_read_optional(row: CatalogJobRow | None) -> SpaceBuildJobRead | None:
     if row is None:
         return None
     return _space_read(row)
+
+
+def _airflow_read(row: CatalogJobRow) -> AirflowBuildJobRead:
+    return AirflowBuildJobRead(
+        id=row.id,
+        instance_id=row.subject_id,
+        instance_name=row.subject_name,
+        status=_job_status(row.status),
+        error=row.error,
+    )
+
+
+def _airflow_read_optional(row: CatalogJobRow | None) -> AirflowBuildJobRead | None:
+    if row is None:
+        return None
+    return _airflow_read(row)
 
 
 def _context_read(row: CatalogJobRow) -> ContextGenerationJobRead:

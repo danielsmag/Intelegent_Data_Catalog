@@ -191,6 +191,63 @@ def test_space_context_is_missing_until_started_and_a_patch_stores_user_text(
         database.dispose()
 
 
+def test_airflow_context_is_missing_until_started_and_a_patch_stores_user_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An instance with no snapshot is 404. Starting a build returns 202. A patch is USER."""
+
+    def _skip(self: RequestPlatform, instance_id: object, options: object) -> None:
+        del self, instance_id, options
+
+    monkeypatch.setattr(RequestPlatform, "build_airflow_context", _skip)
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        created: httpx.Response = _send(
+            app,
+            "POST",
+            "/api/v1/airflow/instances",
+            {
+                "name": "Local",
+                "base_url": "http://airflow.test",
+                "username": "admin",
+                "password": "s3cret-airflow",
+            },
+        )
+        assert created.status_code == 201
+        instance_id: str = _text(_object(created), "id")
+        missing: httpx.Response = _send(
+            app,
+            "GET",
+            f"/api/v1/airflow/instances/{instance_id}/knowledge-context",
+        )
+        assert missing.status_code == 404
+        started: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/airflow/instances/{instance_id}/knowledge-context",
+            {},
+        )
+        assert started.status_code == 202
+        job_id: str = _text(_object(started), "id")
+        finished: dict[str, object] = _wait_for_airflow_build(app, job_id)
+        assert finished["status"] == "succeeded"
+        patched: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/airflow/instances/{instance_id}",
+            {"context": "Nightly sales pipelines."},
+        )
+        assert patched.status_code == 200
+        body: dict[str, object] = _object(patched)
+        assert body["context"] == "Nightly sales pipelines."
+        assert body["context_origin"] == "USER"
+    finally:
+        database.dispose()
+
+
 def test_generate_table_context_returns_a_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -331,6 +388,20 @@ def _wait_for_space_build(app: FastAPI, job_id: str) -> dict[str, object]:
             return body
         time.sleep(0.05)
     raise AssertionError("space build did not finish")
+
+
+def _wait_for_airflow_build(app: FastAPI, job_id: str) -> dict[str, object]:
+    """Poll until the background Airflow build leaves the running state."""
+    attempt: int
+    for attempt in range(50):
+        del attempt
+        current: httpx.Response = _send(app, "GET", f"/api/v1/airflow-builds/{job_id}")
+        assert current.status_code == 200
+        body: dict[str, object] = _object(current)
+        if body["status"] != "running":
+            return body
+        time.sleep(0.05)
+    raise AssertionError("airflow build did not finish")
 
 
 def _wait_for_generation(app: FastAPI, job_id: str) -> dict[str, object]:

@@ -11,6 +11,7 @@ from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.jobs.catalog import (
+    CatalogAirflowBuild,
     CatalogContextGeneration,
     CatalogKnowledgeBuild,
     CatalogScopeBuild,
@@ -19,6 +20,7 @@ from intelegent_data_catalog.jobs.catalog import (
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobStore
 from intelegent_data_catalog.jobs.runtime import job_container
 from intelegent_data_catalog.knowledge.models import (
+    AirflowContextOptions,
     ContextGenerationOptions,
     ScopeContextOptions,
     SpaceContextOptions,
@@ -35,12 +37,14 @@ _FAILURE_LOG: dict[str, str] = {
     CatalogJobKind.SCOPE.value: "scope context build failed",
     CatalogJobKind.SPACE.value: "space context build failed",
     CatalogJobKind.CONTEXT.value: "context generation failed",
+    CatalogJobKind.AIRFLOW.value: "airflow context build failed",
 }
 _FAILURE_MESSAGE: dict[str, str] = {
     CatalogJobKind.KNOWLEDGE.value: "context build failed",
     CatalogJobKind.SCOPE.value: "scope context build failed",
     CatalogJobKind.SPACE.value: "space context build failed",
     CatalogJobKind.CONTEXT.value: "context generation failed",
+    CatalogJobKind.AIRFLOW.value: "airflow context build failed",
 }
 
 
@@ -130,6 +134,11 @@ def _execute(
             CatalogContextGeneration(container).run(
                 subject_id,
                 ContextGenerationOptions.model_validate(options),
+            )
+        case CatalogJobKind.AIRFLOW.value:
+            CatalogAirflowBuild(container).run(
+                subject_id,
+                AirflowContextOptions.model_validate(options),
             )
         case _:
             raise CatalogError(f"unknown catalog job kind: {kind}")

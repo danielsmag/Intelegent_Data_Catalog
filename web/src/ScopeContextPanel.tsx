@@ -1,6 +1,6 @@
 import type { ReactElement } from "react"
 import { Link } from "react-router-dom"
-import type { ScopeKnowledgeContext, ScopeTableLink, ScopeTableSummary } from "./registryApi"
+import type { PipelineSummary, ScopeKnowledgeContext, ScopeTableLink, ScopeTableSummary } from "./registryApi"
 
 export function ScopeContextPanel(props: { context: ScopeKnowledgeContext }): ReactElement {
   const context: ScopeKnowledgeContext = props.context
@@ -22,7 +22,19 @@ export function ScopeContextPanel(props: { context: ScopeKnowledgeContext }): Re
         <dd>{context.table_links.length}</dd>
         <dt>Previous links kept</dt>
         <dd>{context.previous_links_kept}</dd>
+        <dt>Pipelines</dt>
+        <dd>{context.pipelines.length}</dd>
       </dl>
+      {context.pipelines.length > 0 ? (
+        <ul className="registry-list">
+          {context.pipelines.map((pipeline: PipelineSummary) => (
+            <li key={`${pipeline.instance_name}-${pipeline.dag_id}`}>
+              <span className="badge">{pipeline.instance_name}</span>
+              <span>{pipeline.dag_id}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {missing.length > 0 ? (
         <p className="comment">
           {missing.length === 1

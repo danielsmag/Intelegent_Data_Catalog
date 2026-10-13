@@ -46,6 +46,18 @@ class SpaceBuildJobRead(BaseModel):
     error: str | None = None
 
 
+class AirflowBuildJobRead(BaseModel):
+    """One background Airflow build. The saved context is a separate read."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    instance_id: UUID
+    instance_name: str
+    status: KnowledgeBuildState
+    error: str | None = None
+
+
 class ContextGenerationJobRead(BaseModel):
     """One background context write. The catalog row is a separate read."""
 

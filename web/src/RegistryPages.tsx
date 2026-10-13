@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "
 import { Link, useParams } from "react-router-dom"
 import { useTabParam } from "./useTabParam"
 import { ActivityBar } from "./ActivityBar"
+import { AirflowAttachmentsPanel } from "./AirflowAttachmentsPanel"
+import { AttachAirflowForm } from "./AttachAirflowForm"
 import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { ConfigRail, optionsFromFields } from "./ConfigRail"
@@ -290,14 +292,15 @@ export function SpacesPage(): ReactElement {
   )
 }
 
-const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "graph"]
+const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "airflow", "graph"]
 
-type SpaceTab = "overview" | "scopes" | "graph"
+type SpaceTab = "overview" | "scopes" | "airflow" | "graph"
 
 const SPACE_OPTION_FIELDS: readonly OptionField[] = [
   { key: "include_scope_knowledge", label: "Include scope knowledge", defaultValue: true },
   { key: "include_previous", label: "Keep previous findings", defaultValue: true },
   { key: "include_summary", label: "Write summary", defaultValue: true },
+  { key: "include_airflow", label: "Include Airflow", defaultValue: true },
 ]
 
 export function SpacePage(): ReactElement {
@@ -314,6 +317,7 @@ export function SpacePage(): ReactElement {
   const [building, setBuilding] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<boolean>(false)
+  const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
   const config: EntityConfigController = useEntityConfig("space", spaceId, SPACE_OPTION_FIELDS)
   const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
   useRunningJobWatch(
@@ -326,6 +330,7 @@ export function SpacePage(): ReactElement {
   )
   useEffect(() => {
     setCreating(false)
+    setAttachingAirflow(false)
     setBuilding(false)
     setKnowledge(null)
     setSpaceGraph(null)
@@ -435,6 +440,7 @@ export function SpacePage(): ReactElement {
       include_scope_knowledge: config.options.include_scope_knowledge ?? true,
       include_previous: config.options.include_previous ?? true,
       include_summary: config.options.include_summary ?? true,
+      include_airflow: config.options.include_airflow ?? true,
     })
       .then((job: SpaceBuildJob) => {
         setBuilding(job.status === "running")
@@ -514,6 +520,18 @@ export function SpacePage(): ReactElement {
             >
               {creating ? null : <PlusIcon />}
               {creating ? "Close" : "Add scope"}
+            </button>
+            <button
+              type="button"
+              className="button with-icon"
+              aria-expanded={attachingAirflow}
+              disabled={space === null}
+              onClick={() => {
+                setAttachingAirflow((open: boolean) => !open)
+                selectTab("airflow")
+              }}
+            >
+              {attachingAirflow ? "Close" : "Attach Airflow"}
             </button>
             </div>
           </div>
@@ -617,6 +635,32 @@ export function SpacePage(): ReactElement {
             {cards.length > 0 ? <EntityGrid items={cards} /> : null}
           </>
         ) : null}
+        {tab === "airflow" ? (
+          <>
+            {attachingAirflow ? (
+              <div className="catalog-panel">
+                <AttachAirflowForm
+                  targetKind="space"
+                  targetId={spaceId}
+                  onCancel={() => {
+                    setAttachingAirflow(false)
+                  }}
+                  onAttached={() => {
+                    bumpCatalogRevision()
+                  }}
+                />
+              </div>
+            ) : null}
+            <AirflowAttachmentsPanel
+              targetKind="space"
+              targetId={spaceId}
+              revision={revision}
+              onChanged={() => {
+                bumpCatalogRevision()
+              }}
+            />
+          </>
+        ) : null}
         {tab === "graph" ? (
           <SubgraphView
             graph={spaceGraph}
@@ -629,14 +673,15 @@ export function SpacePage(): ReactElement {
   )
 }
 
-const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "graph"]
+const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "airflow", "graph"]
 
-type ScopeTab = "overview" | "tables" | "graph"
+type ScopeTab = "overview" | "tables" | "airflow" | "graph"
 
 const SCOPE_OPTION_FIELDS: readonly OptionField[] = [
   { key: "include_table_knowledge", label: "Include table knowledge", defaultValue: true },
   { key: "include_previous", label: "Keep previous findings", defaultValue: true },
   { key: "include_summary", label: "Write summary", defaultValue: true },
+  { key: "include_airflow", label: "Include Airflow", defaultValue: true },
 ]
 
 export function ScopePage(): ReactElement {
@@ -653,6 +698,7 @@ export function ScopePage(): ReactElement {
   const [building, setBuilding] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [attaching, setAttaching] = useState<boolean>(false)
+  const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
   const config: EntityConfigController = useEntityConfig("scope", scopeId, SCOPE_OPTION_FIELDS)
   const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
   useRunningJobWatch(
@@ -665,6 +711,7 @@ export function ScopePage(): ReactElement {
   )
   useEffect(() => {
     setAttaching(false)
+    setAttachingAirflow(false)
     setSpaceName(null)
     setBuilding(false)
     setKnowledge(null)
@@ -776,6 +823,7 @@ export function ScopePage(): ReactElement {
       include_table_knowledge: config.options.include_table_knowledge ?? true,
       include_previous: config.options.include_previous ?? true,
       include_summary: config.options.include_summary ?? true,
+      include_airflow: config.options.include_airflow ?? true,
     })
       .then((job: ScopeBuildJob) => {
         setBuilding(job.status === "running")
@@ -861,6 +909,18 @@ export function ScopePage(): ReactElement {
               {attaching ? null : <PlusIcon />}
               {attaching ? "Close" : "Attach from catalog"}
             </button>
+            <button
+              type="button"
+              className="button with-icon"
+              aria-expanded={attachingAirflow}
+              disabled={scope === null}
+              onClick={() => {
+                setAttachingAirflow((open: boolean) => !open)
+                selectTab("airflow")
+              }}
+            >
+              {attachingAirflow ? "Close" : "Attach Airflow"}
+            </button>
             </div>
           </div>
           <p className="catalog-lead">{lead}</p>
@@ -944,6 +1004,32 @@ export function ScopePage(): ReactElement {
               </div>
             ) : null}
             {cards.length > 0 ? <EntityGrid items={cards} /> : null}
+          </>
+        ) : null}
+        {tab === "airflow" ? (
+          <>
+            {attachingAirflow ? (
+              <div className="catalog-panel">
+                <AttachAirflowForm
+                  targetKind="scope"
+                  targetId={scopeId}
+                  onCancel={() => {
+                    setAttachingAirflow(false)
+                  }}
+                  onAttached={() => {
+                    bumpCatalogRevision()
+                  }}
+                />
+              </div>
+            ) : null}
+            <AirflowAttachmentsPanel
+              targetKind="scope"
+              targetId={scopeId}
+              revision={revision}
+              onChanged={() => {
+                bumpCatalogRevision()
+              }}
+            />
           </>
         ) : null}
         {tab === "graph" ? (

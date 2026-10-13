@@ -11,6 +11,7 @@ from intelegent_data_catalog.knowledge.models import (
     ScopeCatalogContext,
     ScopeContextOptions,
     ScopeContextProposal,
+    pipeline_summaries,
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.persistence.enums import ContextOrigin
@@ -58,6 +59,7 @@ class ScopeAgent:
                 include_table_knowledge=False,
                 include_previous=False,
                 include_summary=False,
+                include_airflow=False,
             )
         )
 
@@ -75,6 +77,7 @@ class ScopeAgent:
                 summary=None,
                 tables_without_context=list(loaded.tables_without_context),
                 previous_links_kept=0,
+                pipelines=pipeline_summaries(loaded.pipelines),
             )
         written: ScopeAnalysisContext = self._graph_builder.apply(
             loaded,

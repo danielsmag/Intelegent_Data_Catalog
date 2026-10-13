@@ -143,6 +143,7 @@ def _scope_options(raw: dict[str, object]) -> ScopeContextOptions:
         include_table_knowledge=values["include_table_knowledge"],
         include_previous=values["include_previous"],
         include_summary=values["include_summary"],
+        include_airflow=values["include_airflow"],
     )
 
 
@@ -152,4 +153,5 @@ def _space_options(raw: dict[str, object]) -> SpaceContextOptions:
         include_scope_knowledge=values["include_scope_knowledge"],
         include_previous=values["include_previous"],
         include_summary=values["include_summary"],
+        include_airflow=values["include_airflow"],
     )

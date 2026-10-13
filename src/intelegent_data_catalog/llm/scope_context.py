@@ -7,6 +7,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
 from intelegent_data_catalog.knowledge.models import (
+    PipelineInput,
     ScopeCatalogContext,
     ScopeContextProposal,
     ScopeTableSummary,
@@ -20,6 +21,9 @@ _INSTRUCTIONS: str = (
     "The user message is JSON with the scope, its tables and columns, existing context, "
     "and the last scope summary when one exists. "
     "Return two to four sentences on what this scope describes and how its tables fit together. "
+    "pipelines lists Airflow DAGs attached to this scope. "
+    "Tables written by one pipeline from the same inputs usually share keys. "
+    "Use pipelines to describe the business process. "
     "Do not invent tables. "
     "Do not invent facts that the names, descriptions, or context do not support."
 )
@@ -48,6 +52,17 @@ class _PromptTable(BaseModel):
     columns: list[_PromptColumn]
 
 
+class _PromptPipeline(BaseModel):
+    """One attached DAG sent with a scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_id: str
+    instance_name: str
+    summary: str | None
+    schedule: str | None
+
+
 class _ScopePrompt(BaseModel):
     """User message for one scope."""
 
@@ -59,6 +74,7 @@ class _ScopePrompt(BaseModel):
     existing_context: str | None
     summary: str | None
     tables: list[_PromptTable]
+    pipelines: list[_PromptPipeline]
 
 
 class ScopeContextAgent(ProposalAgent[ScopeCatalogContext, ScopeContextProposal]):
@@ -128,6 +144,16 @@ def _prompt(context: ScopeCatalogContext) -> _ScopePrompt:
         existing_context=_clip(context.scope.context),
         summary=summary,
         tables=tables,
+        pipelines=[_pipeline(item) for item in context.pipelines],
+    )
+
+
+def _pipeline(item: PipelineInput) -> _PromptPipeline:
+    return _PromptPipeline(
+        dag_id=item.dag_id,
+        instance_name=item.instance_name,
+        summary=item.summary,
+        schedule=item.schedule,
     )
 
 

@@ -4,14 +4,16 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import InstrumentedAttribute, Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AirflowMappingOrigin
 from intelegent_data_catalog.persistence.models import (
+    AirflowAttachmentRow,
     AirflowDagRow,
     AirflowDagTableRow,
     AirflowInstanceRow,
@@ -50,6 +52,26 @@ class DagWrite:
     run_stats: list[dict[str, object]]
     source_code: str | None
     source_version: int | None
+
+
+@dataclass(frozen=True)
+class LlmMappingWrite:
+    """LLM DAG-to-table link. Replacing these leaves MANUAL and discovered rows."""
+
+    dag_row_id: uuid.UUID
+    table_id: uuid.UUID
+    direction: str
+    evidence: str | None
+
+
+@dataclass(frozen=True)
+class AttachedDag:
+    """One DAG reached through a space or scope attachment."""
+
+    dag: AirflowDagRow
+    instance: AirflowInstanceRow
+    via: str
+    attachment_id: uuid.UUID
 
 
 @dataclass(frozen=True)
@@ -380,6 +402,205 @@ class AirflowRepository:
         """Drop uncommitted work so a failed sync can record its error."""
         self._session.rollback()
 
+    def add_attachment(
+        self,
+        *,
+        instance_id: uuid.UUID | None,
+        dag_row_id: uuid.UUID | None,
+        space_id: uuid.UUID | None,
+        scope_id: uuid.UUID | None,
+    ) -> AirflowAttachmentRow:
+        """Insert one instance or DAG attachment."""
+        row: AirflowAttachmentRow = AirflowAttachmentRow(
+            id=uuid.uuid4(),
+            airflow_instance_id=instance_id,
+            dag_row_id=dag_row_id,
+            space_id=space_id,
+            scope_id=scope_id,
+            created_at=utc_now(),
+        )
+        return self._add(row)
+
+    def get_attachment(self, attachment_id: uuid.UUID) -> AirflowAttachmentRow | None:
+        """Return one attachment."""
+        return self._session.get(AirflowAttachmentRow, attachment_id)
+
+    def find_attachment(
+        self,
+        *,
+        instance_id: uuid.UUID | None,
+        dag_row_id: uuid.UUID | None,
+        space_id: uuid.UUID | None,
+        scope_id: uuid.UUID | None,
+    ) -> AirflowAttachmentRow | None:
+        """Return the attachment for this source and target, if one exists."""
+        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow).where(
+            _id_match(AirflowAttachmentRow.airflow_instance_id, instance_id),
+            _id_match(AirflowAttachmentRow.dag_row_id, dag_row_id),
+            _id_match(AirflowAttachmentRow.space_id, space_id),
+            _id_match(AirflowAttachmentRow.scope_id, scope_id),
+        )
+        return self._session.scalar(statement)
+
+    def list_attachments(
+        self,
+        *,
+        space_id: uuid.UUID | None,
+        scope_id: uuid.UUID | None,
+    ) -> list[AirflowAttachmentRow]:
+        """Return attachments for one space or one scope."""
+        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow)
+        if space_id is not None:
+            statement = statement.where(AirflowAttachmentRow.space_id == space_id)
+        if scope_id is not None:
+            statement = statement.where(AirflowAttachmentRow.scope_id == scope_id)
+        statement = statement.order_by(AirflowAttachmentRow.created_at)
+        return list(self._session.scalars(statement))
+
+    def list_attachments_touching(
+        self,
+        instance_id: uuid.UUID,
+        dag_row_ids: set[uuid.UUID],
+    ) -> list[AirflowAttachmentRow]:
+        """Return attachments of this instance or of the given DAG rows."""
+        clauses = [AirflowAttachmentRow.airflow_instance_id == instance_id]
+        if len(dag_row_ids) > 0:
+            clauses.append(AirflowAttachmentRow.dag_row_id.in_(dag_row_ids))
+        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow).where(
+            or_(*clauses),
+        )
+        return list(self._session.scalars(statement))
+
+    def list_attached_dags(
+        self,
+        scope_ids: set[uuid.UUID],
+        space_ids: set[uuid.UUID],
+    ) -> list[AttachedDag]:
+        """Expand instance attachments to every synced DAG. Direct DAG rows win on overlap."""
+        if len(scope_ids) == 0 and len(space_ids) == 0:
+            return []
+        clauses = []
+        if len(scope_ids) > 0:
+            clauses.append(AirflowAttachmentRow.scope_id.in_(scope_ids))
+        if len(space_ids) > 0:
+            clauses.append(AirflowAttachmentRow.space_id.in_(space_ids))
+        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow).where(
+            or_(*clauses),
+        )
+        attachments: list[AirflowAttachmentRow] = list(self._session.scalars(statement))
+        direct: dict[uuid.UUID, uuid.UUID] = {}
+        by_instance: dict[uuid.UUID, uuid.UUID] = {}
+        attachment: AirflowAttachmentRow
+        for attachment in attachments:
+            if attachment.dag_row_id is not None:
+                direct[attachment.dag_row_id] = attachment.id
+            elif attachment.airflow_instance_id is not None:
+                by_instance[attachment.airflow_instance_id] = attachment.id
+        dags: dict[uuid.UUID, AirflowDagRow] = self.dags_by_row_ids(set(direct))
+        instance_id: uuid.UUID
+        for instance_id in by_instance:
+            dag: AirflowDagRow
+            for dag in self.list_dags(instance_id):
+                dags.setdefault(dag.id, dag)
+        instances: dict[uuid.UUID, AirflowInstanceRow] = self.instances_by_ids(
+            {dag.instance_id for dag in dags.values()},
+        )
+        found: list[AttachedDag] = []
+        dag_row: AirflowDagRow
+        for dag_row in dags.values():
+            instance: AirflowInstanceRow | None = instances.get(dag_row.instance_id)
+            if instance is None:
+                continue
+            if dag_row.id in direct:
+                found.append(
+                    AttachedDag(
+                        dag=dag_row,
+                        instance=instance,
+                        via="dag",
+                        attachment_id=direct[dag_row.id],
+                    )
+                )
+                continue
+            owner: uuid.UUID | None = by_instance.get(dag_row.instance_id)
+            if owner is None:
+                continue
+            found.append(
+                AttachedDag(
+                    dag=dag_row,
+                    instance=instance,
+                    via="instance",
+                    attachment_id=owner,
+                )
+            )
+        found.sort(key=lambda item: (item.instance.name, item.dag.dag_id))
+        return found
+
+    def get_dag_row(self, dag_row_id: uuid.UUID) -> AirflowDagRow | None:
+        """Return one DAG snapshot by its row id."""
+        return self._session.get(AirflowDagRow, dag_row_id)
+
+    def dags_by_row_ids(self, dag_row_ids: set[uuid.UUID]) -> dict[uuid.UUID, AirflowDagRow]:
+        """Return DAG snapshots for the given row ids."""
+        if len(dag_row_ids) == 0:
+            return {}
+        statement: Select[tuple[AirflowDagRow]] = select(AirflowDagRow).where(
+            AirflowDagRow.id.in_(dag_row_ids),
+        )
+        rows: list[AirflowDagRow] = list(self._session.scalars(statement))
+        return {row.id: row for row in rows}
+
+    def instances_by_ids(
+        self,
+        instance_ids: set[uuid.UUID],
+    ) -> dict[uuid.UUID, AirflowInstanceRow]:
+        """Return instances for the given ids."""
+        if len(instance_ids) == 0:
+            return {}
+        statement: Select[tuple[AirflowInstanceRow]] = select(AirflowInstanceRow).where(
+            AirflowInstanceRow.id.in_(instance_ids),
+        )
+        rows: list[AirflowInstanceRow] = list(self._session.scalars(statement))
+        return {row.id: row for row in rows}
+
+    def list_mappings_for_dags(self, dag_row_ids: set[uuid.UUID]) -> list[AirflowDagTableRow]:
+        """Return table links for the given DAG rows."""
+        if len(dag_row_ids) == 0:
+            return []
+        statement: Select[tuple[AirflowDagTableRow]] = select(AirflowDagTableRow).where(
+            AirflowDagTableRow.dag_row_id.in_(dag_row_ids),
+        )
+        return list(self._session.scalars(statement))
+
+    def replace_llm_mappings(
+        self,
+        dag_row_ids: set[uuid.UUID],
+        writes: list[LlmMappingWrite],
+    ) -> int:
+        """Replace LLM links for these DAGs. The caller commits. Other origins stay."""
+        if len(dag_row_ids) == 0:
+            return 0
+        self._session.execute(
+            delete(AirflowDagTableRow).where(
+                AirflowDagTableRow.dag_row_id.in_(dag_row_ids),
+                AirflowDagTableRow.origin == AirflowMappingOrigin.LLM.value,
+            ),
+        )
+        self._flush()
+        inserted: int = 0
+        write: LlmMappingWrite
+        for write in writes:
+            if write.dag_row_id not in dag_row_ids:
+                continue
+            self.add_mapping(
+                dag_row_id=write.dag_row_id,
+                table_id=write.table_id,
+                origin=AirflowMappingOrigin.LLM.value,
+                direction=write.direction,
+                evidence=write.evidence,
+            )
+            inserted += 1
+        return inserted
+
     def _apply_dag(self, row: AirflowDagRow, write: DagWrite) -> None:
         row.display_name = write.display_name
         row.description = write.description
@@ -413,3 +634,12 @@ class AirflowRepository:
         except IntegrityError as err:
             self._session.rollback()
             raise ConflictError(_CONFLICT) from err
+
+
+def _id_match(
+    column: InstrumentedAttribute[uuid.UUID | None],
+    value: uuid.UUID | None,
+) -> ColumnElement[bool]:
+    if value is None:
+        return column.is_(None)
+    return column == value

@@ -11,12 +11,15 @@ from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
 from intelegent_data_catalog.graph.document import GraphView
 from intelegent_data_catalog.jobs.models import (
+    AirflowBuildJobRead,
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     ScopeBuildJobRead,
     SpaceBuildJobRead,
 )
 from intelegent_data_catalog.knowledge.models import (
+    AirflowAnalysisContext,
+    AirflowContextOptions,
     ContextGenerationOptions,
     ContextSubjectKind,
     ScopeAnalysisContext,
@@ -72,6 +75,7 @@ class ScopeContextRequest(BaseModel):
     include_table_knowledge: bool = True
     include_previous: bool = True
     include_summary: bool = True
+    include_airflow: bool = True
 
 
 class SpaceContextRequest(BaseModel):
@@ -80,6 +84,17 @@ class SpaceContextRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     include_scope_knowledge: bool = True
+    include_previous: bool = True
+    include_summary: bool = True
+    include_airflow: bool = True
+
+
+class AirflowContextRequest(BaseModel):
+    """Which slices an Airflow instance build should load."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_source: bool = True
     include_previous: bool = True
     include_summary: bool = True
 
@@ -293,6 +308,7 @@ def build_scope_knowledge_context(
         include_table_knowledge=selected.include_table_knowledge,
         include_previous=selected.include_previous,
         include_summary=selected.include_summary,
+        include_airflow=selected.include_airflow,
     )
     return builds.start_scope(scope_id, scope_name, options)
 
@@ -351,6 +367,7 @@ def build_space_knowledge_context(
         include_scope_knowledge=selected.include_scope_knowledge,
         include_previous=selected.include_previous,
         include_summary=selected.include_summary,
+        include_airflow=selected.include_airflow,
     )
     return builds.start_space(space_id, space_name, options)
 
@@ -495,6 +512,91 @@ def read_latest_column_context_generation(
 ) -> ContextGenerationJobRead:
     """Return the newest column context generation."""
     return _latest_context(builds, column_id, "column")
+
+
+@router.get(
+    "/airflow/instances/{instance_id}/knowledge-context",
+    response_model=AirflowAnalysisContext,
+)
+def read_airflow_knowledge_context(
+    instance_id: UUID,
+    platform: PlatformDep,
+) -> AirflowAnalysisContext:
+    """Return the context last built for this Airflow instance."""
+    return platform.read_airflow_context(instance_id)
+
+
+@router.post(
+    "/airflow/instances/{instance_id}/knowledge-context",
+    response_model=AirflowBuildJobRead,
+    status_code=202,
+)
+def build_airflow_knowledge_context(
+    instance_id: UUID,
+    platform: PlatformDep,
+    builds: CatalogJobsDep,
+    body: AirflowContextRequest | None = None,
+) -> AirflowBuildJobRead:
+    """Start an Airflow build and return before the model finishes.
+
+    One model call covers the synced DAGs of this instance.
+    """
+    instance_name: str = platform.airflow_instance_name(instance_id)
+    selected: AirflowContextRequest = body if body is not None else AirflowContextRequest()
+    options: AirflowContextOptions = AirflowContextOptions(
+        include_source=selected.include_source,
+        include_previous=selected.include_previous,
+        include_summary=selected.include_summary,
+    )
+    return builds.start_airflow(instance_id, instance_name, options)
+
+
+@router.get("/airflow-builds/{job_id}", response_model=AirflowBuildJobRead)
+def read_airflow_build(job_id: UUID, builds: CatalogJobsDep) -> AirflowBuildJobRead:
+    """Return one background Airflow build."""
+    job: AirflowBuildJobRead | None = builds.get_airflow(job_id)
+    if job is None:
+        raise EntityNotFoundError("airflow build", str(job_id))
+    return job
+
+
+@router.get(
+    "/airflow/instances/{instance_id}/knowledge-context/build",
+    response_model=AirflowBuildJobRead,
+)
+def read_latest_airflow_build(instance_id: UUID, builds: CatalogJobsDep) -> AirflowBuildJobRead:
+    """Return the newest context build for an Airflow instance."""
+    job: AirflowBuildJobRead | None = builds.latest_airflow(instance_id)
+    if job is None:
+        raise EntityNotFoundError("airflow build", str(instance_id))
+    return job
+
+
+@router.post(
+    "/airflow/instances/{instance_id}/context/generate",
+    response_model=ContextGenerationJobRead,
+    status_code=202,
+)
+def generate_airflow_context(
+    instance_id: UUID,
+    platform: PlatformDep,
+    builds: CatalogJobsDep,
+) -> ContextGenerationJobRead:
+    """Start an Airflow context write and return before the model finishes."""
+    instance_name: str = platform.airflow_instance_name(instance_id)
+    return _start_context(builds, instance_id, instance_name, "airflow")
+
+
+@router.get(
+    "/airflow/instances/{instance_id}/context/generation",
+    response_model=ContextGenerationJobRead,
+)
+def read_latest_airflow_context_generation(
+    instance_id: UUID,
+    builds: CatalogJobsDep,
+) -> ContextGenerationJobRead:
+    """Return the newest Airflow context generation."""
+    return _latest_context(builds, instance_id, "airflow")
 
 
 def _start_context(

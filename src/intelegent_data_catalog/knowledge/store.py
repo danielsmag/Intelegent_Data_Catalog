@@ -14,6 +14,8 @@ from intelegent_data_catalog.exceptions import (
     PersistenceUnavailableError,
 )
 from intelegent_data_catalog.knowledge.models import (
+    AirflowAnalysisContext,
+    DagFinding,
     ScopeAnalysisContext,
     SpaceAnalysisContext,
     TableAnalysisContext,
@@ -21,6 +23,8 @@ from intelegent_data_catalog.knowledge.models import (
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import ContextOrigin
 from intelegent_data_catalog.persistence.models import (
+    AirflowInstanceKnowledgeContextRow,
+    AirflowInstanceRow,
     CatalogTableRow,
     ColumnRow,
     ScopeKnowledgeContextRow,
@@ -35,6 +39,7 @@ _CONFLICT: str = "knowledge context conflicts with an existing record"
 _INVALID: str = "stored knowledge context is invalid"
 _INVALID_SCOPE: str = "stored scope knowledge context is invalid"
 _INVALID_SPACE: str = "stored space knowledge context is invalid"
+_INVALID_AIRFLOW: str = "stored airflow knowledge context is invalid"
 
 
 class KnowledgeContextStore:
@@ -238,8 +243,105 @@ class ScopeKnowledgeContextStore:
             raise ConflictError(_CONFLICT) from err
 
 
+class SavedAirflowContext:
+    """One stored Airflow snapshot plus the time it was written."""
+
+    def __init__(self, context: AirflowAnalysisContext, built_at: datetime) -> None:
+        self.context: AirflowAnalysisContext = context
+        self.built_at: datetime = built_at
+
+
+class AirflowKnowledgeContextStore:
+    """One snapshot per Airflow instance. Findings for untouched DAGs stay in place."""
+
+    def __init__(self, session: Session) -> None:
+        self._session: Session = session
+
+    def save(self, context: AirflowAnalysisContext) -> None:
+        """Insert or replace the snapshot for ``context.instance_id``."""
+        self._upsert(context)
+        self._commit()
+
+    def merge_findings(self, context: AirflowAnalysisContext) -> AirflowAnalysisContext:
+        """Upsert findings for the analyzed DAGs. Other DAGs and a prior summary stay."""
+        existing: AirflowAnalysisContext | None = self.get(context.instance_id)
+        if existing is None:
+            self.save(context)
+            return context
+        by_dag: dict[UUID, DagFinding] = {item.dag_row_id: item for item in existing.findings}
+        finding: DagFinding
+        for finding in context.findings:
+            by_dag[finding.dag_row_id] = finding
+        summary: str | None = existing.summary if existing.summary else context.summary
+        merged: AirflowAnalysisContext = AirflowAnalysisContext(
+            instance_id=context.instance_id,
+            instance_name=context.instance_name,
+            summary=summary,
+            findings=list(by_dag.values()),
+            dags_analyzed=len(by_dag),
+            previous_links_kept=context.previous_links_kept,
+        )
+        self.save(merged)
+        return merged
+
+    def get(self, instance_id: UUID) -> AirflowAnalysisContext | None:
+        """Return the saved snapshot, or none when this instance has never been built."""
+        saved: SavedAirflowContext | None = self.saved(instance_id)
+        if saved is None:
+            return None
+        return saved.context
+
+    def saved(self, instance_id: UUID) -> SavedAirflowContext | None:
+        """Return the snapshot and its write time."""
+        row: AirflowInstanceKnowledgeContextRow | None = self._by_instance(instance_id)
+        if row is None:
+            return None
+        return SavedAirflowContext(self._decode(row.payload, instance_id), row.updated_at)
+
+    def _upsert(self, context: AirflowAnalysisContext) -> None:
+        payload: dict[str, object] = dump_model(context)
+        now: datetime = utc_now()
+        row: AirflowInstanceKnowledgeContextRow | None = self._by_instance(context.instance_id)
+        if row is None:
+            created: AirflowInstanceKnowledgeContextRow = AirflowInstanceKnowledgeContextRow(
+                id=uuid4(),
+                instance_id=context.instance_id,
+                payload=payload,
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(created)
+            return
+        row.payload = payload
+        row.updated_at = now
+
+    def _by_instance(self, instance_id: UUID) -> AirflowInstanceKnowledgeContextRow | None:
+        statement: Select[tuple[AirflowInstanceKnowledgeContextRow]] = select(
+            AirflowInstanceKnowledgeContextRow,
+        ).where(AirflowInstanceKnowledgeContextRow.instance_id == instance_id)
+        return self._session.scalar(statement)
+
+    def _decode(self, payload: object, instance_id: UUID) -> AirflowAnalysisContext:
+        if not isinstance(payload, dict):
+            raise PersistenceUnavailableError(_INVALID_AIRFLOW)
+        try:
+            context: AirflowAnalysisContext = AirflowAnalysisContext.model_validate(payload)
+        except ValidationError as err:
+            raise PersistenceUnavailableError(_INVALID_AIRFLOW) from err
+        if context.instance_id != instance_id:
+            raise PersistenceUnavailableError(_INVALID_AIRFLOW)
+        return context
+
+    def _commit(self) -> None:
+        try:
+            self._session.commit()
+        except IntegrityError as err:
+            self._session.rollback()
+            raise ConflictError(_CONFLICT) from err
+
+
 class SemanticContextStore:
-    """Writes business context onto a space, scope, table, or column row."""
+    """Writes business context onto a space, scope, table, column, or Airflow instance."""
 
     def __init__(self, session: Session) -> None:
         self._session: Session = session
@@ -272,9 +374,16 @@ class SemanticContextStore:
             raise EntityNotFoundError("column", str(column_id))
         self._write(row, text, origin)
 
+    def save_airflow_instance(self, instance_id: UUID, text: str, origin: ContextOrigin) -> None:
+        """Replace the Airflow instance context. The row must already exist."""
+        row: AirflowInstanceRow | None = self._session.get(AirflowInstanceRow, instance_id)
+        if row is None:
+            raise EntityNotFoundError("airflow instance", str(instance_id))
+        self._write(row, text, origin)
+
     def _write(
         self,
-        row: SpaceRow | ScopeRow | CatalogTableRow | ColumnRow,
+        row: SpaceRow | ScopeRow | CatalogTableRow | ColumnRow | AirflowInstanceRow,
         text: str,
         origin: ContextOrigin,
     ) -> None:

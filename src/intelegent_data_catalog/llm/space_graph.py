@@ -10,6 +10,7 @@ from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.space_graph import accept_space_links
 from intelegent_data_catalog.knowledge.models import (
     ColumnMetadata,
+    PipelineInput,
     PreviousSpaceFindings,
     ScopeGraphEdge,
     ScopeKnowledgeInput,
@@ -45,6 +46,9 @@ _INSTRUCTIONS: str = (
     "Treat previous_findings as a draft: keep a justified link, drop the rest, or add one. "
     "summary is two to four sentences on what this space describes and how the scopes join. "
     "Mention a scope without context only when that gap matters. "
+    "pipelines lists Airflow DAGs attached to this space and the tables each DAG reads or writes. "
+    "Tables written by one pipeline from the same inputs usually share keys. "
+    "Use pipelines to find joins and to describe the business process. "
     "reason is one short sentence grounded in the names, types, keys, or findings. "
     "Return no links when nothing is important. "
     "Do not invent table ids or column ids."
@@ -159,6 +163,19 @@ class _PromptPrevious(BaseModel):
     links: list[_PromptStoredLink]
 
 
+class _PromptPipeline(BaseModel):
+    """One attached DAG sent to the space model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_id: str
+    instance_name: str
+    summary: str | None
+    schedule: str | None
+    reads: list[UUID]
+    writes: list[UUID]
+
+
 class _SpaceGraphPrompt(BaseModel):
     """User message for one space-subgraph call."""
 
@@ -171,6 +188,7 @@ class _SpaceGraphPrompt(BaseModel):
     scopes: list[_PromptScope]
     existing_relationships: list[_PromptRelationship]
     scope_knowledge: list[_PromptScopeKnowledge]
+    pipelines: list[_PromptPipeline]
     previous_findings: _PromptPrevious | None
 
 
@@ -307,6 +325,7 @@ def _prompt(context: SpaceCatalogContext) -> str:
         scopes=scopes,
         existing_relationships=relationships,
         scope_knowledge=knowledge,
+        pipelines=[_pipeline(item) for item in context.pipelines],
         previous_findings=_previous(context.previous),
     )
     rendered: str = payload.model_dump_json(exclude_none=True)
@@ -330,6 +349,17 @@ def _graph_edge(edge: ScopeGraphEdge) -> _PromptGraphEdge:
         target_table_id=edge.target_table_id,
         kind=edge.kind.value,
         reason=edge.reason,
+    )
+
+
+def _pipeline(item: PipelineInput) -> _PromptPipeline:
+    return _PromptPipeline(
+        dag_id=item.dag_id,
+        instance_name=item.instance_name,
+        summary=item.summary,
+        schedule=item.schedule,
+        reads=list(item.reads),
+        writes=list(item.writes),
     )
 
 

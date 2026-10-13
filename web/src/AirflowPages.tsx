@@ -10,16 +10,22 @@ import {
   fetchAirflowDags,
   fetchAirflowInstance,
   fetchAirflowInstances,
+  fetchAirflowKnowledgeContext,
   fetchAirflowOverview,
+  fetchLatestAirflowBuild,
   removeDagTable,
   syncAirflowInstance,
   testAirflowInstance,
   updateAirflowInstance,
   type AirflowConnectionTest,
   type AirflowDag,
+  type AirflowBuildJob,
   type AirflowDagDetail,
+  type AirflowDagFinding,
+  type AirflowDagLink,
   type AirflowDagRun,
   type AirflowDagTable,
+  type AirflowKnowledgeContext,
   type AirflowHealth,
   type AirflowImportError,
   type AirflowInstance,
@@ -35,6 +41,8 @@ import {
   type AirflowTask,
 } from "./airflowApi"
 import { AirflowSidebar } from "./AirflowSidebar"
+import { ContextEditor } from "./ContextEditor"
+import { followAirflowBuild, onAirflowBuildFinished, requestAirflowBuild } from "./knowledgeBuild"
 import { PageSlot } from "./PageSlot"
 import { AirflowConfigRail } from "./ConfigRail"
 import { bumpAirflowRevision, setAirflowSidebarOpen, useAirflowRevision, useAirflowSidebarOpen } from "./airflowSidebarStore"
@@ -283,10 +291,14 @@ export function AirflowInstancePage(): ReactElement {
   const [syncing, setSyncing] = useState<boolean>(false)
   const [editing, setEditing] = useState<boolean>(false)
   const [confirmingDelete, setConfirmingDelete] = useState<boolean>(false)
+  const [knowledge, setKnowledge] = useState<AirflowKnowledgeContext | null>(null)
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
+  const [building, setBuilding] = useState<boolean>(false)
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setOverview(null)
     setDags(null)
+    setBuilding(false)
     void fetchAirflowInstance(instanceId, controller.signal)
       .then((loaded: AirflowInstance) => {
         setInstance(loaded)
@@ -317,10 +329,58 @@ export function AirflowInstancePage(): ReactElement {
           setError(errorMessage(err))
         }
       })
+    setKnowledge(null)
+    setKnowledgeError(null)
+    void fetchAirflowKnowledgeContext(instanceId, controller.signal)
+      .then((loaded: AirflowKnowledgeContext | null) => {
+        setKnowledge(loaded)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledge(null)
+          setKnowledgeError(errorMessage(err))
+        }
+      })
+    void fetchLatestAirflowBuild(instanceId, controller.signal)
+      .then((job: AirflowBuildJob | null) => {
+        if (controller.signal.aborted || job === null || job.status !== "running") {
+          return
+        }
+        setBuilding(true)
+        followAirflowBuild(job)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setKnowledgeError(errorMessage(err))
+        }
+      })
     return () => {
       controller.abort()
     }
   }, [instanceId, revision])
+  useEffect(() => {
+    return onAirflowBuildFinished((job: AirflowBuildJob) => {
+      if (job.instance_id !== instanceId) {
+        return
+      }
+      setBuilding(false)
+      if (job.status === "failed") {
+        setKnowledgeError(job.error ?? "Airflow context build failed.")
+        return
+      }
+      const controller: AbortController = new AbortController()
+      void fetchAirflowKnowledgeContext(instanceId, controller.signal)
+        .then((loaded: AirflowKnowledgeContext | null) => {
+          setKnowledge(loaded)
+          setKnowledgeError(null)
+        })
+        .catch((err: unknown) => {
+          if (!isAbortError(err)) {
+            setKnowledgeError(errorMessage(err))
+          }
+        })
+    })
+  }, [instanceId])
 
   function runSync(): void {
     setSyncing(true)
@@ -368,6 +428,33 @@ export function AirflowInstancePage(): ReactElement {
               <button
                 type="button"
                 className="button secondary"
+                disabled={instance === null || building}
+                onClick={() => {
+                  setBuilding(true)
+                  setKnowledgeError(null)
+                  void requestAirflowBuild(instanceId, {
+                    include_source: true,
+                    include_previous: true,
+                    include_summary: true,
+                  })
+                    .then((job: AirflowBuildJob) => {
+                      setBuilding(job.status === "running")
+                    })
+                    .catch((err: unknown) => {
+                      setBuilding(false)
+                      setKnowledgeError(errorMessage(err))
+                    })
+                }}
+              >
+                {building
+                  ? "Building Airflow context…"
+                  : knowledge === null
+                    ? "Build Airflow context"
+                    : "Rebuild Airflow context"}
+              </button>
+              <button
+                type="button"
+                className="button secondary"
                 disabled={instance === null || instance.status !== "ACTIVE" || syncing}
                 onClick={runSync}
               >
@@ -405,6 +492,12 @@ export function AirflowInstancePage(): ReactElement {
           <p className="catalog-lead">{instance?.base_url ?? "Loading instance…"}</p>
         </header>
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
+        {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
+        {building ? (
+          <p className="comment">
+            Building in the background. Keep using the catalog. An alert appears when it finishes.
+          </p>
+        ) : null}
         {editing && instance !== null ? (
           <div className="catalog-panel">
             <InstanceForm
@@ -445,7 +538,28 @@ export function AirflowInstancePage(): ReactElement {
             </button>
           ))}
         </div>
-        {tab === "overview" ? <OverviewPanel instance={instance} overview={overview} /> : null}
+        {tab === "overview" ? (
+          <>
+            <OverviewPanel instance={instance} overview={overview} />
+            {instance !== null ? (
+              <ContextEditor
+                kind="airflow"
+                id={instance.id}
+                name={instance.name}
+                context={instance.context}
+                origin={instance.context_origin}
+                onChanged={() => {
+                  bumpAirflowRevision()
+                }}
+              />
+            ) : null}
+            {knowledge !== null ? (
+              <AirflowContextPanel context={knowledge} />
+            ) : (
+              <p className="note">Build Airflow context to get a summary and per-DAG findings.</p>
+            )}
+          </>
+        ) : null}
         {tab === "dags" ? <DagRows instanceId={instanceId} dags={dags} /> : null}
         {tab === "mappings" ? <MappingRows instanceId={instanceId} mappings={mappings} /> : null}
       </section>
@@ -693,6 +807,7 @@ export function AirflowDagPage(): ReactElement {
   const [reload, setReload] = useState<number>(0)
   const [dag, setDag] = useState<AirflowDagDetail | null>(null)
   const [runs, setRuns] = useState<AirflowDagRun[] | null>(null)
+  const [finding, setFinding] = useState<AirflowDagFinding | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     const controller: AbortController = new AbortController()
@@ -705,6 +820,18 @@ export function AirflowDagPage(): ReactElement {
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
           setError(errorMessage(err))
+        }
+      })
+    setFinding(null)
+    void fetchAirflowKnowledgeContext(instanceId, controller.signal)
+      .then((loaded: AirflowKnowledgeContext | null) => {
+        const match: AirflowDagFinding | null =
+          loaded?.findings.find((item: AirflowDagFinding) => item.dag_id === dagId) ?? null
+        setFinding(match)
+      })
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) {
+          setFinding(null)
         }
       })
     return () => {
@@ -768,7 +895,28 @@ export function AirflowDagPage(): ReactElement {
             </button>
           ))}
         </div>
-        {tab === "overview" && dag !== null ? <DagFacts dag={dag} /> : null}
+        {tab === "overview" && dag !== null ? (
+          <>
+            <DagFacts dag={dag} />
+            {finding !== null ? (
+              <section className="context-block" aria-label="DAG finding">
+                <h2>Pipeline</h2>
+                <p>{finding.summary === "" ? "No summary." : finding.summary}</p>
+                <ul className="registry-list">
+                  {finding.links.map((link: AirflowDagLink) => (
+                    <li key={`${link.table_id}-${link.direction}`}>
+                      <span className="badge">{link.direction}</span>
+                      <Link to={`/registry/tables/${link.table_id}`}>{link.table_id}</Link>
+                      <span className="comment">{link.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : (
+              <p className="note">Build Airflow context on the instance to explain this DAG.</p>
+            )}
+          </>
+        ) : null}
         {tab === "tasks" ? <TaskTable tasks={dag?.tasks ?? null} /> : null}
         {tab === "runs" ? <RunTable runs={runs} /> : null}
         {tab === "tables" && dag !== null ? (
@@ -796,6 +944,40 @@ export function AirflowDagPage(): ReactElement {
         ) : null}
       </section>
     </Shell>
+  )
+}
+
+function AirflowContextPanel(props: { context: AirflowKnowledgeContext }): ReactElement {
+  const context: AirflowKnowledgeContext = props.context
+  return (
+    <section className="context-block" aria-label="Airflow context">
+      <h2>Airflow context</h2>
+      <p>{context.summary ?? "No summary yet."}</p>
+      <dl className="facts">
+        <dt>DAGs analyzed</dt>
+        <dd>{context.dags_analyzed}</dd>
+        <dt>Findings</dt>
+        <dd>{context.findings.length}</dd>
+        <dt>Previous links kept</dt>
+        <dd>{context.previous_links_kept}</dd>
+      </dl>
+      {context.findings.map((finding: AirflowDagFinding) => (
+        <div key={finding.dag_row_id}>
+          <h3>{finding.dag_id}</h3>
+          <p>{finding.summary === "" ? "No summary." : finding.summary}</p>
+          {finding.links.length === 0 ? <p className="note">No table links.</p> : null}
+          <ul className="registry-list">
+            {finding.links.map((link: AirflowDagLink) => (
+              <li key={`${link.table_id}-${link.direction}`}>
+                <span className="badge">{link.direction}</span>
+                <Link to={`/registry/tables/${link.table_id}`}>{link.table_id}</Link>
+                <span className="comment">{link.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
   )
 }
 

@@ -28,11 +28,13 @@ _SPACE_OPTIONS: dict[str, bool] = {
     "include_scope_knowledge": True,
     "include_previous": True,
     "include_summary": True,
+    "include_airflow": True,
 }
 _SCOPE_OPTIONS: dict[str, bool] = {
     "include_table_knowledge": True,
     "include_previous": True,
     "include_summary": True,
+    "include_airflow": True,
 }
 _TABLE_OPTIONS: dict[str, bool] = {
     "include_graph": True,

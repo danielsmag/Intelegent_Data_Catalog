@@ -12,6 +12,7 @@ from intelegent_data_catalog.knowledge.context.catalog import (
     _relation,
     _space_summary,
 )
+from intelegent_data_catalog.knowledge.context.pipelines import AttachedPipelineSource
 from intelegent_data_catalog.knowledge.context.scope_catalog import (
     _columns,
     _short_text,
@@ -19,6 +20,7 @@ from intelegent_data_catalog.knowledge.context.scope_catalog import (
 )
 from intelegent_data_catalog.knowledge.models import (
     ColumnMetadata,
+    PipelineInput,
     PreviousSpaceFindings,
     ScopeAnalysisContext,
     ScopeGraphEdge,
@@ -212,10 +214,12 @@ class PostgresSpaceCatalogContextProvider:
         repository: RegistryRepository,
         knowledge: SpaceScopeKnowledgeReader,
         previous: PreviousSpaceReader,
+        pipelines: AttachedPipelineSource | None = None,
     ) -> None:
         self._repository: RegistryRepository = repository
         self._knowledge: SpaceScopeKnowledgeReader = knowledge
         self._previous: PreviousSpaceReader = previous
+        self._pipelines: AttachedPipelineSource | None = pipelines
 
     def get_space_context(
         self,
@@ -271,6 +275,10 @@ class PostgresSpaceCatalogContextProvider:
                     source=loaded.source,
                 )
             )
+        pipelines: list[PipelineInput] = []
+        if selected.include_airflow and self._pipelines is not None:
+            scope_ids: set[UUID] = {item[0].id for item in scope_rows}
+            pipelines = self._pipelines.for_space(space_id, scope_ids, set(table_scope))
         return SpaceCatalogContext(
             space=_space_summary(space),
             scopes=scopes,
@@ -278,6 +286,7 @@ class PostgresSpaceCatalogContextProvider:
             scope_knowledge=knowledge,
             scopes_without_context=missing,
             previous=_previous_findings(self._previous, space_id, selected.include_previous),
+            pipelines=pipelines,
         )
 
 

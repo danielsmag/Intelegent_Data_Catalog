@@ -1,3 +1,10 @@
+import {
+  fetchAirflowAttachments,
+  fetchAirflowDags,
+  type AirflowAttachment,
+  type AirflowAttachmentTarget,
+  type AirflowDag,
+} from "./airflowApi"
 import { isAbortError } from "./api"
 
 export type SpaceRecord = {
@@ -411,6 +418,11 @@ export type ScopeTableLink = {
   reason: string
 }
 
+export type PipelineSummary = {
+  dag_id: string
+  instance_name: string
+}
+
 export type ScopeKnowledgeContext = {
   scope: { id: string; name: string; description: string | null }
   space: { id: string; name: string }
@@ -420,6 +432,7 @@ export type ScopeKnowledgeContext = {
   summary: string | null
   tables_without_context: string[]
   previous_links_kept: number
+  pipelines: PipelineSummary[]
 }
 
 export async function fetchScopeGraph(scopeId: string, signal: AbortSignal): Promise<GraphViewRecord> {
@@ -456,6 +469,7 @@ export type ScopeBuildOptions = {
   include_table_knowledge: boolean
   include_previous: boolean
   include_summary: boolean
+  include_airflow: boolean
 }
 
 export async function startScopeBuild(scopeId: string, options: ScopeBuildOptions): Promise<ScopeBuildJob> {
@@ -524,6 +538,7 @@ export type SpaceKnowledgeContext = {
   summary: string | null
   scopes_without_context: string[]
   previous_links_kept: number
+  pipelines: PipelineSummary[]
 }
 
 export async function fetchSpaceKnowledgeContext(
@@ -552,6 +567,7 @@ export type SpaceBuildOptions = {
   include_scope_knowledge: boolean
   include_previous: boolean
   include_summary: boolean
+  include_airflow: boolean
 }
 
 export async function startSpaceBuild(spaceId: string, options: SpaceBuildOptions): Promise<SpaceBuildJob> {
@@ -590,9 +606,9 @@ export async function fetchLatestSpaceBuild(
   return (await response.json()) as SpaceBuildJob
 }
 
-export type ContextSubjectKind = "space" | "scope" | "table" | "table_columns" | "column"
+export type ContextSubjectKind = "space" | "scope" | "table" | "table_columns" | "column" | "airflow"
 
-export type ContextEntityKind = "space" | "scope" | "table" | "column"
+export type ContextEntityKind = "space" | "scope" | "table" | "column" | "airflow"
 
 export type ContextGenerationJob = {
   id: string
@@ -664,6 +680,8 @@ function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
       return `/api/v1/tables/${id}/columns/context/generate`
     case "column":
       return `/api/v1/columns/${id}/context/generate`
+    case "airflow":
+      return `/api/v1/airflow/instances/${id}/context/generate`
   }
 }
 
@@ -679,6 +697,8 @@ function contextLatestPath(kind: ContextSubjectKind, id: string): string {
       return `/api/v1/tables/${id}/context/generation?lane=table_columns`
     case "column":
       return `/api/v1/columns/${id}/context/generation`
+    case "airflow":
+      return `/api/v1/airflow/instances/${id}/context/generation`
   }
 }
 
@@ -692,6 +712,8 @@ function contextPatchPath(kind: ContextEntityKind, id: string): string {
       return `/api/v1/tables/${id}`
     case "column":
       return `/api/v1/columns/${id}`
+    case "airflow":
+      return `/api/v1/airflow/instances/${id}`
   }
 }
 
@@ -705,16 +727,29 @@ export type HierarchyTable = {
   status: string
 }
 
+export type HierarchyDag = {
+  dagRowId: string
+  dagId: string
+}
+
+export type HierarchyAirflow = {
+  instanceId: string
+  name: string
+  dags: HierarchyDag[]
+}
+
 export type HierarchyScope = {
   id: string
   name: string
   tables: HierarchyTable[]
+  airflow: HierarchyAirflow[]
 }
 
 export type HierarchySpace = {
   id: string
   name: string
   scopes: HierarchyScope[]
+  airflow: HierarchyAirflow[]
 }
 
 export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpace[]> {
@@ -725,6 +760,7 @@ export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpac
       const nested: HierarchyScope[] = await Promise.all(
         scopes.map(async (scope: ScopeRecord): Promise<HierarchyScope> => {
           const tables: CatalogTableRecord[] = await fetchScopeTables(scope.id, signal)
+          const airflow: HierarchyAirflow[] = await hierarchyAirflow("scope", scope.id, signal)
           return {
             id: scope.id,
             name: scope.name,
@@ -733,13 +769,51 @@ export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpac
               name: table.name,
               status: table.status,
             })),
+            airflow,
           }
         }),
       )
-      return { id: space.id, name: space.name, scopes: nested }
+      const airflow: HierarchyAirflow[] = await hierarchyAirflow("space", space.id, signal)
+      return { id: space.id, name: space.name, scopes: nested, airflow }
     }),
   )
   return trees
+}
+
+async function hierarchyAirflow(
+  kind: AirflowAttachmentTarget,
+  targetId: string,
+  signal: AbortSignal,
+): Promise<HierarchyAirflow[]> {
+  let attachments: AirflowAttachment[]
+  try {
+    attachments = await fetchAirflowAttachments(kind, targetId, signal)
+  } catch (err: unknown) {
+    if (isAbortError(err)) {
+      throw err
+    }
+    return []
+  }
+  const groups: Map<string, HierarchyAirflow> = new Map()
+  for (const attachment of attachments) {
+    const group: HierarchyAirflow = groups.get(attachment.instance_id) ?? {
+      instanceId: attachment.instance_id,
+      name: attachment.instance_name,
+      dags: [],
+    }
+    if (attachment.dag_id === null || attachment.dag_row_id === null) {
+      const dags: AirflowDag[] = await fetchAirflowDags(attachment.instance_id, signal)
+      for (const dag of dags) {
+        if (!group.dags.some((item: HierarchyDag) => item.dagId === dag.dag_id)) {
+          group.dags.push({ dagRowId: dag.id, dagId: dag.dag_id })
+        }
+      }
+    } else if (!group.dags.some((item: HierarchyDag) => item.dagId === attachment.dag_id)) {
+      group.dags.push({ dagRowId: attachment.dag_row_id, dagId: attachment.dag_id })
+    }
+    groups.set(attachment.instance_id, group)
+  }
+  return [...groups.values()]
 }
 
 export async function searchCatalog(query: string, signal: AbortSignal): Promise<SearchHitRecord[]> {

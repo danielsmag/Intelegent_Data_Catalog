@@ -19,6 +19,12 @@ import {
   type SpaceBuildOptions,
   type TableBuildOptions,
 } from "./registryApi"
+import {
+  fetchAirflowBuild,
+  startAirflowBuild,
+  type AirflowBuildJob,
+  type AirflowBuildOptions,
+} from "./airflowApi"
 
 type BuildStatus = {
   id: string
@@ -174,6 +180,34 @@ export async function requestSpaceBuild(
 
 export function followSpaceBuild(job: SpaceBuildJob): void {
   spaceBuilds.follow(job)
+}
+
+const airflowBuilds: BuildFollower<AirflowBuildJob> = createFollower(
+  fetchAirflowBuild,
+  (job: AirflowBuildJob): string => {
+    const detail: string = job.error ?? "Build failed."
+    if (job.status === "succeeded") {
+      return `Airflow context for ${job.instance_name} is ready.`
+    }
+    return `Airflow context for ${job.instance_name} failed. ${detail}`
+  },
+)
+
+export function onAirflowBuildFinished(handler: FinishedHandler<AirflowBuildJob>): () => void {
+  return airflowBuilds.onFinished(handler)
+}
+
+export async function requestAirflowBuild(
+  instanceId: string,
+  options: AirflowBuildOptions,
+): Promise<AirflowBuildJob> {
+  const job: AirflowBuildJob = await startAirflowBuild(instanceId, options)
+  airflowBuilds.follow(job)
+  return job
+}
+
+export function followAirflowBuild(job: AirflowBuildJob): void {
+  airflowBuilds.follow(job)
 }
 
 const contextGenerations: BuildFollower<ContextGenerationJob> = createFollower(

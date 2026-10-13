@@ -21,6 +21,7 @@ from intelegent_data_catalog.persistence.enums import (
     AirflowInstanceStatus,
     AirflowMappingDirection,
     AirflowMappingOrigin,
+    ContextOrigin,
     SyncRunStatus,
 )
 from intelegent_data_catalog.persistence.models import (
@@ -42,6 +43,8 @@ def instance_read(row: AirflowInstanceRow, dag_count: int) -> AirflowInstanceRea
         username=row.username,
         verify_tls=row.verify_tls,
         description=row.description,
+        context=row.context,
+        context_origin=_context_origin(row.context_origin),
         status=AirflowInstanceStatus(row.status),
         has_credentials=row.password.strip() != "",
         dag_count=dag_count,
@@ -194,6 +197,12 @@ def _counts(value: object) -> AirflowSyncCounts:
         return AirflowSyncCounts.model_validate(value)
     except ValidationError:
         return AirflowSyncCounts()
+
+
+def _context_origin(value: str | None) -> ContextOrigin | None:
+    if value is None:
+        return None
+    return ContextOrigin(value)
 
 
 def _aware(value: datetime) -> datetime:

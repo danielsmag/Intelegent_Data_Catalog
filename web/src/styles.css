@@ -504,6 +504,10 @@ a.tree-row {
   color: #2ee6c8;
 }
 
+.figure-airflow {
+  color: #ff8a4c;
+}
+
 .hierarchy {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 88px),
@@ -520,6 +524,38 @@ a.tree-row {
 
 .hierarchy .depth-table {
   padding-left: 40px;
+}
+
+.hierarchy .depth-airflow {
+  padding-left: 58px;
+}
+
+.hierarchy .depth-dag {
+  padding-left: 76px;
+}
+
+.tree-group {
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.tree-group .tree-label {
+  color: var(--muted);
+}
+
+.registry-list li.focused,
+table.columns tr.focused td {
+  background: var(--hover);
+}
+
+.registry-list li.focused,
+table.columns tr.focused td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .hierarchy.collapsed {

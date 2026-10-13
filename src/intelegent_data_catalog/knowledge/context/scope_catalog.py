@@ -14,10 +14,12 @@ from intelegent_data_catalog.knowledge.context.catalog import (
     _scope_summary,
     _space_summary,
 )
+from intelegent_data_catalog.knowledge.context.pipelines import AttachedPipelineSource
 from intelegent_data_catalog.knowledge.models import (
     ColumnMetadata,
     ColumnRelation,
     ColumnRelationKind,
+    PipelineInput,
     PreviousScopeFindings,
     ScopeCatalogContext,
     ScopeContextOptions,
@@ -179,10 +181,12 @@ class PostgresScopeCatalogContextProvider:
         repository: RegistryRepository,
         knowledge: ScopeTableKnowledgeReader,
         previous: PreviousScopeReader,
+        pipelines: AttachedPipelineSource | None = None,
     ) -> None:
         self._repository: RegistryRepository = repository
         self._knowledge: ScopeTableKnowledgeReader = knowledge
         self._previous: PreviousScopeReader = previous
+        self._pipelines: AttachedPipelineSource | None = pipelines
 
     def get_scope_context(
         self,
@@ -223,6 +227,9 @@ class PostgresScopeCatalogContextProvider:
                     source=loaded.source,
                 )
             )
+        pipelines: list[PipelineInput] = []
+        if selected.include_airflow and self._pipelines is not None:
+            pipelines = self._pipelines.for_scope(scope_id, table_ids)
         return ScopeCatalogContext(
             scope=_scope_summary(scope),
             space=_space_summary(space),
@@ -231,6 +238,7 @@ class PostgresScopeCatalogContextProvider:
             table_knowledge=knowledge,
             tables_without_context=missing,
             previous=_previous_findings(self._previous, scope_id, selected.include_previous),
+            pipelines=pipelines,
         )
 
 

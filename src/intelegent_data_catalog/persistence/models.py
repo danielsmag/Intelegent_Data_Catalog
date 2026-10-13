@@ -614,6 +614,11 @@ class AirflowInstanceRow(Base):
             tuple(item.value for item in AirflowInstanceStatus),
             "ck_airflow_instances_status",
         ),
+        _enum_check(
+            "context_origin",
+            tuple(item.value for item in ContextOrigin),
+            "ck_airflow_instances_context_origin",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -624,6 +629,8 @@ class AirflowInstanceRow(Base):
     password: Mapped[str] = mapped_column(Text, nullable=False)
     verify_tls: Mapped[bool] = mapped_column(Boolean, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -682,7 +689,7 @@ class AirflowDagRow(Base):
 
 
 class AirflowDagTableRow(Base):
-    """DAG to catalog table link. Sync replaces ASSET and SOURCE_MATCH, not MANUAL."""
+    """DAG to catalog table link. Sync replaces ASSET and SOURCE_MATCH, not MANUAL or LLM."""
 
     __tablename__: str = "airflow_dag_tables"
     __table_args__: tuple[UniqueConstraint | CheckConstraint | Index, ...] = (
@@ -719,6 +726,99 @@ class AirflowDagTableRow(Base):
     origin: Mapped[str] = mapped_column(String(32), nullable=False)
     direction: Mapped[str] = mapped_column(String(32), nullable=False)
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+_ONE_AIRFLOW_SOURCE: str = (
+    "(airflow_instance_id IS NOT NULL AND dag_row_id IS NULL) OR "
+    "(airflow_instance_id IS NULL AND dag_row_id IS NOT NULL)"
+)
+_ONE_AIRFLOW_TARGET: str = (
+    "(space_id IS NOT NULL AND scope_id IS NULL) OR (space_id IS NULL AND scope_id IS NOT NULL)"
+)
+
+
+class AirflowAttachmentRow(Base):
+    """Airflow instance or one DAG attached to a space or a scope. Many targets allowed."""
+
+    __tablename__: str = "airflow_attachments"
+    __table_args__: tuple[CheckConstraint | Index, ...] = (
+        CheckConstraint(_ONE_AIRFLOW_SOURCE, name="ck_airflow_attachments_one_source"),
+        CheckConstraint(_ONE_AIRFLOW_TARGET, name="ck_airflow_attachments_one_target"),
+        Index(
+            "uq_airflow_attachments_instance_space",
+            "airflow_instance_id",
+            "space_id",
+            unique=True,
+            sqlite_where=text("airflow_instance_id IS NOT NULL AND space_id IS NOT NULL"),
+            postgresql_where=text("airflow_instance_id IS NOT NULL AND space_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_airflow_attachments_instance_scope",
+            "airflow_instance_id",
+            "scope_id",
+            unique=True,
+            sqlite_where=text("airflow_instance_id IS NOT NULL AND scope_id IS NOT NULL"),
+            postgresql_where=text("airflow_instance_id IS NOT NULL AND scope_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_airflow_attachments_dag_space",
+            "dag_row_id",
+            "space_id",
+            unique=True,
+            sqlite_where=text("dag_row_id IS NOT NULL AND space_id IS NOT NULL"),
+            postgresql_where=text("dag_row_id IS NOT NULL AND space_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_airflow_attachments_dag_scope",
+            "dag_row_id",
+            "scope_id",
+            unique=True,
+            sqlite_where=text("dag_row_id IS NOT NULL AND scope_id IS NOT NULL"),
+            postgresql_where=text("dag_row_id IS NOT NULL AND scope_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    airflow_instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_instances.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    dag_row_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_dags.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    space_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("spaces.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("scopes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AirflowInstanceKnowledgeContextRow(Base):
+    """Latest built analysis context for one Airflow instance. Findings are keyed by DAG."""
+
+    __tablename__: str = "airflow_instance_knowledge_contexts"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("instance_id", name="uq_airflow_instance_knowledge_contexts_instance"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("airflow_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class AirflowSyncRunRow(Base):

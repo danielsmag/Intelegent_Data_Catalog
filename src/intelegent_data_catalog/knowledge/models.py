@@ -8,6 +8,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from intelegent_data_catalog.persistence.enums import (
+    AirflowMappingDirection,
+    AirflowMappingOrigin,
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
@@ -401,6 +403,40 @@ class PreviousScopeFindings(BaseModel):
     built_at: datetime | None
 
 
+class PipelineInput(BaseModel):
+    """One attached Airflow DAG and the catalog tables it reads or writes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_row_id: UUID
+    dag_id: str
+    instance_name: str
+    description: str | None = None
+    schedule: str | None = None
+    summary: str | None = None
+    reads: list[UUID] = Field(default_factory=list)
+    writes: list[UUID] = Field(default_factory=list)
+    unknown: list[UUID] = Field(default_factory=list)
+
+
+class PipelineSummary(BaseModel):
+    """DAG identity stored on a scope or space snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_id: str
+    instance_name: str
+
+
+def pipeline_summaries(pipelines: list[PipelineInput]) -> list[PipelineSummary]:
+    """Keep DAG identity on the snapshot. Table ids stay on the prompt only."""
+    found: list[PipelineSummary] = []
+    item: PipelineInput
+    for item in pipelines:
+        found.append(PipelineSummary(dag_id=item.dag_id, instance_name=item.instance_name))
+    return found
+
+
 class ScopeCatalogContext(BaseModel):
     """Everything known about one scope before the scope agent proposes links."""
 
@@ -413,6 +449,7 @@ class ScopeCatalogContext(BaseModel):
     table_knowledge: list[TableKnowledgeInput]
     tables_without_context: list[UUID]
     previous: PreviousScopeFindings | None
+    pipelines: list[PipelineInput] = Field(default_factory=list)
 
 
 class ScopeContextOptions(BaseModel):
@@ -423,6 +460,7 @@ class ScopeContextOptions(BaseModel):
     include_table_knowledge: bool = True
     include_previous: bool = True
     include_summary: bool = True
+    include_airflow: bool = True
 
 
 class ScopeProposal(BaseModel):
@@ -447,6 +485,7 @@ class ScopeAnalysisContext(BaseModel):
     summary: str | None = None
     tables_without_context: list[UUID] = Field(default_factory=list)
     previous_links_kept: int = Field(default=0, ge=0)
+    pipelines: list[PipelineSummary] = Field(default_factory=list)
 
 
 class ScopeGraphEdge(BaseModel):
@@ -506,6 +545,7 @@ class SpaceCatalogContext(BaseModel):
     scope_knowledge: list[ScopeKnowledgeInput]
     scopes_without_context: list[UUID]
     previous: PreviousSpaceFindings | None
+    pipelines: list[PipelineInput] = Field(default_factory=list)
 
 
 class SpaceContextOptions(BaseModel):
@@ -516,6 +556,7 @@ class SpaceContextOptions(BaseModel):
     include_scope_knowledge: bool = True
     include_previous: bool = True
     include_summary: bool = True
+    include_airflow: bool = True
 
 
 class SpaceProposal(BaseModel):
@@ -539,9 +580,145 @@ class SpaceAnalysisContext(BaseModel):
     summary: str | None = None
     scopes_without_context: list[UUID] = Field(default_factory=list)
     previous_links_kept: int = Field(default=0, ge=0)
+    pipelines: list[PipelineSummary] = Field(default_factory=list)
 
 
-ContextSubjectKind = Literal["space", "scope", "table", "table_columns", "column"]
+class DagTaskSummary(BaseModel):
+    """One task from a synced DAG, reduced for the Airflow agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    operator_name: str | None = None
+    downstream_task_ids: list[str] = Field(default_factory=list)
+
+
+class DagTableRef(BaseModel):
+    """Catalog table already linked to a DAG."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table_id: UUID
+    qualified_name: str
+    direction: AirflowMappingDirection
+    origin: AirflowMappingOrigin
+
+
+class DagCandidateTable(BaseModel):
+    """Catalog table the Airflow agent may attach to a DAG."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    qualified_name: str
+    scope_id: UUID
+    description: str | None = None
+
+
+class AirflowDagInput(BaseModel):
+    """One DAG inside an Airflow instance prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_row_id: UUID
+    dag_id: str
+    display_name: str | None = None
+    description: str | None = None
+    schedule: str | None = None
+    owners: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    tasks: list[DagTaskSummary] = Field(default_factory=list)
+    source_code: str | None = None
+    known_tables: list[DagTableRef] = Field(default_factory=list)
+
+
+class DagTableLink(BaseModel):
+    """Table the model says one DAG reads or writes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_row_id: UUID
+    table_id: UUID
+    direction: AirflowMappingDirection
+    reason: str = Field(min_length=1, max_length=280)
+
+    @field_validator("reason")
+    @classmethod
+    def _clean_reason(cls, value: str) -> str:
+        cleaned: str = value.strip()
+        if cleaned == "":
+            raise ValueError("reason is empty")
+        return cleaned
+
+
+class DagFinding(BaseModel):
+    """Summary and table links for one DAG."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_row_id: UUID
+    dag_id: str
+    summary: str = Field(default="", max_length=600)
+    links: list[DagTableLink] = Field(default_factory=list, max_length=40)
+
+
+class PreviousAirflowFindings(BaseModel):
+    """Findings from the last Airflow build. The model may revise them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str | None
+    findings: list[DagFinding]
+    built_at: datetime | None
+
+
+class AirflowCatalogContext(BaseModel):
+    """One Airflow instance and the DAGs this call should analyze."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: UUID
+    instance_name: str
+    instance_description: str | None = None
+    instance_context: str | None = None
+    dags: list[AirflowDagInput]
+    candidate_tables: list[DagCandidateTable]
+    previous: PreviousAirflowFindings | None = None
+
+
+class AirflowContextOptions(BaseModel):
+    """Which parts of an Airflow instance to send to the model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_source: bool = True
+    include_previous: bool = True
+    include_summary: bool = True
+
+
+class AirflowProposal(BaseModel):
+    """Instance summary and one finding per analyzed DAG."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(default="", max_length=1200)
+    dags: list[DagFinding] = Field(default_factory=list, max_length=40)
+
+
+class AirflowAnalysisContext(BaseModel):
+    """Stored Airflow analysis. Findings are keyed by DAG row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: UUID
+    instance_name: str
+    summary: str | None = None
+    findings: list[DagFinding] = Field(default_factory=list)
+    dags_analyzed: int = Field(default=0, ge=0)
+    previous_links_kept: int = Field(default=0, ge=0)
+
+
+ContextSubjectKind = Literal["space", "scope", "table", "table_columns", "column", "airflow"]
 
 _CONTEXT_LIMIT: int = 1200
 
@@ -613,6 +790,10 @@ class ScopeContextProposal(_ContextText):
 
 class SpaceContextProposal(_ContextText):
     """Business meaning the model wrote for one space."""
+
+
+class AirflowContextProposal(_ContextText):
+    """Business meaning the model wrote for one Airflow instance."""
 
 
 class TableContextInput(BaseModel):

@@ -1,5 +1,5 @@
 export type AirflowInstanceStatus = "ACTIVE" | "DISABLED"
-export type AirflowMappingOrigin = "ASSET" | "SOURCE_MATCH" | "MANUAL"
+export type AirflowMappingOrigin = "ASSET" | "SOURCE_MATCH" | "MANUAL" | "LLM"
 export type AirflowMappingDirection = "INPUT" | "OUTPUT" | "UNKNOWN"
 export type AirflowSyncStatus = "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED"
 
@@ -11,6 +11,8 @@ export type AirflowInstance = {
   username: string
   verify_tls: boolean
   description: string | null
+  context: string | null
+  context_origin: "USER" | "LLM" | null
   status: AirflowInstanceStatus
   has_credentials: boolean
   dag_count: number
@@ -36,6 +38,7 @@ export type AirflowInstancePatch = {
   password?: string
   verify_tls?: boolean
   description?: string | null
+  context?: string | null
   status?: AirflowInstanceStatus
 }
 
@@ -291,6 +294,150 @@ export async function addDagTable(
 
 export async function removeDagTable(instanceId: string, dagId: string, tableId: string): Promise<void> {
   await sendEmpty(`${dagPath(instanceId, dagId)}/tables/${tableId}`, "DELETE")
+}
+
+export type AirflowAttachmentTarget = "space" | "scope"
+
+export type AirflowAttachment = {
+  id: string
+  target_kind: AirflowAttachmentTarget
+  target_id: string
+  instance_id: string
+  instance_name: string
+  instance_slug: string
+  dag_row_id: string | null
+  dag_id: string | null
+  dag_display_name: string | null
+  created_at: string
+}
+
+export type AirflowAttachedDag = {
+  attachment_id: string
+  dag_row_id: string
+  instance_id: string
+  instance_name: string
+  dag_id: string
+  display_name: string | null
+  description: string | null
+  timetable_summary: string | null
+  is_paused: boolean
+  last_run: AirflowLastRun | null
+  table_count: number
+  via: "instance" | "dag"
+  summary: string | null
+}
+
+export type AirflowDagLink = {
+  dag_row_id: string
+  table_id: string
+  direction: AirflowMappingDirection
+  reason: string
+}
+
+export type AirflowDagFinding = {
+  dag_row_id: string
+  dag_id: string
+  summary: string
+  links: AirflowDagLink[]
+}
+
+export type AirflowKnowledgeContext = {
+  instance_id: string
+  instance_name: string
+  summary: string | null
+  findings: AirflowDagFinding[]
+  dags_analyzed: number
+  previous_links_kept: number
+}
+
+export type AirflowBuildJob = {
+  id: string
+  instance_id: string
+  instance_name: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+}
+
+export type AirflowBuildOptions = {
+  include_source: boolean
+  include_previous: boolean
+  include_summary: boolean
+}
+
+export async function fetchAirflowAttachments(
+  kind: AirflowAttachmentTarget,
+  targetId: string,
+  signal: AbortSignal,
+): Promise<AirflowAttachment[]> {
+  return readJson<AirflowAttachment[]>(`/api/v1/${kind}s/${targetId}/airflow`, signal)
+}
+
+export async function attachAirflow(
+  kind: AirflowAttachmentTarget,
+  targetId: string,
+  body: { instance_id: string; dag_id: string | null },
+): Promise<AirflowAttachment> {
+  return sendJson<AirflowAttachment>(`/api/v1/${kind}s/${targetId}/airflow`, "POST", body)
+}
+
+export async function detachAirflow(
+  kind: AirflowAttachmentTarget,
+  targetId: string,
+  attachmentId: string,
+): Promise<void> {
+  await sendEmpty(`/api/v1/${kind}s/${targetId}/airflow/${attachmentId}`, "DELETE")
+}
+
+export async function fetchAttachedDags(
+  kind: AirflowAttachmentTarget,
+  targetId: string,
+  signal: AbortSignal,
+): Promise<AirflowAttachedDag[]> {
+  return readJson<AirflowAttachedDag[]>(`/api/v1/${kind}s/${targetId}/airflow/dags`, signal)
+}
+
+export async function fetchAirflowKnowledgeContext(
+  instanceId: string,
+  signal: AbortSignal,
+): Promise<AirflowKnowledgeContext | null> {
+  const response: Response = await fetch(`/api/v1/airflow/instances/${instanceId}/knowledge-context`, {
+    signal,
+  })
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as AirflowKnowledgeContext
+}
+
+export async function startAirflowBuild(
+  instanceId: string,
+  options: AirflowBuildOptions,
+): Promise<AirflowBuildJob> {
+  return sendJson<AirflowBuildJob>(`/api/v1/airflow/instances/${instanceId}/knowledge-context`, "POST", options)
+}
+
+export async function fetchAirflowBuild(jobId: string): Promise<AirflowBuildJob> {
+  return readJson<AirflowBuildJob>(`/api/v1/airflow-builds/${jobId}`, new AbortController().signal)
+}
+
+export async function fetchLatestAirflowBuild(
+  instanceId: string,
+  signal: AbortSignal,
+): Promise<AirflowBuildJob | null> {
+  const response: Response = await fetch(
+    `/api/v1/airflow/instances/${instanceId}/knowledge-context/build`,
+    { signal },
+  )
+  if (response.status === 404) {
+    return null
+  }
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as AirflowBuildJob
 }
 
 export async function fetchAirflowTree(signal: AbortSignal): Promise<AirflowTree[]> {

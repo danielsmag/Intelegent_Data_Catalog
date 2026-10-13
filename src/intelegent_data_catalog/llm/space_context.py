@@ -7,6 +7,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
 from intelegent_data_catalog.knowledge.models import (
+    PipelineInput,
     ScopeTableSummary,
     SpaceCatalogContext,
     SpaceContextProposal,
@@ -21,6 +22,9 @@ _INSTRUCTIONS: str = (
     "The user message is JSON with the space, its scopes, and the tables in each scope. "
     "A previous space summary is included when one exists. "
     "Return two to four sentences on what this space describes and how its scopes fit together. "
+    "pipelines lists Airflow DAGs attached to this space. "
+    "Tables written by one pipeline from the same inputs usually share keys. "
+    "Use pipelines to describe the business process. "
     "Do not invent scopes or tables. "
     "Do not invent facts that the names, descriptions, or context do not support."
 )
@@ -48,6 +52,17 @@ class _PromptScope(BaseModel):
     tables: list[_PromptTable]
 
 
+class _PromptPipeline(BaseModel):
+    """One attached DAG sent with a space."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dag_id: str
+    instance_name: str
+    summary: str | None
+    schedule: str | None
+
+
 class _SpacePrompt(BaseModel):
     """User message for one space."""
 
@@ -59,6 +74,7 @@ class _SpacePrompt(BaseModel):
     existing_context: str | None
     summary: str | None
     scopes: list[_PromptScope]
+    pipelines: list[_PromptPipeline]
 
 
 class SpaceContextAgent(ProposalAgent[SpaceCatalogContext, SpaceContextProposal]):
@@ -125,6 +141,16 @@ def _prompt(context: SpaceCatalogContext) -> _SpacePrompt:
         existing_context=_clip(context.space.context),
         summary=summary,
         scopes=scopes,
+        pipelines=[_pipeline(item) for item in context.pipelines],
+    )
+
+
+def _pipeline(item: PipelineInput) -> _PromptPipeline:
+    return _PromptPipeline(
+        dag_id=item.dag_id,
+        instance_name=item.instance_name,
+        summary=item.summary,
+        schedule=item.schedule,
     )
 
 

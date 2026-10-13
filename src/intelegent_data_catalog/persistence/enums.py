@@ -121,11 +121,12 @@ class AirflowInstanceStatus(StrEnum):
 
 
 class AirflowMappingOrigin(StrEnum):
-    """How a DAG was linked to a catalog table. Sync never rewrites MANUAL."""
+    """How a DAG was linked to a catalog table. Sync never rewrites MANUAL or LLM."""
 
     ASSET = "ASSET"
     SOURCE_MATCH = "SOURCE_MATCH"
     MANUAL = "MANUAL"
+    LLM = "LLM"
 
 
 class AirflowMappingDirection(StrEnum):
@@ -143,6 +144,7 @@ class CatalogJobKind(StrEnum):
     SCOPE = "scope"
     SPACE = "space"
     CONTEXT = "context"
+    AIRFLOW = "airflow"
 
 
 class CatalogJobStatus(StrEnum):
