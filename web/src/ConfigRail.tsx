@@ -6,6 +6,7 @@ import {
 } from "./airflowApi"
 import { bumpAirflowRevision } from "./airflowSidebarStore"
 import { errorMessage, isAbortError } from "./api"
+import { BuildTracePanel } from "./BuildTracePanel"
 import { PanelChevron } from "./icons"
 import { ResizeHandle } from "./ResizeHandle"
 import {
@@ -23,6 +24,7 @@ import {
 const TAB_KEY: string = "idc-side-tab"
 const LEGACY_RAIL_KEY: string = "idc-config-rail-open"
 const CONFIG_TAB: string = "configuration"
+const TRACE_TAB: string = "stream-tracing"
 
 let activeTab: string | null = readActiveTab()
 const tabListeners: Set<() => void> = new Set()
@@ -250,6 +252,11 @@ export function ConfigRail(props: {
               </button>
             </>
           ),
+        },
+        {
+          id: TRACE_TAB,
+          label: "Stream tracing",
+          content: <BuildTracePanel />,
         },
       ]}
     />

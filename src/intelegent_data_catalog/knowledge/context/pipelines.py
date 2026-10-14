@@ -190,6 +190,7 @@ def _pipeline_inputs(
                 dag_row_id=item.dag.id,
                 dag_id=item.dag.dag_id,
                 instance_name=item.instance.name,
+                instance_context=_blank(item.instance.context),
                 description=_blank(item.dag.description),
                 schedule=_blank(item.dag.timetable_summary),
                 summary=summary,

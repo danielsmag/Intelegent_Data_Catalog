@@ -7,6 +7,7 @@ import pytest
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.graph.knowledge_subgraph import (
+    KnowledgeEdgeWrite,
     KnowledgeSubgraphWrite,
     knowledge_statements,
 )
@@ -19,6 +20,7 @@ from intelegent_data_catalog.knowledge.context.scope_graph import (
 from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
+    PipelineInput,
     PreviousScopeFindings,
     ScopeAnalysisContext,
     ScopeCatalogContext,
@@ -138,6 +140,42 @@ def test_assemble_writes_scope_table_nodes_only() -> None:
     statements: list[tuple[LiteralString, dict[str, object]]] = knowledge_statements(document)
     assert "owner_scope_id" in statements[0][0]
     assert "JOINS_ON" in statements[-1][0]
+
+
+def test_assemble_writes_pipeline_read_to_write_edges() -> None:
+    """A DAG that reads one scope table and writes another adds one DERIVED_FROM edge."""
+    context: ScopeCatalogContext = _context()
+    orders: ScopeTableSummary = context.tables[0]
+    customers: ScopeTableSummary = context.tables[1]
+    outside: UUID = uuid4()
+    first: PipelineInput = PipelineInput(
+        dag_row_id=uuid4(),
+        dag_id="append_sales_order",
+        instance_name="Iceberg",
+        instance_context="Nightly sales loads.",
+        reads=[customers.id, outside],
+        writes=[orders.id],
+    )
+    second: PipelineInput = PipelineInput(
+        dag_row_id=uuid4(),
+        dag_id="append_sales_customer",
+        instance_name="Iceberg",
+        reads=[customers.id],
+        writes=[orders.id, customers.id],
+    )
+    document: KnowledgeSubgraphWrite = assemble_scope_subgraph(
+        context.scope.id,
+        context.tables,
+        [],
+        [],
+        [first, second],
+    )
+    derived: list[str] = [edge.kind for edge in document.edges]
+    assert derived == ["DERIVED_FROM"]
+    written: KnowledgeEdgeWrite = document.edges[0]
+    assert written.source == f"knowledge:scope:{context.scope.id}:table:{customers.id}"
+    assert written.target == f"knowledge:scope:{context.scope.id}:table:{orders.id}"
+    assert written.reason == "Iceberg append_sales_order; Iceberg append_sales_customer"
 
 
 def test_builder_counts_links_kept_from_the_previous_build() -> None:

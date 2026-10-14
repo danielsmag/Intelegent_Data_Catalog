@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterable
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import (
     ModelAPIError,
     ModelHTTPError,
@@ -17,6 +18,13 @@ from pydantic_ai.exceptions import (
     UnexpectedModelBehavior,
     UsageLimitExceeded,
     UserError,
+)
+from pydantic_ai.messages import (
+    AgentStreamEvent,
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    RetryPromptPart,
+    ToolReturnPart,
 )
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.settings import ModelSettings
@@ -77,6 +85,15 @@ class ModelCall[DepsT, OutputT]:
     ) -> OutputT:
         trace: AgentTrace = AgentTrace(self._name)
         trace.start(prompt)
+
+        async def handle_events(
+            _ctx: RunContext[DepsT],
+            events: AsyncIterable[AgentStreamEvent],
+        ) -> None:
+            event: AgentStreamEvent
+            async for event in events:
+                _observe_event(trace, event)
+
         result: AgentRunResult[OutputT]
         try:
             if instructions is None:
@@ -85,6 +102,7 @@ class ModelCall[DepsT, OutputT]:
                     deps=deps,
                     model_settings=self._settings,
                     usage_limits=UsageLimits(request_limit=self._max_requests),
+                    event_stream_handler=handle_events,
                 )
             else:
                 result = await self._agent.run(
@@ -93,6 +111,7 @@ class ModelCall[DepsT, OutputT]:
                     instructions=instructions,
                     model_settings=self._settings,
                     usage_limits=UsageLimits(request_limit=self._max_requests),
+                    event_stream_handler=handle_events,
                 )
         except UsageLimitExceeded as err:
             raise LlmError("language model exceeded the tool step limit") from err
@@ -112,6 +131,21 @@ class ModelCall[DepsT, OutputT]:
         trace.finish(result)
         output: OutputT = result.output
         return output
+
+
+def _observe_event(trace: AgentTrace, event: AgentStreamEvent) -> None:
+    """Publish a tool step as soon as the model stream yields it."""
+    if isinstance(event, FunctionToolCallEvent):
+        trace.observe_tool_call(event.part.tool_name, event.part.args)
+        return
+    if not isinstance(event, FunctionToolResultEvent):
+        return
+    part: ToolReturnPart | RetryPromptPart = event.part
+    if isinstance(part, RetryPromptPart):
+        tool_name: str = part.tool_name or "model"
+        trace.observe_retry(tool_name, part.content)
+        return
+    trace.observe_tool_result(part.tool_name, part.content)
 
 
 def _rejected(name: str, err: BaseException) -> str:

@@ -6,6 +6,7 @@ import pytest
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.graph.knowledge_subgraph import (
+    KnowledgeEdgeWrite,
     KnowledgeSubgraphWrite,
     knowledge_statements,
 )
@@ -17,6 +18,7 @@ from intelegent_data_catalog.knowledge.context.space_graph import (
 )
 from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
+    PipelineInput,
     PreviousSpaceFindings,
     ScopeTableSummary,
     SpaceAnalysisContext,
@@ -129,6 +131,36 @@ def test_assemble_writes_scope_and_table_nodes() -> None:
     assert "owner_space_id" in str(statements[0][0])
     assert any("CREATE (n:Scope" in str(query) for query, _parameters in statements)
     assert any("HAS_TABLE" in str(query) for query, _parameters in statements)
+
+
+def test_assemble_writes_pipeline_read_to_write_edges() -> None:
+    """A DAG that reads one space table and writes another adds one DERIVED_FROM edge."""
+    context: SpaceCatalogContext = _context()
+    orders: ScopeTableSummary = context.scopes[0].tables[0]
+    customers: ScopeTableSummary = context.scopes[1].tables[0]
+    outside: UUID = uuid4()
+    pipeline: PipelineInput = PipelineInput(
+        dag_row_id=uuid4(),
+        dag_id="append_sales_order",
+        instance_name="Iceberg",
+        instance_context="Nightly sales loads.",
+        reads=[customers.id, outside],
+        writes=[orders.id],
+    )
+    document: KnowledgeSubgraphWrite = assemble_space_subgraph(
+        context.space.id,
+        context.scopes,
+        [],
+        [],
+        [pipeline],
+    )
+    derived: list[KnowledgeEdgeWrite] = [
+        edge for edge in document.edges if edge.kind == "DERIVED_FROM"
+    ]
+    assert len(derived) == 1
+    assert derived[0].source.endswith(f":table:{customers.id}")
+    assert derived[0].target.endswith(f":table:{orders.id}")
+    assert derived[0].reason == "Iceberg append_sales_order"
 
 
 def test_builder_counts_links_kept_from_the_previous_build() -> None:

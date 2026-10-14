@@ -172,6 +172,14 @@ export async function createScope(spaceId: string, body: NamedCreate): Promise<S
   return writeJson<ScopeRecord>(`/api/v1/spaces/${spaceId}/scopes`, body)
 }
 
+export async function deleteSpace(spaceId: string): Promise<void> {
+  await removeRecord(`/api/v1/spaces/${spaceId}`)
+}
+
+export async function deleteScope(scopeId: string): Promise<void> {
+  await removeRecord(`/api/v1/scopes/${scopeId}`)
+}
+
 export async function fetchScopes(spaceId: string, signal: AbortSignal): Promise<ScopeRecord[]> {
   return readJson<ScopeRecord[]>(`/api/v1/spaces/${spaceId}/scopes`, signal)
 }
@@ -436,11 +444,11 @@ export type ScopeKnowledgeContext = {
 }
 
 export async function fetchScopeGraph(scopeId: string, signal: AbortSignal): Promise<GraphViewRecord> {
-  return readJson<GraphViewRecord>(`/api/v1/scopes/${scopeId}/graph`, signal)
+  return readJson<GraphViewRecord>(`/api/v1/scopes/${scopeId}/knowledge-graph`, signal)
 }
 
 export async function fetchSpaceGraph(spaceId: string, signal: AbortSignal): Promise<GraphViewRecord> {
-  return readJson<GraphViewRecord>(`/api/v1/spaces/${spaceId}/graph`, signal)
+  return readJson<GraphViewRecord>(`/api/v1/spaces/${spaceId}/knowledge-graph`, signal)
 }
 
 export async function fetchScopeKnowledgeContext(
@@ -580,6 +588,20 @@ export async function startSpaceBuild(spaceId: string, options: SpaceBuildOption
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as SpaceBuildJob
+}
+
+export type CatalogJobCancel = {
+  id: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+}
+
+export async function cancelCatalogJob(jobId: string): Promise<CatalogJobCancel> {
+  const response: Response = await fetch(`/api/v1/catalog-jobs/${jobId}/cancel`, { method: "POST" })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as CatalogJobCancel
 }
 
 export async function fetchSpaceBuild(jobId: string): Promise<SpaceBuildJob> {
@@ -825,6 +847,39 @@ export async function searchCatalog(query: string, signal: AbortSignal): Promise
   return body.hits
 }
 
+export type BuildTraceKind = "table" | "scope" | "space" | "airflow"
+
+export type BuildTraceEvent = {
+  id: string
+  at: string
+  kind: BuildTraceKind
+  subject_name: string
+  subject_id: string
+  job_id: string
+  agent: string
+  step: string
+  title: string
+  detail: string
+}
+
+export type BuildTracePage = {
+  events: BuildTraceEvent[]
+  cursor: string | null
+}
+
+export async function fetchBuildTraces(
+  after: string | null,
+  signal: AbortSignal,
+): Promise<BuildTracePage> {
+  const params: URLSearchParams = new URLSearchParams()
+  if (after !== null && after !== "") {
+    params.set("after", after)
+  }
+  const query: string = params.toString()
+  const path: string = query === "" ? "/api/v1/build-traces" : `/api/v1/build-traces?${query}`
+  return readJson<BuildTracePage>(path, signal)
+}
+
 export { isAbortError }
 
 async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
@@ -849,6 +904,13 @@ async function writeJson<T>(path: string, body: NamedCreate): Promise<T> {
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as T
+}
+
+async function removeRecord(path: string): Promise<void> {
+  const response: Response = await fetch(path, { method: "DELETE" })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
 }
 
 async function readDetail(response: Response): Promise<string> {

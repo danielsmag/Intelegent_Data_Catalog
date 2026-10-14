@@ -4,7 +4,7 @@ import logging
 from uuid import UUID
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
-from intelegent_data_catalog.exceptions import ValidationAppError
+from intelegent_data_catalog.exceptions import ProfileUnavailableError, ValidationAppError
 from intelegent_data_catalog.knowledge.access import (
     accept_table_profile,
     profiles_physical_data,
@@ -101,7 +101,14 @@ class TableContextBuilder:
             profile_options.access_mode
         ):
             return None
-        raw: TableDataProfile = self._profiler.profile_table(table_id, profile_options)
+        try:
+            raw: TableDataProfile = self._profiler.profile_table(table_id, profile_options)
+        except ProfileUnavailableError:
+            logger.warning(
+                "data profile skipped table_id=%s reason=profiler is not configured",
+                table_id,
+            )
+            return None
         allowed: set[UUID] = {column.id for column in catalog.columns}
         return accept_table_profile(raw, table_id, allowed, profile_options)
 

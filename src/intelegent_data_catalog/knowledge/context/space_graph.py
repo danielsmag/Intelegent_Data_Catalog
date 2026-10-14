@@ -15,9 +15,11 @@ from intelegent_data_catalog.knowledge.context.column_graph import (
     GraphBuilder,
     KnowledgeSubgraphWriter,
 )
+from intelegent_data_catalog.knowledge.context.scope_graph import pipeline_derived_edges
 from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
+    PipelineInput,
     ScopeTableSummary,
     SpaceAnalysisContext,
     SpaceCatalogContext,
@@ -110,6 +112,7 @@ class SpaceGraphBuilder(SpaceGraphAppender):
             context.scopes,
             context.relationships,
             accepted,
+            context.pipelines,
         )
         self._writer.write(document)
         if self._publisher is not None:
@@ -190,6 +193,7 @@ def assemble_space_subgraph(
     scopes: list[SpaceScopeSummary],
     relationships: list[TableRelation],
     links: list[TableLink],
+    pipelines: list[PipelineInput] | None = None,
 ) -> KnowledgeSubgraphWrite:
     """Build scope and table nodes. Column nodes stay on each table's subgraph."""
     scope_nodes: dict[UUID, KnowledgeNodeWrite] = {}
@@ -256,6 +260,8 @@ def assemble_space_subgraph(
                 reason=_link_reason(link, by_id, scope_of, scope_names),
             )
         )
+    selected: list[PipelineInput] = [] if pipelines is None else pipelines
+    edges.extend(pipeline_derived_edges(table_nodes, selected))
     return KnowledgeSubgraphWrite(
         owner_table_id=str(space_id),
         owner_kind="space",

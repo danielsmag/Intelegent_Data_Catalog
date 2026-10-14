@@ -58,6 +58,10 @@ from intelegent_data_catalog.knowledge.models import (
     TagSummary,
 )
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
+from intelegent_data_catalog.knowledge.profiling.profiler import (
+    DataProfiler,
+    UnconfiguredDataProfiler,
+)
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
@@ -574,6 +578,20 @@ def test_build_context_combines_metadata_profile_graph_and_lineage() -> None:
     assert len(profiler.table_options) == 1
 
 
+def test_build_context_skips_an_unconfigured_profiler() -> None:
+    """A missing profiler does not fail the rest of the table context."""
+    table_id: UUID = uuid4()
+    agent: TableAgent = _factory(
+        _context(table_id),
+        profiler=UnconfiguredDataProfiler(),
+    ).create(table_id)
+    context: TableAnalysisContext = agent.build_context(
+        TableContextOptions(include_data_profile=True)
+    )
+    assert context.data_profile is None
+    assert context.table.id == table_id
+
+
 def test_build_context_logs_requested_slices(caplog: pytest.LogCaptureFixture) -> None:
     """Build logs the table id and which slices were requested."""
     caplog.set_level(logging.INFO, logger="intelegent_data_catalog.knowledge")
@@ -892,7 +910,7 @@ def _factory(
     context: TableCatalogContext,
     *,
     catalog: _Catalog | _MissingCatalog | None = None,
-    profiler: _Profiler | None = None,
+    profiler: DataProfiler | None = None,
     graph: _Neighbors | None = None,
     lineage: _Lineage | None = None,
     defaults: KnowledgeDefaults | None = None,
@@ -900,7 +918,7 @@ def _factory(
     operation_agent: TableOperationAgent | None = None,
     column_graph: ColumnGraphAppender | None = None,
 ) -> TableAgentFactory:
-    selected_profiler: _Profiler = profiler or _Profiler(
+    selected_profiler: DataProfiler = profiler or _Profiler(
         _table_profile(context.table.id, context.columns[0].id)
     )
     return TableAgentFactory(

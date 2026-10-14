@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react"
 import { Link, useNavigate, useParams, useSearchParams, type NavigateFunction } from "react-router-dom"
 import { ActivityBar } from "./ActivityBar"
+import { BuildingBanner } from "./BuildingBanner"
 import {
   addDagTable,
   createAirflowInstance,
@@ -42,7 +43,12 @@ import {
 } from "./airflowApi"
 import { AirflowSidebar } from "./AirflowSidebar"
 import { ContextEditor } from "./ContextEditor"
-import { followAirflowBuild, onAirflowBuildFinished, requestAirflowBuild } from "./knowledgeBuild"
+import {
+  followAirflowBuild,
+  isCancelledBuild,
+  onAirflowBuildFinished,
+  requestAirflowBuild,
+} from "./knowledgeBuild"
 import { PageSlot } from "./PageSlot"
 import { AirflowConfigRail } from "./ConfigRail"
 import { bumpAirflowRevision, setAirflowSidebarOpen, useAirflowRevision, useAirflowSidebarOpen } from "./airflowSidebarStore"
@@ -294,11 +300,13 @@ export function AirflowInstancePage(): ReactElement {
   const [knowledge, setKnowledge] = useState<AirflowKnowledgeContext | null>(null)
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
+  const [buildJobId, setBuildJobId] = useState<string | null>(null)
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setOverview(null)
     setDags(null)
     setBuilding(false)
+    setBuildJobId(null)
     void fetchAirflowInstance(instanceId, controller.signal)
       .then((loaded: AirflowInstance) => {
         setInstance(loaded)
@@ -347,6 +355,7 @@ export function AirflowInstancePage(): ReactElement {
           return
         }
         setBuilding(true)
+        setBuildJobId(job.id)
         followAirflowBuild(job)
       })
       .catch((err: unknown) => {
@@ -364,6 +373,10 @@ export function AirflowInstancePage(): ReactElement {
         return
       }
       setBuilding(false)
+      setBuildJobId(null)
+      if (isCancelledBuild(job)) {
+        return
+      }
       if (job.status === "failed") {
         setKnowledgeError(job.error ?? "Airflow context build failed.")
         return
@@ -431,6 +444,7 @@ export function AirflowInstancePage(): ReactElement {
                 disabled={instance === null || building}
                 onClick={() => {
                   setBuilding(true)
+                  setBuildJobId(null)
                   setKnowledgeError(null)
                   void requestAirflowBuild(instanceId, {
                     include_source: true,
@@ -439,9 +453,11 @@ export function AirflowInstancePage(): ReactElement {
                   })
                     .then((job: AirflowBuildJob) => {
                       setBuilding(job.status === "running")
+                      setBuildJobId(job.status === "running" ? job.id : null)
                     })
                     .catch((err: unknown) => {
                       setBuilding(false)
+                      setBuildJobId(null)
                       setKnowledgeError(errorMessage(err))
                     })
                 }}
@@ -494,9 +510,13 @@ export function AirflowInstancePage(): ReactElement {
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
         {building ? (
-          <p className="comment">
-            Building in the background. Keep using the catalog. An alert appears when it finishes.
-          </p>
+          <BuildingBanner
+            jobId={buildJobId}
+            onCancelled={() => {
+              setBuilding(false)
+              setBuildJobId(null)
+            }}
+          />
         ) : null}
         {editing && instance !== null ? (
           <div className="catalog-panel">

@@ -32,6 +32,12 @@ type BuildStatus = {
   error: string | null
 }
 
+export const BUILD_CANCELLED: string = "build cancelled"
+
+export function isCancelledBuild(job: BuildStatus): boolean {
+  return job.error === BUILD_CANCELLED
+}
+
 type FinishedHandler<Job extends BuildStatus> = (job: Job) => void
 
 type BuildFollower<Job extends BuildStatus> = {
@@ -62,8 +68,10 @@ function createFollower<Job extends BuildStatus>(
     handlers.forEach((handler: FinishedHandler<Job>) => {
       handler(job)
     })
-    const tone: PageAlertTone = job.status === "succeeded" ? "success" : "error"
-    showPageAlert(message(job), tone)
+    const cancelled: boolean = isCancelledBuild(job)
+    const tone: PageAlertTone = job.status === "succeeded" ? "success" : cancelled ? "info" : "error"
+    const text: string = cancelled ? "Build cancelled." : message(job)
+    showPageAlert(text, tone)
   }
 
   function follow(job: Job): void {
@@ -238,13 +246,13 @@ export function useRunningJobWatch<Job extends BuildStatus>(
   enabled: boolean,
   load: (signal: AbortSignal) => Promise<Job | null>,
   follow: (job: Job) => void,
-  markRunning: () => void,
+  markRunning: (job: Job) => void,
 ): void {
   const loadRef: MutableRefObject<(signal: AbortSignal) => Promise<Job | null>> = useRef(load)
   loadRef.current = load
   const followRef: MutableRefObject<(job: Job) => void> = useRef(follow)
   followRef.current = follow
-  const markRef: MutableRefObject<() => void> = useRef(markRunning)
+  const markRef: MutableRefObject<(job: Job) => void> = useRef(markRunning)
   markRef.current = markRunning
   useEffect(() => {
     if (!enabled) {
@@ -262,7 +270,7 @@ export function useRunningJobWatch<Job extends BuildStatus>(
           if (stopped || controller.signal.aborted || job === null || job.status !== "running") {
             return
           }
-          markRef.current()
+          markRef.current(job)
           followRef.current(job)
         })
         .catch(() => {

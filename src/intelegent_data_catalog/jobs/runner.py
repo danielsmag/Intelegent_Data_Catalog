@@ -9,7 +9,9 @@ from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.core.logger import LOGGER_NAME
+from intelegent_data_catalog.core.settings import CelerySettings
 from intelegent_data_catalog.exceptions import CatalogError
+from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR, CancelSignal, RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog import (
     CatalogAirflowBuild,
     CatalogContextGeneration,
@@ -18,7 +20,15 @@ from intelegent_data_catalog.jobs.catalog import (
     CatalogSpaceBuild,
 )
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobStore
+from intelegent_data_catalog.jobs.lease import JobLeaseStore, LeaseHeartbeat, RedisJobLeaseStore
 from intelegent_data_catalog.jobs.runtime import job_container
+from intelegent_data_catalog.jobs.trace import (
+    BuildTraceSubject,
+    RedisBuildTrace,
+    build_trace_scope,
+    publish_build_step,
+    trace_kind_for_job,
+)
 from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
@@ -49,24 +59,69 @@ _FAILURE_MESSAGE: dict[str, str] = {
 
 
 def execute_catalog_job(job_id: UUID) -> None:
-    """Run a committed catalog job and store its status."""
+    """Run a committed catalog job and store its status.
+
+    The Redis lease keeps Beat from starting a second copy. A duplicate delivery
+    finds the lease held and returns. The heartbeat covers a long model call.
+    """
     container: AppContainer = job_container()
     store: CatalogJobStore = CatalogJobStore(container.database())
     row: CatalogJobRow | None = store.get(job_id)
     if row is None or row.status != CatalogJobStatus.RUNNING.value:
         return
+    celery_settings: CelerySettings = container.settings().celery
+    broker_url: str = celery_settings.broker_url
+    cancels: CancelSignal = RedisCancelSignal.from_url(broker_url)
+    if cancels.is_requested(job_id):
+        store.complete(job_id, "failed", CANCELLED_JOB_ERROR)
+        cancels.clear(job_id)
+        return
+    leases: JobLeaseStore = RedisJobLeaseStore.from_url(broker_url)
+    ttl_seconds: int = max(int(celery_settings.lease_seconds), 1)
+    token: str | None = leases.try_acquire(job_id, ttl_seconds)
+    if token is None:
+        _LOGGER.info("catalog job lease held job_id=%s", job_id)
+        return
+    current: CatalogJobRow | None = store.get(job_id)
+    if current is None or current.status != CatalogJobStatus.RUNNING.value:
+        leases.release(job_id, token)
+        return
+    heartbeat: LeaseHeartbeat = LeaseHeartbeat(leases, job_id, token, ttl_seconds, cancels)
+    heartbeat.start()
+    subject: BuildTraceSubject = BuildTraceSubject(
+        job_id,
+        trace_kind_for_job(current.kind, current.options),
+        current.subject_id,
+        current.subject_name,
+    )
+    try:
+        with build_trace_scope(subject, RedisBuildTrace.from_url(broker_url)):
+            publish_build_step("", "started", "")
+            _finish(container, store, current)
+    finally:
+        heartbeat.stop()
+        leases.release(job_id, token)
+
+
+def _finish(container: AppContainer, store: CatalogJobStore, row: CatalogJobRow) -> None:
+    job_id: UUID = row.id
     kind: str = row.kind
     subject_id: UUID = row.subject_id
     options: dict[str, object] = row.options
     try:
         _execute(container, kind, subject_id, options)
     except CatalogError as err:
-        store.complete(job_id, "failed", str(err))
+        message: str = str(err)
+        store.complete(job_id, "failed", message)
+        publish_build_step("", "failed", message)
     except Exception:
         _LOGGER.exception(_FAILURE_LOG.get(kind, "catalog job failed"))
-        store.complete(job_id, "failed", _FAILURE_MESSAGE.get(kind, "catalog job failed"))
+        failed: str = _FAILURE_MESSAGE.get(kind, "catalog job failed")
+        store.complete(job_id, "failed", failed)
+        publish_build_step("", "failed", failed)
     else:
         store.complete(job_id, "succeeded", None)
+        publish_build_step("", "succeeded", "Context saved")
 
 
 def execute_trino_sync(source_binding_id: UUID) -> None:

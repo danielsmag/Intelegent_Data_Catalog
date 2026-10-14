@@ -199,13 +199,34 @@ class AirflowSettings(BaseModel):
 
 
 class CelerySettings(BaseModel):
-    """Redis broker and the beat tick. Job status stays in Postgres."""
+    """Redis broker and the beat tick. Job status stays in Postgres.
+
+    A worker holds a Redis lease while a build runs. Beat requeues a running job
+    once that lease is gone, and fails the job if it is still abandoned after
+    ``abandon_after_seconds``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     broker_url: str = Field(default="redis://127.0.0.1:6379/0", min_length=1)
     dispatch_interval_seconds: float = Field(default=1.0, gt=0)
     task_always_eager: bool = False
+    lease_seconds: float = Field(default=90, gt=0)
+    reclaim_after_seconds: float = Field(default=120, gt=0)
+    abandon_after_seconds: float = Field(default=1800, gt=0)
+    visibility_timeout_seconds: float = Field(default=7200, gt=0)
+
+    @model_validator(mode="after")
+    def _lease_windows_increase(self) -> CelerySettings:
+        if self.lease_seconds >= self.reclaim_after_seconds:
+            raise ValueError("lease_seconds must be shorter than reclaim_after_seconds")
+        if self.reclaim_after_seconds >= self.abandon_after_seconds:
+            raise ValueError("reclaim_after_seconds must be shorter than abandon_after_seconds")
+        if self.abandon_after_seconds >= self.visibility_timeout_seconds:
+            raise ValueError(
+                "abandon_after_seconds must be shorter than visibility_timeout_seconds",
+            )
+        return self
 
 
 class ObservabilitySettings(BaseModel):

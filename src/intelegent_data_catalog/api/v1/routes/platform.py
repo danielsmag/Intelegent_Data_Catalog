@@ -3,20 +3,25 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
-from intelegent_data_catalog.api.dependencies import CatalogJobsDep, PlatformDep
+from intelegent_data_catalog.api.container import AppContainer
+from intelegent_data_catalog.api.dependencies import CatalogJobsDep, PlatformDep, get_container
 from intelegent_data_catalog.catalog.models import QueryResult
+from intelegent_data_catalog.core.settings import CelerySettings
 from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
 from intelegent_data_catalog.graph.document import GraphView
+from intelegent_data_catalog.jobs.cancel import CancelSignal, RedisCancelSignal
 from intelegent_data_catalog.jobs.models import (
     AirflowBuildJobRead,
+    CatalogJobCancelRead,
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     ScopeBuildJobRead,
     SpaceBuildJobRead,
 )
+from intelegent_data_catalog.jobs.trace import BuildTraceEvent, BuildTraceList, RedisBuildTrace
 from intelegent_data_catalog.knowledge.models import (
     AirflowAnalysisContext,
     AirflowContextOptions,
@@ -372,6 +377,22 @@ def build_space_knowledge_context(
     return builds.start_space(space_id, space_name, options)
 
 
+@router.post("/catalog-jobs/{job_id}/cancel", response_model=CatalogJobCancelRead)
+def cancel_catalog_job(
+    job_id: UUID,
+    builds: CatalogJobsDep,
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> CatalogJobCancelRead:
+    """Stop a running build. A live worker exits. A stuck row is released."""
+    celery_settings: CelerySettings = container.settings().celery
+    signal: CancelSignal = RedisCancelSignal.from_url(celery_settings.broker_url)
+    ttl_seconds: int = max(int(celery_settings.visibility_timeout_seconds), 1)
+    cancelled: CatalogJobCancelRead | None = builds.cancel(job_id, signal, ttl_seconds)
+    if cancelled is None:
+        raise EntityNotFoundError("catalog job", str(job_id))
+    return cancelled
+
+
 @router.get("/space-builds/{job_id}", response_model=SpaceBuildJobRead)
 def read_space_build(job_id: UUID, builds: CatalogJobsDep) -> SpaceBuildJobRead:
     """Return one background space build."""
@@ -597,6 +618,19 @@ def read_latest_airflow_context_generation(
 ) -> ContextGenerationJobRead:
     """Return the newest Airflow context generation."""
     return _latest_context(builds, instance_id, "airflow")
+
+
+@router.get("/build-traces", response_model=BuildTraceList)
+def read_build_traces(
+    container: Annotated[AppContainer, Depends(get_container)],
+    after: Annotated[str | None, Query()] = None,
+) -> BuildTraceList:
+    """Return context-build steps newer than the cursor."""
+    broker_url: str = container.settings().celery.broker_url
+    sink: RedisBuildTrace = RedisBuildTrace.from_url(broker_url)
+    events: list[BuildTraceEvent] = sink.read(after)
+    cursor: str | None = events[-1].id if len(events) > 0 else after
+    return BuildTraceList(events=events, cursor=cursor)
 
 
 def _start_context(

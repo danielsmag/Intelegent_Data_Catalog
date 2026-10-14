@@ -11,5 +11,6 @@
     "scripts",
     "airflow",
     "airflow/.venv/lib/python3.12/site-packages"
-  ]
+  ],
+  "makefile.configureOnOpen": false
 }

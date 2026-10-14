@@ -37,6 +37,8 @@ _INSTRUCTIONS: str = (
     "previous_findings are a draft for these DAGs: keep, drop, or add. "
     "Do not invent DAG ids or table ids. "
     "Return no links for a DAG when the source does not name a candidate table. "
+    "instance_context is the business meaning already written for this Airflow instance. "
+    "Use it when you summarize the instance and when you explain each DAG. "
     "The instance summary ties the DAGs together in two to four sentences."
 )
 
@@ -127,6 +129,7 @@ class _AirflowPrompt(BaseModel):
     instance_id: UUID
     instance_name: str
     instance_description: str | None
+    instance_context: str | None
     dags: list[_PromptDag]
     candidate_tables: list[_PromptCandidate]
     previous_findings: _PromptPrevious | None
@@ -191,6 +194,7 @@ def _prompt(context: AirflowCatalogContext) -> str:
         instance_id=context.instance_id,
         instance_name=context.instance_name,
         instance_description=context.instance_description,
+        instance_context=context.instance_context,
         dags=dags,
         candidate_tables=candidates,
         previous_findings=_previous(context.previous),

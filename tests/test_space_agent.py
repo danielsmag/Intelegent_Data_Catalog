@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic_ai.messages import (
     ModelMessage,
@@ -15,6 +15,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.knowledge.models import (
+    PipelineInput,
     PreviousSpaceFindings,
     ScopeGraphEdge,
     ScopeKnowledgeInput,
@@ -140,6 +141,50 @@ def test_space_agent_retries_a_same_scope_link() -> None:
     assert "Old summary" in prompts[0]
     assert "Commerce covers sales." in prompts[0]
     assert "shared region inside ordering" in prompts[0]
+
+
+def test_space_summary_must_name_attached_pipelines() -> None:
+    """A summary that ignores an attached DAG is sent back until the dag id is named."""
+    base: SpaceCatalogContext = _context()
+    pipeline: PipelineInput = PipelineInput(
+        dag_row_id=uuid4(),
+        dag_id="append_sales_order",
+        instance_name="Iceberg",
+        instance_context="Nightly sales loads.",
+    )
+    context: SpaceCatalogContext = base.model_copy(update={"pipelines": [pipeline]})
+    prompts: list[str] = []
+    feedback: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        prompts.append(_user_text(messages))
+        feedback.append(_feedback(messages))
+        if _feedback(messages) == "":
+            return ModelResponse(
+                parts=[TextPart(content='{"summary":"No cross-scope links.","links":[]}')]
+            )
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content=(
+                        '{"summary":"append_sales_order appends orders for Iceberg.","links":[]}'
+                    )
+                )
+            ]
+        )
+
+    agent: SpaceSubgraphAgent = SpaceSubgraphAgent(
+        FunctionModel(respond),
+        max_requests=4,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+    selected: SpaceProposal = agent.propose(context)
+    assert selected.summary == "append_sales_order appends orders for Iceberg."
+    assert "Nightly sales loads." in prompts[0]
+    assert "append_sales_order" in feedback[1]
 
 
 def test_replace_across_scopes_keeps_intra_scope_rows(tmp_path: Path) -> None:

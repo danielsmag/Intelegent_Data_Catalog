@@ -18,8 +18,18 @@ from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import RunUsage
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
+from intelegent_data_catalog.jobs.trace import TraceStep, publish_build_step
 
 _INFO_LIMIT: int = 500
+_STEPS: dict[str, TraceStep] = {
+    "ask": "ask",
+    "tool_call": "tool_call",
+    "tool_result": "tool_result",
+    "retry": "retry",
+    "text": "text",
+    "output": "output",
+    "usage": "usage",
+}
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.llm")
 
@@ -27,31 +37,52 @@ OutputT = TypeVar("OutputT")
 
 
 class AgentTrace:
-    """Writes one agent run to the package logger.
+    """Writes one agent run to the package logger and the build trace.
 
-    The ask is logged before the model runs. Tool calls, tool results, retries,
-    and the final output are logged after ``all_messages`` is available.
+    The ask is logged before the model runs. Live tool steps are logged as the
+    event stream yields them. The final output and token usage are logged after.
     """
 
     def __init__(self, agent_name: str) -> None:
         self._agent_name: str = agent_name
+        self._streamed: bool = False
+        self._seen: set[tuple[str, str]] = set()
 
     def start(self, ask: str) -> None:
         """Log the instruction or prompt before the model runs."""
-        self._emit("ask", ask)
+        self._emit("ask", ask, publish=True)
+
+    def observe_tool_call(self, name: str, args: object) -> None:
+        """Log one tool call as the model requests it."""
+        self._streamed = True
+        rendered_args: str = _render(args)
+        self._emit("tool_call", f"{name} {rendered_args}", publish=True)
+
+    def observe_tool_result(self, name: str, content: object) -> None:
+        """Log one tool result as the tool returns."""
+        self._streamed = True
+        rendered_content: str = _render(content)
+        self._emit("tool_result", f"{name} {rendered_content}", publish=True)
+
+    def observe_retry(self, name: str, content: object) -> None:
+        """Log one tool retry as the model is asked to try again."""
+        self._streamed = True
+        rendered_retry: str = _render(content)
+        self._emit("retry", f"{name} {rendered_retry}", publish=True)
 
     def finish(self, result: AgentRunResult[OutputT]) -> None:
-        """Log tool steps, the model output, and token usage."""
+        """Log remaining steps, the model output, and token usage."""
         saw_text: bool = False
+        publish_parts: bool = not self._streamed
         message: ModelMessage
         for message in result.all_messages():
             for part in message.parts:
                 if isinstance(part, TextPart):
                     saw_text = True
-                self._log_part(part)
+                self._log_part(part, publish=publish_parts)
         output: OutputT = result.output
-        if not isinstance(output, str) or not saw_text:
-            self._emit("output", _render(output))
+        if not isinstance(output, str) or not saw_text or self._streamed:
+            self._emit("output", _render(output), publish=True)
         usage: RunUsage = result.usage
         logger.info(
             "agent=%s usage requests=%s tool_calls=%s input_tokens=%s output_tokens=%s",
@@ -61,31 +92,44 @@ class AgentTrace:
             usage.input_tokens,
             usage.output_tokens,
         )
+        usage_detail: str = f"{usage.input_tokens:,} in · {usage.output_tokens:,} out"
+        self._emit("usage", usage_detail, publish=True, log=False)
 
-    def _log_part(self, part: object) -> None:
+    def _log_part(self, part: object, *, publish: bool) -> None:
         if isinstance(part, UserPromptPart):
             return
         if isinstance(part, ToolCallPart):
             rendered_args: str = _render(part.args)
-            self._emit("tool_call", f"{part.tool_name} {rendered_args}")
+            self._emit("tool_call", f"{part.tool_name} {rendered_args}", publish=publish)
             return
         if isinstance(part, ToolReturnPart):
             rendered_content: str = _render(part.content)
-            self._emit("tool_result", f"{part.tool_name} {rendered_content}")
+            self._emit("tool_result", f"{part.tool_name} {rendered_content}", publish=publish)
             return
         if isinstance(part, RetryPromptPart):
             tool_name: str = part.tool_name or "model"
             rendered_retry: str = _render(part.content)
-            self._emit("retry", f"{tool_name} {rendered_retry}")
+            self._emit("retry", f"{tool_name} {rendered_retry}", publish=publish)
             return
         if isinstance(part, TextPart):
-            self._emit("text", part.content)
+            self._emit("text", part.content, publish=publish)
 
-    def _emit(self, kind: str, body: str) -> None:
-        shown: str = body if len(body) <= _INFO_LIMIT else f"{body[:_INFO_LIMIT]}..."
-        logger.info("agent=%s %s=%s", self._agent_name, kind, shown)
-        if len(body) > _INFO_LIMIT:
-            logger.debug("agent=%s %s=%s", self._agent_name, kind, body)
+    def _emit(self, kind: str, body: str, *, publish: bool, log: bool = True) -> None:
+        seen_key: tuple[str, str] = (kind, body)
+        if seen_key in self._seen:
+            return
+        self._seen.add(seen_key)
+        if log:
+            shown: str = body if len(body) <= _INFO_LIMIT else f"{body[:_INFO_LIMIT]}..."
+            logger.info("agent=%s %s=%s", self._agent_name, kind, shown)
+            if len(body) > _INFO_LIMIT:
+                logger.debug("agent=%s %s=%s", self._agent_name, kind, body)
+        if not publish:
+            return
+        step: TraceStep | None = _STEPS.get(kind)
+        if step is None:
+            return
+        publish_build_step(self._agent_name, step, body)
 
 
 def _render(value: object) -> str:

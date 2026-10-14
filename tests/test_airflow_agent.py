@@ -21,7 +21,10 @@ from intelegent_data_catalog.knowledge.context.airflow_catalog import (
     PostgresAirflowCatalogContextProvider,
 )
 from intelegent_data_catalog.knowledge.context.airflow_graph import AirflowGraphBuilder
-from intelegent_data_catalog.knowledge.context.pipelines import AttachedPipelineRunner
+from intelegent_data_catalog.knowledge.context.pipelines import (
+    AttachedPipelineReader,
+    AttachedPipelineRunner,
+)
 from intelegent_data_catalog.knowledge.factories.airflow_agent_factory import (
     build_airflow_agent_factory,
 )
@@ -144,6 +147,34 @@ def test_airflow_agent_retries_an_unknown_table() -> None:
     assert len(selected.dags) == 1
     assert selected.dags[0].links[0].table_id == table_id
     assert selected.dags[0].links[0].direction == AirflowMappingDirection.OUTPUT
+
+
+def test_airflow_analysis_prompt_includes_instance_context() -> None:
+    """The analysis prompt carries the business context stored on the instance."""
+    context: AirflowCatalogContext = AirflowCatalogContext(
+        instance_id=uuid4(),
+        instance_name="Local",
+        instance_context="Nightly sales loads.",
+        dags=[],
+        candidate_tables=[],
+    )
+    prompts: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        prompts.append(_user_text(messages))
+        return ModelResponse(parts=[TextPart(content='{"summary":"Loads.","dags":[]}')])
+
+    agent: AirflowAnalysisAgent = AirflowAnalysisAgent(
+        FunctionModel(respond),
+        max_requests=2,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+    agent.propose(context)
+    assert "instance_context" in prompts[0]
+    assert "Nightly sales loads." in prompts[0]
 
 
 def test_replace_llm_mappings_keeps_manual_and_other_dags(tmp_path: Path) -> None:
@@ -396,6 +427,41 @@ def test_runner_keeps_a_scope_build_when_one_instance_fails(tmp_path: Path) -> N
         by_name: dict[str, str | None] = {item.instance_name: item.summary for item in pipelines}
         assert by_name["Broken"] == "Saved finding."
         assert "healthy_job" in {item.dag_id for item in pipelines}
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_reader_copies_instance_context(tmp_path: Path) -> None:
+    """Stored Airflow instance context is attached to each pipeline for the scope."""
+    database: CatalogDatabase = _database(tmp_path)
+    session: Session = database.session()
+    try:
+        scope_id: UUID
+        table_id: UUID
+        scope_id, table_id, _space_id = _scope_table(session)
+        del _space_id
+        repo: AirflowRepository = AirflowRepository(session)
+        instance_id: UUID = _instance(repo, "Iceberg", "http://airflow.test")
+        _dag(repo, instance_id, "append_sales_order")
+        repo.add_attachment(
+            instance_id=instance_id,
+            dag_row_id=None,
+            space_id=None,
+            scope_id=scope_id,
+        )
+        row: AirflowInstanceRow | None = repo.get_instance(instance_id)
+        assert row is not None
+        row.context = "Nightly sales loads."
+        repo.commit()
+        reader: AttachedPipelineReader = AttachedPipelineReader(
+            repo,
+            AirflowKnowledgeContextStore(session),
+        )
+        found: list[PipelineInput] = reader.for_scope(scope_id, {table_id})
+        assert len(found) == 1
+        assert found[0].dag_id == "append_sales_order"
+        assert found[0].instance_context == "Nightly sales loads."
     finally:
         session.close()
         database.dispose()

@@ -17,6 +17,9 @@ app.conf.task_store_eager_result = False
 app.conf.task_always_eager = _settings.celery.task_always_eager
 app.conf.task_eager_propagates = False
 app.conf.broker_connection_retry_on_startup = True
+app.conf.broker_transport_options = {
+    "visibility_timeout": int(_settings.celery.visibility_timeout_seconds),
+}
 app.conf.worker_send_task_events = True
 app.conf.task_send_sent_event = True
 app.conf.beat_schedule = {

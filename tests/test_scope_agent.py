@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic_ai.messages import (
     ModelMessage,
@@ -17,14 +17,17 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.knowledge.models import (
     ColumnRelation,
     ColumnRelationKind,
+    PipelineInput,
     PreviousScopeFindings,
     ScopeCatalogContext,
+    ScopeContextProposal,
     ScopeProposal,
     ScopeTableSummary,
     TableKnowledgeInput,
     TableLink,
     TableLinkKind,
 )
+from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
 from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
@@ -142,6 +145,56 @@ def test_scope_agent_retries_until_the_link_is_in_scope() -> None:
     assert "scope_context" in prompts[0]
     assert "Ordering covers checkout." in prompts[0]
     assert "One row per order." in prompts[0]
+
+
+def test_scope_prompts_include_airflow_instance_context() -> None:
+    """Scope text and graph prompts carry the stored Airflow instance context."""
+    base: ScopeCatalogContext = _context()
+    pipeline: PipelineInput = PipelineInput(
+        dag_row_id=uuid4(),
+        dag_id="append_sales_order",
+        instance_name="Iceberg",
+        instance_context="Nightly sales loads.",
+    )
+    context: ScopeCatalogContext = base.model_copy(update={"pipelines": [pipeline]})
+    prompts: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        prompts.append(_user_text(messages))
+        return ModelResponse(
+            parts=[TextPart(content='{"context":"append_sales_order appends orders."}')]
+        )
+
+    text_agent: ScopeContextAgent = ScopeContextAgent(
+        FunctionModel(respond),
+        max_requests=2,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+    written: ScopeContextProposal = text_agent.propose(context)
+    assert written.context == "append_sales_order appends orders."
+    assert "instance_context" in prompts[0]
+    assert "Nightly sales loads." in prompts[0]
+
+    def graph_respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        prompts.append(_user_text(messages))
+        return ModelResponse(
+            parts=[TextPart(content='{"summary":"append_sales_order appends orders.","links":[]}')]
+        )
+
+    graph_agent: ScopeSubgraphAgent = ScopeSubgraphAgent(
+        FunctionModel(graph_respond),
+        max_requests=2,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+    graph_agent.propose(context)
+    assert "instance_context" in prompts[1]
+    assert "Nightly sales loads." in prompts[1]
 
 
 def test_replace_keeps_non_llm_rows_and_rewrites_llm_rows(tmp_path: Path) -> None:

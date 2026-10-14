@@ -18,6 +18,7 @@ from intelegent_data_catalog.knowledge.context.column_graph import (
 from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
+    PipelineInput,
     ScopeAnalysisContext,
     ScopeCatalogContext,
     ScopeProposal,
@@ -118,6 +119,7 @@ class ScopeGraphBuilder(ScopeGraphAppender):
             context.tables,
             context.relationships,
             accepted,
+            context.pipelines,
         )
         self._writer.write(document)
         if self._publisher is not None:
@@ -191,6 +193,7 @@ def assemble_scope_subgraph(
     tables: list[ScopeTableSummary],
     relationships: list[TableRelation],
     links: list[TableLink],
+    pipelines: list[PipelineInput] | None = None,
 ) -> KnowledgeSubgraphWrite:
     """Build table nodes for the scope. Column nodes stay on each table's subgraph."""
     nodes: dict[UUID, KnowledgeNodeWrite] = {}
@@ -231,6 +234,8 @@ def assemble_scope_subgraph(
                 reason=_link_reason(link, by_id),
             )
         )
+    selected: list[PipelineInput] = [] if pipelines is None else pipelines
+    edges.extend(pipeline_derived_edges(nodes, selected))
     return KnowledgeSubgraphWrite(
         owner_table_id=str(scope_id),
         owner_kind="scope",
@@ -238,6 +243,46 @@ def assemble_scope_subgraph(
         columns=[],
         edges=edges,
     )
+
+
+def pipeline_derived_edges(
+    nodes: dict[UUID, KnowledgeNodeWrite],
+    pipelines: list[PipelineInput],
+) -> list[KnowledgeEdgeWrite]:
+    """One DERIVED_FROM edge per read table to each table the same DAG writes."""
+    grouped: dict[tuple[str, str], list[str]] = {}
+    pipeline: PipelineInput
+    for pipeline in pipelines:
+        label: str = f"{pipeline.instance_name} {pipeline.dag_id}"
+        read_id: UUID
+        for read_id in pipeline.reads:
+            source: KnowledgeNodeWrite | None = nodes.get(read_id)
+            if source is None:
+                continue
+            write_id: UUID
+            for write_id in pipeline.writes:
+                if read_id == write_id:
+                    continue
+                target: KnowledgeNodeWrite | None = nodes.get(write_id)
+                if target is None:
+                    continue
+                key: tuple[str, str] = (source.node_id, target.node_id)
+                reasons: list[str] = grouped.setdefault(key, [])
+                if label not in reasons:
+                    reasons.append(label)
+    edges: list[KnowledgeEdgeWrite] = []
+    pair: tuple[str, str]
+    labels: list[str]
+    for pair, labels in grouped.items():
+        edges.append(
+            KnowledgeEdgeWrite(
+                source=pair[0],
+                target=pair[1],
+                kind="DERIVED_FROM",
+                reason="; ".join(labels),
+            )
+        )
+    return edges
 
 
 def _catalog_pairs(relationships: list[TableRelation]) -> set[tuple[UUID, UUID]]:

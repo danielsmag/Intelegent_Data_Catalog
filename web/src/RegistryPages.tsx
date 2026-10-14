@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "
 import { Link, useParams } from "react-router-dom"
 import { useTabParam } from "./useTabParam"
 import { ActivityBar } from "./ActivityBar"
+import { BuildingBanner } from "./BuildingBanner"
 import { AirflowAttachmentsPanel } from "./AirflowAttachmentsPanel"
 import { AttachAirflowForm } from "./AttachAirflowForm"
 import { AttachCatalogForm } from "./AttachCatalogForm"
@@ -19,6 +20,7 @@ import {
   followKnowledgeBuild,
   followScopeBuild,
   followSpaceBuild,
+  isCancelledBuild,
   useRunningJobWatch,
   onContextGenerationFinished,
   onKnowledgeBuildFinished,
@@ -315,6 +317,7 @@ export function SpacePage(): ReactElement {
   const [knowledge, setKnowledge] = useState<SpaceKnowledgeContext | null>(null)
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
+  const [buildJobId, setBuildJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<boolean>(false)
   const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
@@ -324,14 +327,16 @@ export function SpacePage(): ReactElement {
     config.loaded && config.enabled,
     (signal: AbortSignal) => fetchLatestSpaceBuild(spaceId, signal),
     followSpaceBuild,
-    () => {
+    (job: SpaceBuildJob) => {
       setBuilding(true)
+      setBuildJobId(job.id)
     },
   )
   useEffect(() => {
     setCreating(false)
     setAttachingAirflow(false)
     setBuilding(false)
+    setBuildJobId(null)
     setKnowledge(null)
     setSpaceGraph(null)
     setScopeTables(null)
@@ -388,6 +393,7 @@ export function SpacePage(): ReactElement {
           return
         }
         setBuilding(true)
+        setBuildJobId(job.id)
         followSpaceBuild(job)
       })
       .catch((err: unknown) => {
@@ -405,6 +411,10 @@ export function SpacePage(): ReactElement {
         return
       }
       setBuilding(false)
+      setBuildJobId(null)
+      if (isCancelledBuild(job)) {
+        return
+      }
       if (job.status === "failed") {
         setKnowledgeError(job.error ?? "Space context build failed.")
         return
@@ -435,6 +445,7 @@ export function SpacePage(): ReactElement {
   }, [spaceId])
   function runBuildContext(): void {
     setBuilding(true)
+    setBuildJobId(null)
     setKnowledgeError(null)
     void requestSpaceBuild(spaceId, {
       include_scope_knowledge: config.options.include_scope_knowledge ?? true,
@@ -444,9 +455,11 @@ export function SpacePage(): ReactElement {
     })
       .then((job: SpaceBuildJob) => {
         setBuilding(job.status === "running")
+        setBuildJobId(job.status === "running" ? job.id : null)
       })
       .catch((err: unknown) => {
         setBuilding(false)
+        setBuildJobId(null)
         setKnowledgeError(errorMessage(err))
       })
   }
@@ -538,9 +551,13 @@ export function SpacePage(): ReactElement {
           <p className="catalog-lead">{lead}</p>
         </header>
         {building ? (
-          <p className="comment">
-            Building in the background. Keep using the catalog. An alert appears when it finishes.
-          </p>
+          <BuildingBanner
+            jobId={buildJobId}
+            onCancelled={() => {
+              setBuilding(false)
+              setBuildJobId(null)
+            }}
+          />
         ) : null}
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
@@ -665,7 +682,7 @@ export function SpacePage(): ReactElement {
           <SubgraphView
             graph={spaceGraph}
             error={graphError}
-            emptyMessage="No scopes in this space."
+            emptyMessage="No subgraph for this space. Build space context to write one."
           />
         ) : null}
       </section>
@@ -696,6 +713,7 @@ export function ScopePage(): ReactElement {
   const [knowledge, setKnowledge] = useState<ScopeKnowledgeContext | null>(null)
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
+  const [buildJobId, setBuildJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attaching, setAttaching] = useState<boolean>(false)
   const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
@@ -705,8 +723,9 @@ export function ScopePage(): ReactElement {
     config.loaded && config.enabled,
     (signal: AbortSignal) => fetchLatestScopeBuild(scopeId, signal),
     followScopeBuild,
-    () => {
+    (job: ScopeBuildJob) => {
       setBuilding(true)
+      setBuildJobId(job.id)
     },
   )
   useEffect(() => {
@@ -714,6 +733,7 @@ export function ScopePage(): ReactElement {
     setAttachingAirflow(false)
     setSpaceName(null)
     setBuilding(false)
+    setBuildJobId(null)
     setKnowledge(null)
     setScopeGraph(null)
   }, [scopeId])
@@ -771,6 +791,7 @@ export function ScopePage(): ReactElement {
           return
         }
         setBuilding(true)
+        setBuildJobId(job.id)
         followScopeBuild(job)
       })
       .catch((err: unknown) => {
@@ -788,6 +809,10 @@ export function ScopePage(): ReactElement {
         return
       }
       setBuilding(false)
+      setBuildJobId(null)
+      if (isCancelledBuild(job)) {
+        return
+      }
       if (job.status === "failed") {
         setKnowledgeError(job.error ?? "Scope context build failed.")
         return
@@ -818,6 +843,7 @@ export function ScopePage(): ReactElement {
   }, [scopeId])
   function runBuildContext(): void {
     setBuilding(true)
+    setBuildJobId(null)
     setKnowledgeError(null)
     void requestScopeBuild(scopeId, {
       include_table_knowledge: config.options.include_table_knowledge ?? true,
@@ -827,9 +853,11 @@ export function ScopePage(): ReactElement {
     })
       .then((job: ScopeBuildJob) => {
         setBuilding(job.status === "running")
+        setBuildJobId(job.status === "running" ? job.id : null)
       })
       .catch((err: unknown) => {
         setBuilding(false)
+        setBuildJobId(null)
         setKnowledgeError(errorMessage(err))
       })
   }
@@ -926,9 +954,13 @@ export function ScopePage(): ReactElement {
           <p className="catalog-lead">{lead}</p>
         </header>
         {building ? (
-          <p className="comment">
-            Building in the background. Keep using the catalog. An alert appears when it finishes.
-          </p>
+          <BuildingBanner
+            jobId={buildJobId}
+            onCancelled={() => {
+              setBuilding(false)
+              setBuildJobId(null)
+            }}
+          />
         ) : null}
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
@@ -1036,7 +1068,7 @@ export function ScopePage(): ReactElement {
           <SubgraphView
             graph={scopeGraph}
             error={graphError}
-            emptyMessage="No tables in this scope."
+            emptyMessage="No subgraph for this scope. Build scope context to write one."
           />
         ) : null}
       </section>
@@ -1082,18 +1114,21 @@ export function RegistryTablePage(): ReactElement {
   const [knowledge, setKnowledge] = useState<KnowledgeContext | null>(null)
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
+  const [buildJobId, setBuildJobId] = useState<string | null>(null)
   const [columnsBuilding, setColumnsBuilding] = useState<boolean>(false)
   useRunningJobWatch(
     config.loaded && config.enabled,
     (signal: AbortSignal) => fetchLatestKnowledgeBuild(tableId, signal),
     followKnowledgeBuild,
-    () => {
+    (job: KnowledgeBuildJob) => {
       setBuilding(true)
+      setBuildJobId(job.id)
     },
   )
   const loadAbort = useRef<AbortController | null>(null)
   useEffect(() => {
     setBuilding(false)
+    setBuildJobId(null)
     setColumnsBuilding(false)
   }, [tableId])
   useEffect(() => {
@@ -1170,6 +1205,7 @@ export function RegistryTablePage(): ReactElement {
           return
         }
         setBuilding(true)
+        setBuildJobId(job.id)
         followKnowledgeBuild(job)
       })
       .catch((err: unknown) => {
@@ -1201,6 +1237,10 @@ export function RegistryTablePage(): ReactElement {
         return
       }
       setBuilding(false)
+      setBuildJobId(null)
+      if (isCancelledBuild(job)) {
+        return
+      }
       if (job.status === "failed") {
         setKnowledgeError(job.error ?? "Context build failed.")
         return
@@ -1275,6 +1315,7 @@ export function RegistryTablePage(): ReactElement {
   }
   function runBuildContext(): void {
     setBuilding(true)
+    setBuildJobId(null)
     setKnowledgeError(null)
     void requestKnowledgeBuild(tableId, {
       include_data_profile: config.options.include_data_profile ?? false,
@@ -1283,9 +1324,11 @@ export function RegistryTablePage(): ReactElement {
     })
       .then((job: KnowledgeBuildJob) => {
         setBuilding(job.status === "running")
+        setBuildJobId(job.status === "running" ? job.id : null)
       })
       .catch((err: unknown) => {
         setBuilding(false)
+        setBuildJobId(null)
         setKnowledgeError(errorMessage(err))
       })
   }
@@ -1348,9 +1391,13 @@ export function RegistryTablePage(): ReactElement {
           </button>
         </div>
         {building ? (
-          <p className="comment">
-            Building in the background. Keep using the catalog. An alert appears when it finishes.
-          </p>
+          <BuildingBanner
+            jobId={buildJobId}
+            onCancelled={() => {
+              setBuilding(false)
+              setBuildJobId(null)
+            }}
+          />
         ) : null}
         {error !== null ? <p className="error-text">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text">{knowledgeError}</p> : null}

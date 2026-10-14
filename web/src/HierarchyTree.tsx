@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode, type RefObject } from "react"
 import { Link, useLocation, useNavigate, useParams, type Location, type NavigateFunction } from "react-router-dom"
 import { errorMessage, isAbortError } from "./api"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
-import { AirflowIcon, Chevron, PanelChevron, PlusIcon, ScopeIcon, SearchIcon, SpaceIcon, TableIcon } from "./icons"
+import { AirflowIcon, Chevron, IcebergIcon, MoreIcon, PanelChevron, ScopeIcon, SearchIcon, SpaceIcon } from "./icons"
 import { ResizeHandle } from "./ResizeHandle"
 import {
   createScope,
   createSpace,
+  deleteScope,
+  deleteSpace,
   fetchHierarchy,
   type HierarchyAirflow,
   type HierarchyDag,
@@ -30,6 +32,8 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [addingSpace, setAddingSpace] = useState<boolean>(false)
   const [addingScopeId, setAddingScopeId] = useState<string | null>(null)
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [pendingDrop, setPendingDrop] = useState<string | null>(null)
   const revision: number = useCatalogRevision()
   const navigate: NavigateFunction = useNavigate()
   const params: Readonly<Record<string, string | undefined>> = useParams()
@@ -89,6 +93,44 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
     return collapsed.has(key)
   }
 
+  function openMenu(key: string): void {
+    setPendingDrop(null)
+    setMenuId((current: string | null) => (current === key ? null : key))
+  }
+
+  function closeMenu(): void {
+    setMenuId(null)
+    setPendingDrop(null)
+  }
+
+  async function dropSpace(space: HierarchySpace): Promise<void> {
+    try {
+      await deleteSpace(space.id)
+      closeMenu()
+      if (selectedSpace === space.id) {
+        navigate("/spaces")
+      }
+      bumpCatalogRevision()
+    } catch (err: unknown) {
+      closeMenu()
+      setError(errorMessage(err))
+    }
+  }
+
+  async function dropScope(space: HierarchySpace, scope: HierarchyScope): Promise<void> {
+    try {
+      await deleteScope(scope.id)
+      closeMenu()
+      if (selectedScope === scope.id) {
+        navigate(`/spaces/${space.id}`)
+      }
+      bumpCatalogRevision()
+    } catch (err: unknown) {
+      closeMenu()
+      setError(errorMessage(err))
+    }
+  }
+
   const sidebarClass: string = props.collapsed ? "sidebar hierarchy collapsed" : "sidebar hierarchy"
   return (
     <aside className={sidebarClass} aria-label="Spaces">
@@ -102,19 +144,23 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
         )}
         <div className="sidebar-actions">
           {props.collapsed ? null : (
-            <button
-              type="button"
-              className="sidebar-toggle"
-              aria-expanded={addingSpace}
-              aria-label={addingSpace ? "Close add space" : "Add space"}
-              title={addingSpace ? "Close add space" : "Add space"}
-              onClick={() => {
-                setAddingScopeId(null)
-                setAddingSpace((open: boolean) => !open)
-              }}
-            >
-              <PlusIcon />
-            </button>
+            <TreeMenu
+              menuKey="header"
+              label="Space actions"
+              open={menuId === "header"}
+              onOpen={openMenu}
+              onClose={closeMenu}
+              items={[
+                {
+                  label: "Add space",
+                  onSelect: () => {
+                    closeMenu()
+                    setAddingScopeId(null)
+                    setAddingSpace(true)
+                  },
+                },
+              ]}
+            />
           )}
           <button
             type="button"
@@ -138,7 +184,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
           <ScopeIcon /> Scope
         </span>
         <span className="figure-table">
-          <TableIcon /> Table
+          <IcebergIcon /> Iceberg
         </span>
         <span className="figure-airflow">
           <AirflowIcon /> Airflow
@@ -180,13 +226,23 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
         {!loading && error === null && visible.length === 0 ? (
           <p className="tree-status">{searching ? "No matches." : "No spaces yet."}</p>
         ) : null}
+        {visible.length > 0 ? (
+        <TreeGroup
+          groupKey="spaces"
+          label="Spaces"
+          depth="depth-root"
+          figure="figure-space"
+          icon={<SpaceIcon />}
+          closed={closed("spaces")}
+          onToggle={toggle}
+        >
         {visible.map((space: HierarchySpace) => {
           const spaceKey: string = `space:${space.id}`
           const spaceClosed: boolean = closed(spaceKey)
           const spaceSelected: boolean = selectedSpace === space.id
           return (
             <div key={space.id} role="treeitem" aria-expanded={!spaceClosed}>
-              <div className={spaceSelected ? "tree-row depth-catalog current-branch" : "tree-row depth-catalog"}>
+              <div className={spaceSelected ? "tree-row depth-space current-branch" : "tree-row depth-space"}>
                 <button
                   type="button"
                   className="chevron"
@@ -201,19 +257,47 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                   <SpaceIcon />
                   <span className="tree-label">{space.name}</span>
                 </Link>
-                <button
-                  type="button"
-                  className="tree-add"
-                  aria-expanded={addingScopeId === space.id}
-                  aria-label={addingScopeId === space.id ? `Close add scope in ${space.name}` : `Add scope in ${space.name}`}
-                  title="Add scope"
-                  onClick={() => {
-                    setAddingSpace(false)
-                    setAddingScopeId((current: string | null) => (current === space.id ? null : space.id))
-                  }}
-                >
-                  <PlusIcon />
-                </button>
+                <TreeMenu
+                  menuKey={`space:${space.id}`}
+                  label={`Actions for ${space.name}`}
+                  open={menuId === `space:${space.id}`}
+                  onOpen={openMenu}
+                  onClose={closeMenu}
+                  items={
+                    pendingDrop === `space:${space.id}`
+                      ? [
+                          {
+                            label: `Drop ${space.name}`,
+                            danger: true,
+                            onSelect: () => {
+                              void dropSpace(space)
+                            },
+                          },
+                          { label: "Cancel", onSelect: () => setPendingDrop(null) },
+                        ]
+                      : [
+                          {
+                            label: "Add scope",
+                            onSelect: () => {
+                              closeMenu()
+                              setAddingSpace(false)
+                              setAddingScopeId(space.id)
+                              setCollapsed((current: ReadonlySet<string>) => {
+                                const next: Set<string> = new Set(current)
+                                next.delete("spaces")
+                                next.delete(spaceKey)
+                                return next
+                              })
+                            },
+                          },
+                          {
+                            label: "Drop",
+                            danger: true,
+                            onSelect: () => setPendingDrop(`space:${space.id}`),
+                          },
+                        ]
+                  }
+                />
               </div>
               {addingScopeId === space.id ? (
                 <CreateRecordForm
@@ -229,7 +313,9 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                     setAddingScopeId(null)
                     setCollapsed((current: ReadonlySet<string>) => {
                       const next: Set<string> = new Set(current)
+                      next.delete("spaces")
                       next.delete(spaceKey)
+                      next.delete(`scopes:${space.id}`)
                       return next
                     })
                     bumpCatalogRevision()
@@ -239,13 +325,23 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
               ) : null}
               {spaceClosed ? null : (
                 <>
+                  {space.scopes.length > 0 ? (
+                  <TreeGroup
+                    groupKey={`scopes:${space.id}`}
+                    label="Scopes"
+                    depth="depth-scopes"
+                    figure="figure-scope"
+                    icon={<ScopeIcon />}
+                    closed={closed(`scopes:${space.id}`)}
+                    onToggle={toggle}
+                  >
                   {space.scopes.map((scope: HierarchyScope) => {
                     const scopeKey: string = `scope:${scope.id}`
                     const scopeClosed: boolean = closed(scopeKey)
                     const scopeSelected: boolean = selectedScope === scope.id
                     return (
                       <div key={scope.id} role="treeitem" aria-expanded={!scopeClosed}>
-                        <div className={scopeSelected ? "tree-row depth-schema current-branch" : "tree-row depth-schema"}>
+                        <div className={scopeSelected ? "tree-row depth-scope current-branch" : "tree-row depth-scope"}>
                           <button
                             type="button"
                             className="chevron"
@@ -264,6 +360,33 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                             <ScopeIcon />
                             <span className="tree-label">{scope.name}</span>
                           </Link>
+                          <TreeMenu
+                            menuKey={`scope:${scope.id}`}
+                            label={`Actions for ${scope.name}`}
+                            open={menuId === `scope:${scope.id}`}
+                            onOpen={openMenu}
+                            onClose={closeMenu}
+                            items={
+                              pendingDrop === `scope:${scope.id}`
+                                ? [
+                                    {
+                                      label: `Drop ${scope.name}`,
+                                      danger: true,
+                                      onSelect: () => {
+                                        void dropScope(space, scope)
+                                      },
+                                    },
+                                    { label: "Cancel", onSelect: () => setPendingDrop(null) },
+                                  ]
+                                : [
+                                    {
+                                      label: "Drop",
+                                      danger: true,
+                                      onSelect: () => setPendingDrop(`scope:${scope.id}`),
+                                    },
+                                  ]
+                            }
+                          />
                         </div>
                         {scopeClosed ? null : (
                           <>
@@ -271,9 +394,9 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                               <TreeGroup
                                 groupKey={`tables:${scope.id}`}
                                 label="Iceberg tables"
-                                depth="depth-table"
+                                depth="depth-section"
                                 figure="figure-table"
-                                icon={<TableIcon />}
+                                icon={<IcebergIcon />}
                                 closed={closed(`tables:${scope.id}`)}
                                 onToggle={toggle}
                               >
@@ -283,12 +406,12 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                     <Link
                                       key={table.id}
                                       to={`/registry/tables/${table.id}`}
-                                      className="tree-row depth-airflow figure-table"
+                                      className="tree-row depth-node figure-table"
                                       role="treeitem"
                                       aria-current={tableSelected ? "page" : undefined}
                                     >
                                       <span className="chevron-spacer" />
-                                      <TableIcon />
+                                      <IcebergIcon />
                                       <span className="tree-label">{table.name}</span>
                                     </Link>
                                   )
@@ -299,7 +422,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                               <TreeGroup
                                 groupKey={`airflow-group:${scope.id}`}
                                 label="Airflow"
-                                depth="depth-table"
+                                depth="depth-section"
                                 figure="figure-airflow"
                                 icon={<AirflowIcon />}
                                 closed={closed(`airflow-group:${scope.id}`)}
@@ -309,8 +432,8 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                   nodes={scope.airflow}
                                   parentKey={scope.id}
                                   ownerPath={`/scopes/${scope.id}`}
-                                  instanceDepth="depth-airflow"
-                                  dagDepth="depth-dag"
+                                  instanceDepth="depth-node"
+                                  dagDepth="depth-child"
                                   collapsed={closed}
                                   onToggle={toggle}
                                   location={location}
@@ -322,11 +445,13 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                       </div>
                     )
                   })}
+                  </TreeGroup>
+                  ) : null}
                   {space.airflow.length > 0 ? (
                     <TreeGroup
                       groupKey={`airflow-group:${space.id}`}
                       label="Airflow"
-                      depth="depth-schema"
+                      depth="depth-scopes"
                       figure="figure-airflow"
                       icon={<AirflowIcon />}
                       closed={closed(`airflow-group:${space.id}`)}
@@ -336,8 +461,8 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                         nodes={space.airflow}
                         parentKey={space.id}
                         ownerPath={`/spaces/${space.id}`}
-                        instanceDepth="depth-table"
-                        dagDepth="depth-airflow"
+                        instanceDepth="depth-scope"
+                        dagDepth="depth-section"
                         collapsed={closed}
                         onToggle={toggle}
                         location={location}
@@ -349,11 +474,112 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
             </div>
           )
         })}
+        </TreeGroup>
+        ) : null}
       </div>
         </>
       )}
       {props.collapsed ? null : <ResizeHandle pane="sidebar" edge="end" label="Resize sidebar" />}
     </aside>
+  )
+}
+
+type MenuAction = {
+  label: string
+  danger?: boolean
+  onSelect: () => void
+}
+
+type MenuBox = {
+  top: number
+  left: number
+}
+
+function TreeMenu(props: {
+  menuKey: string
+  label: string
+  open: boolean
+  onOpen: (key: string) => void
+  onClose: () => void
+  items: readonly MenuAction[]
+}): ReactElement {
+  const triggerRef: RefObject<HTMLButtonElement | null> = useRef<HTMLButtonElement>(null)
+  const panelRef: RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState<MenuBox | null>(null)
+
+  function place(): void {
+    const trigger: HTMLButtonElement | null = triggerRef.current
+    if (trigger === null) {
+      return
+    }
+    const rect: DOMRect = trigger.getBoundingClientRect()
+    const width: number = 160
+    const left: number = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
+    const top: number = rect.bottom + 4
+    setBox({ top, left })
+  }
+
+  useEffect(() => {
+    if (!props.open) {
+      return
+    }
+    place()
+    function onPointer(event: PointerEvent): void {
+      const target: EventTarget | null = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+      if (triggerRef.current?.contains(target) === true || panelRef.current?.contains(target) === true) {
+        return
+      }
+      props.onClose()
+    }
+    window.addEventListener("pointerdown", onPointer)
+    window.addEventListener("resize", props.onClose)
+    return () => {
+      window.removeEventListener("pointerdown", onPointer)
+      window.removeEventListener("resize", props.onClose)
+    }
+  }, [props.open, props.menuKey, props.onClose])
+
+  return (
+    <div className="tree-menu">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="tree-add"
+        aria-haspopup="menu"
+        aria-expanded={props.open}
+        aria-label={props.label}
+        title={props.label}
+        onClick={() => {
+          props.onOpen(props.menuKey)
+        }}
+      >
+        <MoreIcon />
+      </button>
+      {props.open && box !== null ? (
+        <div
+          ref={panelRef}
+          className="tree-menu-panel"
+          role="menu"
+          aria-label={props.label}
+          style={{ position: "fixed", top: box.top, left: box.left }}
+        >
+          {props.items.map((item: MenuAction) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className={item.danger === true ? "tree-menu-item danger" : "tree-menu-item"}
+              onClick={item.onSelect}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   )
 }
 

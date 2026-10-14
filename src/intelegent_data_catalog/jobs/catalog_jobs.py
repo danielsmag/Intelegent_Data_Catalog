@@ -1,6 +1,7 @@
 
 
-from typing import cast
+import logging
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -9,9 +10,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.selectable import Select
 
+from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import CatalogError, ConflictError, ValidationAppError
+from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR, CancelSignal
 from intelegent_data_catalog.jobs.models import (
     AirflowBuildJobRead,
+    CatalogJobCancelRead,
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
@@ -32,6 +36,7 @@ from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import CatalogJobKind, CatalogJobStatus
 from intelegent_data_catalog.persistence.models import CatalogJobRow
 
+_LOGGER: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.jobs")
 _QUEUE_FAILURE: str = "catalog job could not be queued"
 
 
@@ -45,7 +50,7 @@ class CatalogJobStore:
         """Return the running job for one subject and lane."""
         session: Session = self._database.session()
         try:
-            statement: Select[tuple[CatalogJobRow]] = (
+            statement: Any = (
                 select(CatalogJobRow)
                 .where(
                     CatalogJobRow.kind == kind.value,
@@ -122,7 +127,7 @@ class CatalogJobStore:
         """Return the newest job for a subject and lane."""
         session: Session = self._database.session()
         try:
-            statement: Select[tuple[CatalogJobRow]] = (
+            statement: Select[CatalogJobRow] = (
                 select(CatalogJobRow)
                 .where(
                     CatalogJobRow.kind == kind.value,
@@ -136,6 +141,21 @@ class CatalogJobStore:
             if row is not None:
                 session.expunge(row)
             return row
+        finally:
+            session.close()
+
+    def list_running(self) -> list[CatalogJobRow]:
+        """Return every job still marked running."""
+        session: Session = self._database.session()
+        try:
+            statement: Select[CatalogJobRow] = select(CatalogJobRow).where(
+                CatalogJobRow.status == CatalogJobStatus.RUNNING.value,
+            )
+            rows: list[CatalogJobRow] = list(session.scalars(statement))
+            row: CatalogJobRow
+            for row in rows:
+                session.expunge(row)
+            return rows
         finally:
             session.close()
 
@@ -287,6 +307,33 @@ class CatalogJobs:
         """Return the newest context generation for a subject and lane."""
         return _context_read_optional(self._store.latest(CatalogJobKind.CONTEXT, subject_id, lane))
 
+    def cancel(
+        self,
+        job_id: UUID,
+        signal: CancelSignal,
+        signal_ttl_seconds: int,
+    ) -> CatalogJobCancelRead | None:
+        """Stop one running build.
+
+        The flag is written before the row changes so a live worker exits. The
+        row is marked failed even when no worker holds it, which releases the
+        UI and lets the next build start. A finished job is returned unchanged.
+        """
+        row: CatalogJobRow | None = self._store.get(job_id)
+        if row is None:
+            return None
+        if row.status != CatalogJobStatus.RUNNING.value:
+            return _cancel_read(row)
+        try:
+            signal.request(job_id, signal_ttl_seconds)
+        except Exception:
+            _LOGGER.exception("catalog job cancel signal failed job_id=%s", job_id)
+        self._store.complete(job_id, "failed", CANCELLED_JOB_ERROR)
+        updated: CatalogJobRow | None = self._store.get(job_id)
+        if updated is None:
+            return None
+        return _cancel_read(updated)
+
     def _start(
         self,
         kind: CatalogJobKind,
@@ -318,6 +365,14 @@ class CatalogJobs:
         if row is None:
             raise ConflictError("catalog job could not be started")
         return row
+
+
+def _cancel_read(row: CatalogJobRow) -> CatalogJobCancelRead:
+    return CatalogJobCancelRead(
+        id=row.id,
+        status=_job_status(row.status),
+        error=row.error,
+    )
 
 
 def _dump_options(options: BaseModel) -> dict[str, object]:

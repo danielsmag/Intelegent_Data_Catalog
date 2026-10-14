@@ -58,6 +58,16 @@ class AirflowBuildJobRead(BaseModel):
     error: str | None = None
 
 
+class CatalogJobCancelRead(BaseModel):
+    """Result of cancelling one background build."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    status: KnowledgeBuildState
+    error: str | None = None
+
+
 class ContextGenerationJobRead(BaseModel):
     """One background context write. The catalog row is a separate read."""
 

@@ -411,6 +411,7 @@ class PipelineInput(BaseModel):
     dag_row_id: UUID
     dag_id: str
     instance_name: str
+    instance_context: str | None = None
     description: str | None = None
     schedule: str | None = None
     summary: str | None = None
@@ -435,6 +436,17 @@ def pipeline_summaries(pipelines: list[PipelineInput]) -> list[PipelineSummary]:
     for item in pipelines:
         found.append(PipelineSummary(dag_id=item.dag_id, instance_name=item.instance_name))
     return found
+
+
+def omitted_pipeline_names(text: str, pipelines: list[PipelineInput]) -> list[str]:
+    """DAG ids the text does not name. An empty pipeline list returns none."""
+    folded: str = text.casefold()
+    missing: list[str] = []
+    pipeline: PipelineInput
+    for pipeline in pipelines:
+        if pipeline.dag_id.casefold() not in folded:
+            missing.append(pipeline.dag_id)
+    return missing
 
 
 class ScopeCatalogContext(BaseModel):

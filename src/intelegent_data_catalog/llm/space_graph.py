@@ -20,6 +20,7 @@ from intelegent_data_catalog.knowledge.models import (
     SpaceScopeSummary,
     TableLink,
     TableRelation,
+    omitted_pipeline_names,
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
@@ -47,8 +48,13 @@ _INSTRUCTIONS: str = (
     "summary is two to four sentences on what this space describes and how the scopes join. "
     "Mention a scope without context only when that gap matters. "
     "pipelines lists Airflow DAGs attached to this space and the tables each DAG reads or writes. "
+    "instance_context is the business meaning already written for that Airflow instance. "
     "Tables written by one pipeline from the same inputs usually share keys. "
-    "Use pipelines to find joins and to describe the business process. "
+    "Use pipelines and instance_context to find joins and to describe the business process. "
+    "When pipelines is not empty, the summary must name every dag_id "
+    "and say what that pipeline does. "
+    "Do that even when links is empty because the space has one scope. "
+    "Do not use the summary only to say that no cross-scope link exists. "
     "reason is one short sentence grounded in the names, types, keys, or findings. "
     "Return no links when nothing is important. "
     "Do not invent table ids or column ids."
@@ -170,6 +176,7 @@ class _PromptPipeline(BaseModel):
 
     dag_id: str
     instance_name: str
+    instance_context: str | None
     summary: str | None
     schedule: str | None
     reads: list[UUID]
@@ -240,6 +247,12 @@ def _accept_output(ctx: RunContext[SpaceCatalogContext], proposed: SpaceProposal
         accept_space_links(ctx.deps, proposed.links)
     except ValidationAppError as err:
         raise ModelRetry(str(err)) from err
+    missing: list[str] = omitted_pipeline_names(proposed.summary, ctx.deps.pipelines)
+    if len(missing) > 0:
+        names: str = ", ".join(missing)
+        raise ModelRetry(
+            f"summary must name every attached pipeline and say what it does: {names}"
+        )
     return proposed
 
 
@@ -356,6 +369,7 @@ def _pipeline(item: PipelineInput) -> _PromptPipeline:
     return _PromptPipeline(
         dag_id=item.dag_id,
         instance_name=item.instance_name,
+        instance_context=item.instance_context,
         summary=item.summary,
         schedule=item.schedule,
         reads=list(item.reads),
