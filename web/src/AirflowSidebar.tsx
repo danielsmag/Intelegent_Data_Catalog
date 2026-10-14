@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactElement } from "react"
-import { Link, useNavigate, useParams, type NavigateFunction } from "react-router-dom"
 import { fetchAirflowTree, type AirflowDag, type AirflowTree } from "./airflowApi"
+import { openInFocusedGroup, parseRouteIds, pathnameOf, useFocusedPath, type RouteIds } from "./editorLayout"
+import { WorkbenchLink } from "./editorSlots"
 import { bumpAirflowRevision, useAirflowRevision } from "./airflowSidebarStore"
 import { errorMessage, isAbortError } from "./api"
 import { AirflowIcon, Chevron, PanelChevron, PlusIcon, RefreshIcon, SchemaIcon, SearchIcon } from "./icons"
@@ -13,10 +14,9 @@ type AirflowSidebarProps = {
 
 export function AirflowSidebar(props: AirflowSidebarProps): ReactElement {
   const revision: number = useAirflowRevision()
-  const navigate: NavigateFunction = useNavigate()
-  const params: Readonly<Record<string, string | undefined>> = useParams()
-  const selectedInstance: string | undefined = params.instanceId
-  const selectedDag: string | undefined = params.dagId
+  const ids: RouteIds = parseRouteIds(pathnameOf(useFocusedPath()))
+  const selectedInstance: string | undefined = ids.instanceId ?? undefined
+  const selectedDag: string | undefined = ids.dagId ?? undefined
   const [tree, setTree] = useState<AirflowTree[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
@@ -100,7 +100,7 @@ export function AirflowSidebar(props: AirflowSidebarProps): ReactElement {
               aria-label="Add Airflow instance"
               title="Add instance"
               onClick={() => {
-                void navigate("/airflow?new=1")
+                openInFocusedGroup("/airflow?new=1")
               }}
             >
               <PlusIcon />
@@ -169,14 +169,14 @@ export function AirflowSidebar(props: AirflowSidebarProps): ReactElement {
                     >
                       <Chevron open={!instanceClosed} />
                     </button>
-                    <Link
+                    <WorkbenchLink
                       to={`/airflow/${node.instance.id}`}
                       className="tree-link figure-catalog"
                       aria-current={current ? "page" : undefined}
                     >
                       <AirflowIcon />
                       <span className="tree-label">{node.instance.name}</span>
-                    </Link>
+                    </WorkbenchLink>
                   </div>
                   {instanceClosed
                     ? null
@@ -184,7 +184,7 @@ export function AirflowSidebar(props: AirflowSidebarProps): ReactElement {
                         const dagCurrent: boolean =
                           selectedInstance === node.instance.id && selectedDag === dag.dag_id
                         return (
-                          <Link
+                          <WorkbenchLink
                             key={dag.dag_id}
                             to={`/airflow/${node.instance.id}/dags/${encodeURIComponent(dag.dag_id)}`}
                             className="tree-row depth-schema"
@@ -194,7 +194,7 @@ export function AirflowSidebar(props: AirflowSidebarProps): ReactElement {
                             <span className="chevron-spacer" />
                             <SchemaIcon />
                             <span className="tree-label figure-scope">{dag.dag_id}</span>
-                          </Link>
+                          </WorkbenchLink>
                         )
                       })}
                 </div>

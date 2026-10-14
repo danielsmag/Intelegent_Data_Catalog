@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react"
 import { Link } from "react-router-dom"
 import { errorMessage, fetchExplorerSample, formatTimestamp, isAbortError, queryPagePath } from "./api"
-import { PageSlot } from "./PageSlot"
 import { ResultGrid } from "./ResultGrid"
 import type { ColumnDetail, DetailTab, QueryResult, TableDetail } from "./types"
 import { useTabParam } from "./useTabParam"
@@ -69,24 +68,16 @@ export function TablePane(props: TablePaneProps): ReactElement {
     props.table === undefined
   ) {
     return (
-      <section className="main">
-        <div className="main-scroll">
-          <PageSlot>
-            <div className="empty">
-              <h1>Catalog</h1>
-              <p>Select a table. Each source lists the catalogs, schemas, and tables it contains.</p>
-            </div>
-          </PageSlot>
-        </div>
-      </section>
+      <div className="empty">
+        <h1>Catalog</h1>
+        <p>Select a table. Each source lists the catalogs, schemas, and tables it contains.</p>
+      </div>
     )
   }
 
   const qualified: string = `${props.catalog}.${props.namespace}.${props.table}`
   return (
-    <section className="main">
-      <div className="main-scroll">
-        <PageSlot>
+    <>
         <p className="crumb">
           {props.sourceName}
           {" / "}
@@ -111,9 +102,7 @@ export function TablePane(props: TablePaneProps): ReactElement {
         {tab === "sample" ? (
           <SamplePane loading={sampleLoading} error={sampleError} result={sample} />
         ) : null}
-        </PageSlot>
-      </div>
-    </section>
+    </>
   )
 }
 

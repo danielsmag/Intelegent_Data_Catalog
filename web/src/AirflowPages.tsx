@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react"
 import { Link, useNavigate, useParams, useSearchParams, type NavigateFunction } from "react-router-dom"
-import { ActivityBar } from "./ActivityBar"
 import { BuildingBanner } from "./BuildingBanner"
 import {
   addDagTable,
@@ -41,48 +40,20 @@ import {
   type AirflowSyncRun,
   type AirflowTask,
 } from "./airflowApi"
-import { AirflowSidebar } from "./AirflowSidebar"
 import { ContextEditor } from "./ContextEditor"
+import { EditorRail, useEditorStatus, useEditorTitle } from "./editorSlots"
 import {
   followAirflowBuild,
   isCancelledBuild,
   onAirflowBuildFinished,
   requestAirflowBuild,
 } from "./knowledgeBuild"
-import { PageSlot } from "./PageSlot"
 import { AirflowConfigRail } from "./ConfigRail"
-import { bumpAirflowRevision, setAirflowSidebarOpen, useAirflowRevision, useAirflowSidebarOpen } from "./airflowSidebarStore"
+import { bumpAirflowRevision, useAirflowRevision } from "./airflowSidebarStore"
 import { errorMessage, isAbortError } from "./api"
 import { PlusIcon } from "./icons"
 import { searchCatalog, type SearchHitRecord } from "./registryApi"
 import { useTabParam } from "./useTabParam"
-
-function Shell(props: { status: string; config?: ReactElement; children: ReactElement }): ReactElement {
-  const sidebarOpen: boolean = useAirflowSidebarOpen()
-  return (
-    <div className="shell">
-      <div className="workspace">
-        <ActivityBar />
-        <AirflowSidebar
-          collapsed={!sidebarOpen}
-          onToggleCollapsed={() => {
-            setAirflowSidebarOpen(!sidebarOpen)
-          }}
-        />
-        <main className="main">
-          <div className="main-scroll">
-            <PageSlot>{props.children}</PageSlot>
-          </div>
-        </main>
-        {props.config ?? null}
-      </div>
-      <footer className="status">
-        <span>Airflow</span>
-        <span>{props.status}</span>
-      </footer>
-    </div>
-  )
-}
 
 function formatWhen(value: string | null): string {
   if (value === null || value === "") {
@@ -178,8 +149,10 @@ export function AirflowInstancesPage(): ReactElement {
       })
   }
 
+  useEditorTitle("Airflow")
+  useEditorStatus("Airflow", "Instances")
   return (
-    <Shell status="Instances">
+    <>
       <section className="catalog-page">
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -278,7 +251,7 @@ export function AirflowInstancesPage(): ReactElement {
           </table>
         ) : null}
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -426,8 +399,13 @@ export function AirflowInstancePage(): ReactElement {
   }
 
   const mappings: AirflowDagTable[] = (dags ?? []).flatMap((dag: AirflowDag) => dag.tables)
+  useEditorTitle(instance?.name ?? null)
+  useEditorStatus("Airflow", instance?.name ?? "Instance")
   return (
-    <Shell status={instance?.name ?? "Instance"} config={<AirflowConfigRail instanceId={instanceId} />}>
+    <>
+      <EditorRail>
+        <AirflowConfigRail instanceId={instanceId} />
+      </EditorRail>
       <section className="catalog-page">
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -583,7 +561,7 @@ export function AirflowInstancePage(): ReactElement {
         {tab === "dags" ? <DagRows instanceId={instanceId} dags={dags} /> : null}
         {tab === "mappings" ? <MappingRows instanceId={instanceId} mappings={mappings} /> : null}
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -884,8 +862,10 @@ export function AirflowDagPage(): ReactElement {
     bumpAirflowRevision()
   }
 
+  useEditorTitle(dag?.dag_id ?? dagId)
+  useEditorStatus("Airflow", dag?.dag_id ?? dagId)
   return (
-    <Shell status={dag?.dag_id ?? dagId}>
+    <>
       <section className="catalog-page">
         <header className="catalog-hero">
           <div className="catalog-hero-copy">
@@ -963,7 +943,7 @@ export function AirflowDagPage(): ReactElement {
           )
         ) : null}
       </section>
-    </Shell>
+    </>
   )
 }
 

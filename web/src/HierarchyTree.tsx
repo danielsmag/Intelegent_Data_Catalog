@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode, type RefObject } from "react"
-import { Link, useLocation, useNavigate, useParams, type Location, type NavigateFunction } from "react-router-dom"
 import { errorMessage, isAbortError } from "./api"
+import { openInFocusedGroup, parseRouteIds, pathnameOf, searchOf, useFocusedPath, type RouteIds } from "./editorLayout"
+import { WorkbenchLink } from "./editorSlots"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { AirflowIcon, Chevron, IcebergIcon, MoreIcon, PanelChevron, ScopeIcon, SearchIcon, SpaceIcon } from "./icons"
@@ -45,13 +46,13 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [menuId, setMenuId] = useState<string | null>(null)
   const [pendingDrop, setPendingDrop] = useState<string | null>(null)
   const revision: number = useCatalogRevision()
-  const navigate: NavigateFunction = useNavigate()
-  const params: Readonly<Record<string, string | undefined>> = useParams()
-  const location: Location = useLocation()
-  const path: string = location.pathname
-  const selectedSpace: string | undefined = path.startsWith("/spaces/") ? params.spaceId : undefined
-  const selectedScope: string | undefined = path.startsWith("/scopes/") ? params.scopeId : undefined
-  const selectedTable: string | undefined = path.startsWith("/registry/tables/") ? params.tableId : undefined
+  const focused: string = useFocusedPath()
+  const pathname: string = pathnameOf(focused)
+  const search: string = searchOf(focused)
+  const ids: RouteIds = parseRouteIds(pathname)
+  const selectedSpace: string | undefined = ids.spaceId ?? undefined
+  const selectedScope: string | undefined = ids.scopeId ?? undefined
+  const selectedTable: string | undefined = ids.tableId ?? undefined
   const searching: boolean = query.trim() !== ""
   const visible: HierarchySpace[] = useMemo(
     () => filterSpaces(spaces ?? [], query),
@@ -125,7 +126,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
       await deleteSpace(space.id)
       closeMenu()
       if (selectedSpace === space.id) {
-        navigate("/spaces")
+        openInFocusedGroup("/spaces")
       }
       bumpCatalogRevision()
     } catch (err: unknown) {
@@ -139,7 +140,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
       await deleteScope(scope.id)
       closeMenu()
       if (selectedScope === scope.id) {
-        navigate(`/spaces/${space.id}`)
+        openInFocusedGroup(`/spaces/${space.id}`)
       }
       bumpCatalogRevision()
     } catch (err: unknown) {
@@ -234,7 +235,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
             const created = await createSpace(input)
             setAddingSpace(false)
             bumpCatalogRevision()
-            navigate(`/spaces/${created.id}`)
+            openInFocusedGroup(`/spaces/${created.id}`)
           }}
         />
       ) : null}
@@ -271,10 +272,10 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                 >
                   <Chevron open={!spaceClosed} />
                 </button>
-                <Link to={`/spaces/${space.id}`} className="tree-link figure-space" aria-current={spaceSelected ? "page" : undefined}>
+                <WorkbenchLink to={`/spaces/${space.id}`} className="tree-link figure-space" aria-current={spaceSelected ? "page" : undefined}>
                   <SpaceIcon />
                   <span className="tree-label">{space.name}</span>
-                </Link>
+                </WorkbenchLink>
                 <TreeMenu
                   menuKey={`space:${space.id}`}
                   label={`Actions for ${space.name}`}
@@ -360,7 +361,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                       return next
                     })
                     bumpCatalogRevision()
-                    navigate(`/scopes/${created.id}`)
+                    openInFocusedGroup(`/scopes/${created.id}`)
                   }}
                 />
               ) : null}
@@ -393,14 +394,14 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                           >
                             <Chevron open={!scopeClosed} />
                           </button>
-                          <Link
+                          <WorkbenchLink
                             to={`/scopes/${scope.id}`}
                             className="tree-link figure-scope"
                             aria-current={scopeSelected ? "page" : undefined}
                           >
                             <ScopeIcon />
                             <span className="tree-label">{scope.name}</span>
-                          </Link>
+                          </WorkbenchLink>
                           <TreeMenu
                             menuKey={`scope:${scope.id}`}
                             label={`Actions for ${scope.name}`}
@@ -466,7 +467,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                 {scope.tables.map((table: HierarchyTable) => {
                                   const tableSelected: boolean = selectedTable === table.id
                                   return (
-                                    <Link
+                                    <WorkbenchLink
                                       key={table.id}
                                       to={`/registry/tables/${table.id}`}
                                       className="tree-row depth-node figure-table"
@@ -476,7 +477,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                       <span className="chevron-spacer" />
                                       <IcebergIcon />
                                       <span className="tree-label">{table.name}</span>
-                                    </Link>
+                                    </WorkbenchLink>
                                   )
                                 })}
                               </TreeGroup>
@@ -499,7 +500,8 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                   dagDepth="depth-child"
                                   collapsed={closed}
                                   onToggle={toggle}
-                                  location={location}
+                                  pathname={pathname}
+                                  search={search}
                                 />
                               </TreeGroup>
                             ) : null}
@@ -528,7 +530,8 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                         dagDepth="depth-section"
                         collapsed={closed}
                         onToggle={toggle}
-                        location={location}
+                        pathname={pathname}
+                        search={search}
                       />
                     </TreeGroup>
                   ) : null}
@@ -685,13 +688,14 @@ function AirflowNodes(props: {
   dagDepth: string
   collapsed: (key: string) => boolean
   onToggle: (key: string) => void
-  location: Location
+  pathname: string
+  search: string
 }): ReactElement | null {
   if (props.nodes.length === 0) {
     return null
   }
-  const onOwner: boolean = props.location.pathname === props.ownerPath
-  const search: URLSearchParams = new URLSearchParams(props.location.search)
+  const onOwner: boolean = props.pathname === props.ownerPath
+  const search: URLSearchParams = new URLSearchParams(props.search)
   const onAirflowTab: boolean = onOwner && search.get("tab") === "airflow"
   const selectedInstance: string | null = search.get("instance")
   const selectedDag: string | null = search.get("dag")
@@ -716,14 +720,14 @@ function AirflowNodes(props: {
               >
                 <Chevron open={!instanceClosed} />
               </button>
-              <Link
+              <WorkbenchLink
                 to={instancePath}
                 className="tree-link figure-airflow"
                 aria-current={instanceSelected ? "page" : undefined}
               >
                 <AirflowIcon />
                 <span className="tree-label">{instance.name}</span>
-              </Link>
+              </WorkbenchLink>
             </div>
             {instanceClosed
               ? null
@@ -732,7 +736,7 @@ function AirflowNodes(props: {
                   const dagSelected: boolean =
                     onAirflowTab && selectedInstance === instance.instanceId && selectedDag === dag.dagId
                   return (
-                    <Link
+                    <WorkbenchLink
                       key={dag.dagRowId}
                       to={dagPath}
                       className={`tree-row ${props.dagDepth} figure-airflow`}
@@ -742,7 +746,7 @@ function AirflowNodes(props: {
                       <span className="chevron-spacer" />
                       <AirflowIcon />
                       <span className="tree-label">{dag.dagId}</span>
-                    </Link>
+                    </WorkbenchLink>
                   )
                 })}
           </div>

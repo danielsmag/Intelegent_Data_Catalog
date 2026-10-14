@@ -1,9 +1,83 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactElement } from "react"
-import { Link } from "react-router-dom"
-import { catalogTablePath } from "./api"
+import { useEffect, useMemo, useState, useSyncExternalStore, type ChangeEvent, type ReactElement } from "react"
+import { catalogTablePath, errorMessage, fetchExplorerTree, isAbortError } from "./api"
+import { parseRouteIds, pathnameOf, useFocusedPath } from "./editorLayout"
+import { WorkbenchLink } from "./editorSlots"
 import { CatalogIcon, Chevron, RefreshIcon, SchemaIcon, SearchIcon, SourceIcon, TableIcon } from "./icons"
 import { ResizeHandle } from "./ResizeHandle"
 import type { CatalogNode, ExplorerSource, ExplorerTree, NamespaceNode, TableSummary } from "./types"
+
+let explorerTree: ExplorerTree | null = null
+const treeListeners: Set<() => void> = new Set()
+
+function subscribeExplorerTree(listener: () => void): () => void {
+  treeListeners.add(listener)
+  return () => {
+    treeListeners.delete(listener)
+  }
+}
+
+function setExplorerTree(next: ExplorerTree | null): void {
+  explorerTree = next
+  for (const listener of treeListeners) {
+    listener()
+  }
+}
+
+export function useExplorerTree(): ExplorerTree | null {
+  return useSyncExternalStore(subscribeExplorerTree, () => explorerTree, () => null)
+}
+
+export function CatalogSidebar(): ReactElement {
+  const focused: string = useFocusedPath()
+  const ids = parseRouteIds(pathnameOf(focused))
+  const [tree, setTree] = useState<ExplorerTree | null>(explorerTree)
+  const [treeError, setTreeError] = useState<string | null>(null)
+  const [treeLoading, setTreeLoading] = useState<boolean>(explorerTree === null)
+  const [query, setQuery] = useState<string>("")
+  const [reload, setReload] = useState<number>(0)
+  useEffect(() => {
+    const controller: AbortController = new AbortController()
+    setTreeLoading(true)
+    setTreeError(null)
+    void fetchExplorerTree(controller.signal)
+      .then((loaded: ExplorerTree) => {
+        setTree(loaded)
+        setExplorerTree(loaded)
+      })
+      .catch((err: unknown) => {
+        if (isAbortError(err)) {
+          return
+        }
+        setTree(null)
+        setExplorerTree(null)
+        setTreeError(errorMessage(err))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setTreeLoading(false)
+        }
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [reload])
+  return (
+    <CatalogTreePane
+      tree={tree}
+      loading={treeLoading}
+      error={treeError}
+      query={query}
+      onQueryChange={setQuery}
+      onRetry={() => {
+        setReload((current: number) => current + 1)
+      }}
+      selectedSource={ids.source ?? undefined}
+      selectedCatalog={ids.catalog ?? undefined}
+      selectedNamespace={ids.namespace ?? undefined}
+      selectedTable={ids.explorerTable ?? undefined}
+    />
+  )
+}
 
 type CatalogTreeProps = {
   tree: ExplorerTree | null
@@ -247,7 +321,7 @@ function NamespaceBranch(props: {
               props.selectedNamespace === props.namespace.name &&
               props.selectedTable === table.name
             return (
-              <Link
+              <WorkbenchLink
                 key={table.name}
                 className="tree-row depth-table"
                 role="treeitem"
@@ -257,7 +331,7 @@ function NamespaceBranch(props: {
                 <span className="chevron-spacer" />
                 <TableIcon />
                 <span className="tree-label figure-table">{table.name}</span>
-              </Link>
+              </WorkbenchLink>
             )
           })}
     </div>

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react"
 import { Link, useParams } from "react-router-dom"
 import { useTabParam } from "./useTabParam"
-import { ActivityBar } from "./ActivityBar"
 import { BuildingBanner } from "./BuildingBanner"
 import { AirflowAttachmentsPanel } from "./AirflowAttachmentsPanel"
 import { AttachAirflowForm } from "./AttachAirflowForm"
@@ -32,10 +31,8 @@ import {
   requestScopeBuild,
   requestSpaceBuild,
 } from "./knowledgeBuild"
-import { HierarchyTree } from "./HierarchyTree"
-import { PageSlot } from "./PageSlot"
+import { EditorRail, useEditorStatus, useEditorTitle } from "./editorSlots"
 import { PanelChevron, PlusIcon } from "./icons"
-import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { errorMessage, isAbortError } from "./api"
 import { useDeadlineLabel, useEntityConfig, type EntityConfigController, type OptionField } from "./refreshSettings"
 import {
@@ -89,41 +86,6 @@ import {
 } from "./registryApi"
 
 type TabName = "overview" | "columns" | "relationships" | "lineage" | "graph" | "source"
-
-function Shell(props: {
-  status: string
-  tree?: boolean
-  config?: ReactElement
-  children: ReactElement
-}): ReactElement {
-  const sidebarOpen: boolean = useSpacesSidebarOpen()
-  return (
-    <div className="shell">
-      <div className="workspace">
-        <ActivityBar />
-        {props.tree ? (
-          <HierarchyTree
-            title="Spaces"
-            collapsed={!sidebarOpen}
-            onToggleCollapsed={() => {
-              setSpacesSidebarOpen(!sidebarOpen)
-            }}
-          />
-        ) : null}
-        <main className="main">
-          <div className="main-scroll">
-            <PageSlot>{props.children}</PageSlot>
-          </div>
-        </main>
-        {props.config ?? null}
-      </div>
-      <footer className="status">
-        <span>Spaces</span>
-        <span>{props.status}</span>
-      </footer>
-    </div>
-  )
-}
 
 type EntityCardItem = {
   id: string
@@ -227,6 +189,8 @@ export function SpacesPage(): ReactElement {
     }
   }, [revision])
   const loading: boolean = spaces === null && error === null
+  useEditorTitle("Spaces")
+  useEditorStatus("Spaces", "Spaces")
   const cards: EntityCardItem[] = (spaces ?? []).map((space: SpaceRecord): EntityCardItem => ({
     id: space.id,
     name: space.name,
@@ -236,7 +200,7 @@ export function SpacesPage(): ReactElement {
     to: `/spaces/${space.id}`,
   }))
   return (
-    <Shell status="Spaces" tree>
+    <>
       <section className="catalog-page">
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -293,7 +257,7 @@ export function SpacesPage(): ReactElement {
         ) : null}
         {cards.length > 0 ? <EntityGrid items={cards} /> : null}
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -485,11 +449,11 @@ export function SpacePage(): ReactElement {
     scopeTables === null
       ? null
       : [...scopeTables.values()].reduce((sum: number, count: number) => sum + count, 0)
+  useEditorTitle(space?.name ?? null)
+  useEditorStatus("Spaces", space?.name ?? "Space")
   return (
-    <Shell
-      status={space?.name ?? "Space"}
-      tree
-      config={
+    <>
+      <EditorRail>
         <ConfigRail
           minutes={config.minutes}
           enabled={config.enabled}
@@ -501,8 +465,7 @@ export function SpacePage(): ReactElement {
           options={optionsFromFields(SPACE_OPTION_FIELDS, config.options)}
           onCommit={config.commit}
         />
-      }
-    >
+      </EditorRail>
       <section className={tab === "graph" ? "catalog-page catalog-page-graph" : "catalog-page"}>
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -726,7 +689,7 @@ export function SpacePage(): ReactElement {
           />
         ) : null}
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -919,11 +882,11 @@ export function ScopePage(): ReactElement {
     scope?.description !== null && scope?.description !== undefined && scope.description !== ""
       ? scope.description
       : "Tables attached to this scope."
+  useEditorTitle(scope?.name ?? null)
+  useEditorStatus("Spaces", scope?.name ?? "Scope")
   return (
-    <Shell
-      status={scope?.name ?? "Scope"}
-      tree
-      config={
+    <>
+      <EditorRail>
         <ConfigRail
           minutes={config.minutes}
           enabled={config.enabled}
@@ -935,8 +898,7 @@ export function ScopePage(): ReactElement {
           options={optionsFromFields(SCOPE_OPTION_FIELDS, config.options)}
           onCommit={config.commit}
         />
-      }
-    >
+      </EditorRail>
       <section className={tab === "graph" ? "catalog-page catalog-page-graph" : "catalog-page"}>
         <header className="catalog-hero">
           <div className="catalog-hero-top">
@@ -1149,7 +1111,7 @@ export function ScopePage(): ReactElement {
           />
         ) : null}
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -1425,11 +1387,11 @@ export function RegistryTablePage(): ReactElement {
       })
   }
   const qualified: string = table?.source_key ?? "Table"
+  useEditorTitle(table?.display_name ?? table?.name ?? null)
+  useEditorStatus("Spaces", qualified)
   return (
-    <Shell
-      status={qualified}
-      tree
-      config={
+    <>
+      <EditorRail>
         <ConfigRail
           minutes={config.minutes}
           enabled={config.enabled}
@@ -1441,8 +1403,7 @@ export function RegistryTablePage(): ReactElement {
           options={optionsFromFields(TABLE_OPTION_FIELDS, config.options)}
           onCommit={config.commit}
         />
-      }
-    >
+      </EditorRail>
       <section className={tab === "graph" ? "section-fill" : undefined}>
         <p className="crumb">
           <Link to="/spaces">Spaces</Link>
@@ -1543,7 +1504,7 @@ export function RegistryTablePage(): ReactElement {
           <SourceTab table={table} bindings={bindings} spark={spark} />
         ) : null}
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -1565,8 +1526,10 @@ export function SearchPage(): ReactElement {
         }
       })
   }
+  useEditorTitle("Search")
+  useEditorStatus("Search", "Search")
   return (
-    <Shell status="Search">
+    <>
       <section>
         <h1>Search</h1>
         <form onSubmit={onSubmit} className="search-form">
@@ -1598,7 +1561,7 @@ export function SearchPage(): ReactElement {
           ))}
         </ul>
       </section>
-    </Shell>
+    </>
   )
 }
 
@@ -1606,8 +1569,10 @@ export function DataSourcesPage(): ReactElement {
   const [sources, setSources] = useState<DataSourceRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   useLoad(setSources, setError, fetchDataSources)
+  useEditorTitle("Sources")
+  useEditorStatus("Sources", "Data sources")
   return (
-    <Shell status="Data sources">
+    <>
       <section>
         <h1>Data sources</h1>
         <p className="comment">A source record does not provision a Trino or Spark connector.</p>
@@ -1623,7 +1588,7 @@ export function DataSourcesPage(): ReactElement {
           ))}
         </ul>
       </section>
-    </Shell>
+    </>
   )
 }
 

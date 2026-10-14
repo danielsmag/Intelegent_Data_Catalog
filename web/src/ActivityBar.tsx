@@ -1,5 +1,6 @@
 import type { ReactElement } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { pathnameOf, useFocusedPath } from "./editorLayout"
+import { WorkbenchLink } from "./editorSlots"
 import { AirflowIcon, BrandMark, CatalogIcon, GraphIcon, QueryIcon, SpaceIcon, TableIcon } from "./icons"
 import { setSpacesSidebarOpen } from "./spacesSidebar"
 
@@ -11,7 +12,7 @@ type Item = {
 }
 
 export function ActivityBar(): ReactElement {
-  const path: string = useLocation().pathname
+  const path: string = pathnameOf(useFocusedPath())
   const items: Item[] = [
     {
       to: "/",
@@ -56,7 +57,7 @@ export function ActivityBar(): ReactElement {
         <BrandMark />
       </div>
       {items.map((item: Item) => (
-        <Link
+        <WorkbenchLink
           key={item.to}
           to={item.to}
           className="activity-button"
@@ -71,7 +72,7 @@ export function ActivityBar(): ReactElement {
         >
           {item.icon}
           <span>{item.label}</span>
-        </Link>
+        </WorkbenchLink>
       ))}
     </nav>
   )
