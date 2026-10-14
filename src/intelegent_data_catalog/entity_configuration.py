@@ -8,6 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.core.settings import (
+    ModelId,
+    ReasoningEffort,
+    parse_effort,
+    parse_model_id,
+)
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
@@ -55,6 +61,8 @@ class EntityConfigurationWrite(BaseModel):
 
     interval_seconds: int = Field(ge=1, le=2_147_483_647)
     enabled: bool
+    model: ModelId = "gpt-4.1"
+    effort: ReasoningEffort = "low"
     options: dict[str, bool]
 
 
@@ -67,6 +75,8 @@ class EntityConfigurationRead(BaseModel):
     subject_id: UUID
     interval_seconds: int
     enabled: bool
+    model: ModelId
+    effort: ReasoningEffort
     options: dict[str, bool]
     next_run_at: datetime | None
 
@@ -74,8 +84,15 @@ class EntityConfigurationRead(BaseModel):
 class EntityConfigurationService:
     """Reads and writes entity configuration. The caller owns the session."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        default_model: ModelId = "llama3.2",
+        default_effort: ReasoningEffort = "low",
+    ) -> None:
         self._session: Session = session
+        self._default_model: ModelId = default_model
+        self._default_effort: ReasoningEffort = default_effort
 
     def get(self, kind: RefreshSubjectKind, subject_id: UUID) -> EntityConfigurationRead:
         """Return the saved settings. The first read stores the default schedule."""
@@ -104,6 +121,8 @@ class EntityConfigurationService:
                 catalog_table_id=subject_id if kind is RefreshSubjectKind.TABLE else None,
                 interval_seconds=body.interval_seconds,
                 enabled=body.enabled,
+                model=body.model,
+                effort=body.effort,
                 options=dict(options),
                 created_at=now,
                 updated_at=now,
@@ -113,6 +132,8 @@ class EntityConfigurationService:
             return _read(kind, subject_id, created, next_rebuild_at(self._session, created))
         row.interval_seconds = body.interval_seconds
         row.enabled = body.enabled
+        row.model = body.model
+        row.effort = body.effort
         row.options = dict(options)
         row.updated_at = now
         self._session.commit()
@@ -145,6 +166,20 @@ class EntityConfigurationService:
             )
         return self._session.scalar(statement)
 
+    def saved_model(self, kind: RefreshSubjectKind, subject_id: UUID) -> ModelId:
+        """Return the stored model id. A missing row uses the process default."""
+        row: EntityConfigurationRow | None = self._find(kind, subject_id)
+        if row is None:
+            return self._default_model
+        return parse_model_id(row.model)
+
+    def saved_effort(self, kind: RefreshSubjectKind, subject_id: UUID) -> ReasoningEffort:
+        """Return the stored effort. A missing row uses the process default."""
+        row: EntityConfigurationRow | None = self._find(kind, subject_id)
+        if row is None:
+            return self._default_effort
+        return parse_effort(row.effort)
+
     def _store_default(
         self,
         kind: RefreshSubjectKind,
@@ -158,6 +193,8 @@ class EntityConfigurationService:
             catalog_table_id=subject_id if kind is RefreshSubjectKind.TABLE else None,
             interval_seconds=_DEFAULT_INTERVAL_SECONDS,
             enabled=True,
+            model=self._default_model,
+            effort=self._default_effort,
             options=dict(_DEFAULTS[kind]),
             created_at=now,
             updated_at=now,
@@ -269,6 +306,8 @@ def _read(
         subject_id=subject_id,
         interval_seconds=row.interval_seconds,
         enabled=row.enabled,
+        model=parse_model_id(row.model),
+        effort=parse_effort(row.effort),
         options=option_values(kind, row.options),
         next_run_at=next_run_at,
     )

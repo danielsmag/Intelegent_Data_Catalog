@@ -100,7 +100,7 @@ class AirflowInstanceAgent:
             raise LlmUnavailableError("context generation is not configured")
         loaded: AirflowCatalogContext = self._context(
             AirflowContextOptions(
-                include_source=False,
+                include_source=True,
                 include_previous=True,
                 include_summary=False,
             ),

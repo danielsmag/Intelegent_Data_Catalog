@@ -4,6 +4,7 @@ from typing import Protocol
 from uuid import UUID
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository
+from intelegent_data_catalog.core.settings import ContextSettings
 from intelegent_data_catalog.exceptions import EntityNotFoundError
 from intelegent_data_catalog.knowledge.models import (
     AirflowCatalogContext,
@@ -25,12 +26,6 @@ from intelegent_data_catalog.persistence.models import (
     ScopeRow,
 )
 from intelegent_data_catalog.registry.repository import RegistryRepository
-
-_MAX_DAGS: int = 20
-_MAX_CANDIDATES: int = 300
-_MAX_TASKS: int = 60
-_SOURCE_LIMIT: int = 3000
-_TEXT_LIMIT: int = 200
 
 
 class PreviousAirflowReader(Protocol):
@@ -63,10 +58,12 @@ class PostgresAirflowCatalogContextProvider:
         airflow: AirflowRepository,
         registry: RegistryRepository,
         previous: PreviousAirflowReader,
+        limits: ContextSettings | None = None,
     ) -> None:
         self._airflow: AirflowRepository = airflow
         self._registry: RegistryRepository = registry
         self._previous: PreviousAirflowReader = previous
+        self._limits: ContextSettings = limits if limits is not None else ContextSettings()
 
     def get_airflow_context(
         self,
@@ -84,8 +81,8 @@ class PostgresAirflowCatalogContextProvider:
         if dag_row_ids is not None:
             rows = [row for row in rows if row.id in dag_row_ids]
         rows.sort(key=lambda item: item.dag_id)
-        truncated: bool = len(rows) > _MAX_DAGS
-        chosen: list[AirflowDagRow] = rows[:_MAX_DAGS]
+        truncated: bool = len(rows) > self._limits.airflow_max_dags
+        chosen: list[AirflowDagRow] = rows[: self._limits.airflow_max_dags]
         include_source: bool = selected.include_source and not truncated
         mappings: list[AirflowDagTableRow] = self._airflow.list_mappings_for_dags(
             {row.id for row in chosen},
@@ -95,7 +92,7 @@ class PostgresAirflowCatalogContextProvider:
         )
         known: dict[UUID, list[DagTableRef]] = _known_tables(mappings, tables)
         dags: list[AirflowDagInput] = [
-            _dag_input(row, known.get(row.id, []), include_source) for row in chosen
+            _dag_input(row, known.get(row.id, []), include_source, self._limits) for row in chosen
         ]
         candidates: list[DagCandidateTable] = self._candidates(
             instance_id,
@@ -105,8 +102,8 @@ class PostgresAirflowCatalogContextProvider:
         return AirflowCatalogContext(
             instance_id=instance.id,
             instance_name=instance.name,
-            instance_description=_short_text(instance.description),
-            instance_context=_short_text(instance.context),
+            instance_description=_short_text(instance.description, self._limits.text_chars),
+            instance_context=_short_text(instance.context, self._limits.text_chars),
             dags=dags,
             candidate_tables=candidates,
             previous=_previous(self._previous, instance_id, chosen, selected.include_previous),
@@ -126,7 +123,8 @@ class PostgresAirflowCatalogContextProvider:
             ordered.sort(
                 key=lambda item: (item.physical_catalog, item.physical_namespace, item.name),
             )
-            return [_candidate(row) for row in ordered[:_MAX_CANDIDATES]]
+            capped: list[CatalogTableRow] = ordered[: self._limits.airflow_max_candidate_tables]
+            return [_candidate(row, self._limits.text_chars) for row in capped]
         preferred_scopes: set[UUID] = self._attached_scopes(instance_id, dags)
         preferred: list[CatalogTableRow] = []
         scope_id: UUID
@@ -138,7 +136,10 @@ class PostgresAirflowCatalogContextProvider:
             if row.scope_id not in preferred_scopes
         ]
         combined: list[CatalogTableRow] = preferred + rest
-        return [_candidate(row) for row in combined[:_MAX_CANDIDATES]]
+        return [
+            _candidate(row, self._limits.text_chars)
+            for row in combined[: self._limits.airflow_max_candidate_tables]
+        ]
 
     def _attached_scopes(self, instance_id: UUID, dags: list[AirflowDagRow]) -> set[UUID]:
         attachments: list[AirflowAttachmentRow] = self._airflow.list_attachments_touching(
@@ -163,18 +164,22 @@ def _dag_input(
     row: AirflowDagRow,
     known: list[DagTableRef],
     include_source: bool,
+    limits: ContextSettings,
 ) -> AirflowDagInput:
-    schedule: str | None = _short_text(row.timetable_summary or row.timetable_description)
+    schedule: str | None = _short_text(
+        row.timetable_summary or row.timetable_description,
+        limits.text_chars,
+    )
     return AirflowDagInput(
         dag_row_id=row.id,
         dag_id=row.dag_id,
         display_name=row.display_name,
-        description=_short_text(row.description),
+        description=_short_text(row.description, limits.text_chars),
         schedule=schedule,
         owners=_strings(row.owners),
         tags=_strings(row.tags),
-        tasks=_tasks(row.tasks),
-        source_code=_source(row.source_code, include_source),
+        tasks=_tasks(row.tasks, limits.airflow_max_tasks),
+        source_code=_source(row.source_code, include_source, limits.airflow_source_chars),
         known_tables=known,
     )
 
@@ -205,12 +210,12 @@ def _known_tables(
     return grouped
 
 
-def _candidate(row: CatalogTableRow) -> DagCandidateTable:
+def _candidate(row: CatalogTableRow, text_chars: int) -> DagCandidateTable:
     return DagCandidateTable(
         id=row.id,
         qualified_name=_qualified(row),
         scope_id=row.scope_id,
-        description=_short_text(row.description or row.source_description),
+        description=_short_text(row.description or row.source_description, text_chars),
     )
 
 
@@ -237,7 +242,7 @@ def _qualified(table: CatalogTableRow) -> str:
     return f"{table.physical_catalog}.{table.physical_namespace}.{table.physical_table}"
 
 
-def _tasks(value: object) -> list[DagTaskSummary]:
+def _tasks(value: object, max_tasks: int) -> list[DagTaskSummary]:
     if not isinstance(value, list):
         return []
     found: list[DagTaskSummary] = []
@@ -264,7 +269,7 @@ def _tasks(value: object) -> list[DagTaskSummary]:
                 downstream_task_ids=downstream,
             )
         )
-        if len(found) >= _MAX_TASKS:
+        if len(found) >= max_tasks:
             break
     return found
 
@@ -280,14 +285,14 @@ def _strings(value: object) -> list[str]:
     return found
 
 
-def _source(value: str | None, include: bool) -> str | None:
+def _source(value: str | None, include: bool, source_chars: int) -> str | None:
     if not include:
         return None
-    return _clip(value, _SOURCE_LIMIT)
+    return _clip(value, source_chars)
 
 
-def _short_text(value: str | None) -> str | None:
-    return _clip(value, _TEXT_LIMIT)
+def _short_text(value: str | None, text_chars: int) -> str | None:
+    return _clip(value, text_chars)
 
 
 def _clip(value: str | None, limit: int) -> str | None:

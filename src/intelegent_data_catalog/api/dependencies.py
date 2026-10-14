@@ -172,7 +172,11 @@ def get_sync_schedules(
     """Open one catalog session for sync schedule reads and writes."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
-    service: SyncScheduleService = SyncScheduleService(session)
+    service: SyncScheduleService = SyncScheduleService(
+        session,
+        container.settings().llm.default_model_id(),
+        container.settings().llm.effort,
+    )
     try:
         yield service
     except SQLAlchemyError as err:
@@ -194,7 +198,11 @@ def get_entity_configuration(
     """Open one catalog session for entity configuration reads and writes."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
-    service: EntityConfigurationService = EntityConfigurationService(session)
+    service: EntityConfigurationService = EntityConfigurationService(
+        session,
+        container.settings().llm.default_model_id(),
+        container.settings().llm.effort,
+    )
     try:
         yield service
     except SQLAlchemyError as err:

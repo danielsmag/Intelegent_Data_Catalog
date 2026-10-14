@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import CelerySettings
+from intelegent_data_catalog.jobs.cancel import RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.celery_app import celery_app
 from intelegent_data_catalog.jobs.context_refresh import ContextRefreshService
@@ -27,6 +28,7 @@ from intelegent_data_catalog.jobs.runner import (
 )
 from intelegent_data_catalog.jobs.runtime import job_container
 from intelegent_data_catalog.jobs.schedules import SyncScheduleService
+from intelegent_data_catalog.jobs.trace import RedisBuildTrace
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 
@@ -75,12 +77,16 @@ def _reclaim_abandoned(
     now: datetime,
 ) -> int:
     settings: CelerySettings = job_container().settings().celery
+    broker_url: str = settings.broker_url
     reclaimer: AbandonedJobReclaimer = AbandonedJobReclaimer(
         CatalogJobStore(database),
-        RedisJobLeaseStore.from_url(settings.broker_url),
+        RedisJobLeaseStore.from_url(broker_url),
         publisher,
         timedelta(seconds=settings.reclaim_after_seconds),
         timedelta(seconds=settings.abandon_after_seconds),
+        RedisBuildTrace.from_url(broker_url),
+        RedisCancelSignal.from_url(broker_url),
+        max(int(settings.visibility_timeout_seconds), 1),
     )
     try:
         return reclaimer.reclaim(now)

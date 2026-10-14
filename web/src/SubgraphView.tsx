@@ -133,6 +133,7 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string | 
     selected === null ? null : (nodesById.get(selected) ?? null)
   const scopeCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "scope").length
   const tableCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "table").length
+  const dagCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "dag").length
   const columnCount: number = graph.nodes.filter((node: GraphNodeRecord) => node.kind === "column").length
   const kinds: string[] = [...new Set(graph.edges.map((edge: GraphEdgeRecord) => edge.kind))]
   function viewBoxPoint(clientX: number, clientY: number): Point | null {
@@ -212,6 +213,11 @@ function SubgraphCanvas(props: { graph: GraphViewRecord; focusTableId: string | 
           <span>
             <i className="swatch swatch-table" /> Table {tableCount}
           </span>
+          {dagCount > 0 ? (
+            <span>
+              <i className="swatch swatch-dag" /> Dag {dagCount}
+            </span>
+          ) : null}
           <span>
             <i className="swatch swatch-column" /> Column {columnCount}
           </span>
@@ -405,12 +411,18 @@ function badgeClass(kind: string): string {
   if (kind === "table") {
     return "badge badge-table"
   }
+  if (kind === "dag") {
+    return "badge badge-airflow"
+  }
   return "badge badge-column"
 }
 
 function radiusFor(node: GraphNodeRecord): number {
   if (node.kind === "scope") {
     return SCOPE_RADIUS
+  }
+  if (node.kind === "dag") {
+    return TABLE_RADIUS
   }
   if (node.kind === "table") {
     return TABLE_RADIUS
@@ -439,7 +451,8 @@ function simulateGraph(nodes: GraphNodeRecord[], edges: GraphEdgeRecord[]): Body
   const placed: Array<{ id: string; x: number; y: number; vx: number; vy: number }> = nodes.map(
     (node: GraphNodeRecord, index: number) => {
       const angle: number = (Math.PI * 2 * index) / Math.max(nodes.length, 1)
-      const ring: number = node.kind === "scope" ? 40 : node.kind === "table" ? 120 : 200
+      const ring: number =
+        node.kind === "scope" ? 40 : node.kind === "table" ? 120 : node.kind === "dag" ? 260 : 200
       return {
         id: node.id,
         x: VIEW_WIDTH / 2 + Math.cos(angle) * ring,

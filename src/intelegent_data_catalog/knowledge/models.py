@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
+from intelegent_data_catalog.core.settings import StoredEffort, StoredModelId
 from intelegent_data_catalog.persistence.enums import (
     AirflowMappingDirection,
     AirflowMappingOrigin,
@@ -323,6 +324,8 @@ class TableContextOptions(BaseModel):
     include_data_profile: bool = True
     include_graph: bool = True
     include_lineage: bool = True
+    model: StoredModelId = "gpt-4.1"
+    effort: StoredEffort = "low"
     profile: ProfileOverrides | None = None
 
 
@@ -403,6 +406,25 @@ class PreviousScopeFindings(BaseModel):
     built_at: datetime | None
 
 
+class PipelineTask(BaseModel):
+    """One task on an attached DAG."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    operator_name: str | None = None
+
+
+class PipelineTableRef(BaseModel):
+    """Catalog table a DAG reads, writes, or only mentions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table_id: UUID
+    name: str
+    direction: Literal["READS", "WRITES", "MENTIONS"]
+
+
 class PipelineInput(BaseModel):
     """One attached Airflow DAG and the catalog tables it reads or writes."""
 
@@ -412,30 +434,125 @@ class PipelineInput(BaseModel):
     dag_id: str
     instance_name: str
     instance_context: str | None = None
+    instance_summary: str | None = None
     description: str | None = None
     schedule: str | None = None
     summary: str | None = None
+    tasks: list[PipelineTask] = Field(default_factory=list)
     reads: list[UUID] = Field(default_factory=list)
     writes: list[UUID] = Field(default_factory=list)
     unknown: list[UUID] = Field(default_factory=list)
 
 
 class PipelineSummary(BaseModel):
-    """DAG identity stored on a scope or space snapshot."""
+    """DAG facts stored on a scope or space snapshot and shown in the overview."""
 
     model_config = ConfigDict(extra="forbid")
 
     dag_id: str
     instance_name: str
+    instance_summary: str | None = None
+    description: str | None = None
+    schedule: str | None = None
+    summary: str | None = None
+    tasks: list[PipelineTask] = Field(default_factory=list)
+    tables: list[PipelineTableRef] = Field(default_factory=list)
 
 
-def pipeline_summaries(pipelines: list[PipelineInput]) -> list[PipelineSummary]:
-    """Keep DAG identity on the snapshot. Table ids stay on the prompt only."""
+def pipeline_summaries(
+    pipelines: list[PipelineInput],
+    names: dict[UUID, str] | None = None,
+) -> list[PipelineSummary]:
+    """Keep DAG facts on the snapshot, with table names resolved from the owner."""
+    lookup: dict[UUID, str] = {} if names is None else names
     found: list[PipelineSummary] = []
     item: PipelineInput
     for item in pipelines:
-        found.append(PipelineSummary(dag_id=item.dag_id, instance_name=item.instance_name))
+        found.append(
+            PipelineSummary(
+                dag_id=item.dag_id,
+                instance_name=item.instance_name,
+                instance_summary=item.instance_summary,
+                description=item.description,
+                schedule=item.schedule,
+                summary=item.summary,
+                tasks=list(item.tasks),
+                tables=_pipeline_tables(item, lookup),
+            )
+        )
     return found
+
+
+def pipelines_missing_instance_summary(pipelines: list[PipelineSummary]) -> set[str]:
+    """Instance names whose pipelines still have no Airflow summary."""
+    missing: set[str] = set()
+    item: PipelineSummary
+    for item in pipelines:
+        if _kept_text(item.instance_summary) is not None:
+            continue
+        missing.add(item.instance_name)
+    return missing
+
+
+def apply_instance_summaries(
+    pipelines: list[PipelineSummary],
+    summaries: dict[str, str],
+) -> list[PipelineSummary]:
+    """Fill pipelines that have no instance summary. A known name supplies the text."""
+    updated: list[PipelineSummary] = []
+    changed: bool = False
+    item: PipelineSummary
+    for item in pipelines:
+        if _kept_text(item.instance_summary) is not None:
+            updated.append(item)
+            continue
+        found: str | None = _kept_text(summaries.get(item.instance_name))
+        if found is None:
+            updated.append(item)
+            continue
+        changed = True
+        updated.append(item.model_copy(update={"instance_summary": found}))
+    if not changed:
+        return pipelines
+    return updated
+
+
+def _kept_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text: str = value.strip()
+    if text == "":
+        return None
+    return text
+
+
+def _pipeline_tables(item: PipelineInput, names: dict[UUID, str]) -> list[PipelineTableRef]:
+    refs: list[PipelineTableRef] = []
+    seen: set[UUID] = set()
+    table_id: UUID
+    for table_id in item.writes:
+        _add_pipeline_table(refs, seen, names, table_id, "WRITES")
+    for table_id in item.reads:
+        _add_pipeline_table(refs, seen, names, table_id, "READS")
+    for table_id in item.unknown:
+        _add_pipeline_table(refs, seen, names, table_id, "MENTIONS")
+    return refs
+
+
+def _add_pipeline_table(
+    refs: list[PipelineTableRef],
+    seen: set[UUID],
+    names: dict[UUID, str],
+    table_id: UUID,
+    direction: Literal["READS", "WRITES", "MENTIONS"],
+) -> None:
+    if table_id in seen:
+        return
+    name: str | None = names.get(table_id)
+    if name is None:
+        return
+    seen.add(table_id)
+    refs.append(PipelineTableRef(table_id=table_id, name=name, direction=direction))
 
 
 def omitted_pipeline_names(text: str, pipelines: list[PipelineInput]) -> list[str]:
@@ -473,6 +590,8 @@ class ScopeContextOptions(BaseModel):
     include_previous: bool = True
     include_summary: bool = True
     include_airflow: bool = True
+    model: StoredModelId = "gpt-4.1"
+    effort: StoredEffort = "low"
 
 
 class ScopeProposal(BaseModel):
@@ -569,6 +688,8 @@ class SpaceContextOptions(BaseModel):
     include_previous: bool = True
     include_summary: bool = True
     include_airflow: bool = True
+    model: StoredModelId = "gpt-4.1"
+    effort: StoredEffort = "low"
 
 
 class SpaceProposal(BaseModel):
@@ -706,6 +827,8 @@ class AirflowContextOptions(BaseModel):
     include_source: bool = True
     include_previous: bool = True
     include_summary: bool = True
+    model: StoredModelId = "gpt-4.1"
+    effort: StoredEffort = "low"
 
 
 class AirflowProposal(BaseModel):
@@ -751,6 +874,8 @@ class ContextGenerationOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: ContextSubjectKind
+    model: StoredModelId = "gpt-4.1"
+    effort: StoredEffort = "low"
 
 
 class _ContextText(BaseModel):

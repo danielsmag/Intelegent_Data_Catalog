@@ -4,12 +4,15 @@ import { errorMessage, isAbortError } from "./api"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
 import { AirflowIcon, Chevron, IcebergIcon, MoreIcon, PanelChevron, ScopeIcon, SearchIcon, SpaceIcon } from "./icons"
+import { RenameRecordForm } from "./RenameRecordForm"
 import { ResizeHandle } from "./ResizeHandle"
 import {
   createScope,
   createSpace,
   deleteScope,
   deleteSpace,
+  renameScope,
+  renameSpace,
   fetchHierarchy,
   type HierarchyAirflow,
   type HierarchyDag,
@@ -24,6 +27,12 @@ type HierarchyTreeProps = {
   onToggleCollapsed: () => void
 }
 
+type RenameTarget = {
+  kind: "space" | "scope"
+  id: string
+  name: string
+}
+
 export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [spaces, setSpaces] = useState<HierarchySpace[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +41,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [addingSpace, setAddingSpace] = useState<boolean>(false)
   const [addingScopeId, setAddingScopeId] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<RenameTarget | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
   const [pendingDrop, setPendingDrop] = useState<string | null>(null)
   const revision: number = useCatalogRevision()
@@ -103,6 +113,13 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
     setPendingDrop(null)
   }
 
+  function beginRename(kind: "space" | "scope", id: string, name: string): void {
+    closeMenu()
+    setAddingSpace(false)
+    setAddingScopeId(null)
+    setRenaming({ kind, id, name })
+  }
+
   async function dropSpace(space: HierarchySpace): Promise<void> {
     try {
       await deleteSpace(space.id)
@@ -156,6 +173,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                   onSelect: () => {
                     closeMenu()
                     setAddingScopeId(null)
+                    setRenaming(null)
                     setAddingSpace(true)
                   },
                 },
@@ -281,6 +299,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                             onSelect: () => {
                               closeMenu()
                               setAddingSpace(false)
+                              setRenaming(null)
                               setAddingScopeId(space.id)
                               setCollapsed((current: ReadonlySet<string>) => {
                                 const next: Set<string> = new Set(current)
@@ -288,6 +307,12 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                 next.delete(spaceKey)
                                 return next
                               })
+                            },
+                          },
+                          {
+                            label: "Rename",
+                            onSelect: () => {
+                              beginRename("space", space.id, space.name)
                             },
                           },
                           {
@@ -299,6 +324,22 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                   }
                 />
               </div>
+              {renaming?.kind === "space" && renaming.id === space.id ? (
+                <RenameRecordForm
+                  idPrefix={`tree-rename-space-${space.id}`}
+                  nameLabel="Space name"
+                  initialName={renaming.name}
+                  compact
+                  onCancel={() => {
+                    setRenaming(null)
+                  }}
+                  onRename={async (name: string) => {
+                    await renameSpace(space.id, name)
+                    setRenaming(null)
+                    bumpCatalogRevision()
+                  }}
+                />
+              ) : null}
               {addingScopeId === space.id ? (
                 <CreateRecordForm
                   idPrefix={`tree-scope-${space.id}`}
@@ -380,6 +421,12 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                   ]
                                 : [
                                     {
+                                      label: "Rename",
+                                      onSelect: () => {
+                                        beginRename("scope", scope.id, scope.name)
+                                      },
+                                    },
+                                    {
                                       label: "Drop",
                                       danger: true,
                                       onSelect: () => setPendingDrop(`scope:${scope.id}`),
@@ -388,6 +435,22 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                             }
                           />
                         </div>
+                        {renaming?.kind === "scope" && renaming.id === scope.id ? (
+                          <RenameRecordForm
+                            idPrefix={`tree-rename-scope-${scope.id}`}
+                            nameLabel="Scope name"
+                            initialName={renaming.name}
+                            compact
+                            onCancel={() => {
+                              setRenaming(null)
+                            }}
+                            onRename={async (name: string) => {
+                              await renameScope(scope.id, name)
+                              setRenaming(null)
+                              bumpCatalogRevision()
+                            }}
+                          />
+                        ) : null}
                         {scopeClosed ? null : (
                           <>
                             {scope.tables.length > 0 ? (

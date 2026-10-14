@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.lease import JobLeaseStore
 from intelegent_data_catalog.jobs.reclaim import ABANDONED_JOB_ERROR, AbandonedJobReclaimer
+from intelegent_data_catalog.jobs.trace import BuildTraceEvent, MemoryBuildTrace
 from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
@@ -29,6 +30,26 @@ class _RecordingBuilds:
 
     def enqueue_build(self, job_id: UUID) -> None:
         self.job_ids.append(job_id)
+
+
+class _MemoryCancel:
+    """Records cancel requests. The worker heartbeat would then exit."""
+
+    def __init__(self) -> None:
+        self.requested: list[UUID] = []
+
+    def request(self, job_id: UUID, ttl_seconds: int) -> None:
+        """Remember the job that should stop."""
+        del ttl_seconds
+        self.requested.append(job_id)
+
+    def is_requested(self, job_id: UUID) -> bool:
+        """Return whether this test asked the job to stop."""
+        return job_id in self.requested
+
+    def clear(self, job_id: UUID) -> None:
+        """Drop a recorded cancel."""
+        self.requested = [item for item in self.requested if item != job_id]
 
 
 class _FailingBuilds:
@@ -92,6 +113,23 @@ class _MemoryJobLeaseStore:
             del self._leases[job_id]
 
 
+def test_finished_job_status_is_readable(tmp_path: Path) -> None:
+    """A finished row is what the trace panel uses to stop its clock."""
+    database: CatalogDatabase = _database(tmp_path)
+    publisher: _RecordingBuilds = _RecordingBuilds()
+    try:
+        job_id: UUID = _running_job(database, publisher)
+        assert CatalogJobStore(database).complete(job_id, "failed", "build cancelled") is True
+        rows: list[CatalogJobRow] = CatalogJobStore(database).statuses({job_id, uuid4()})
+        assert len(rows) == 1
+        assert rows[0].id == job_id
+        assert rows[0].status == "failed"
+        assert rows[0].error == "build cancelled"
+        assert rows[0].finished_at is not None
+    finally:
+        database.dispose()
+
+
 def test_young_running_job_is_left_alone(tmp_path: Path) -> None:
     """A job still waiting for its first worker is not requeued."""
     database: CatalogDatabase = _database(tmp_path)
@@ -123,8 +161,8 @@ def test_dead_job_is_requeued_once_until_the_marker_expires(tmp_path: Path) -> N
         database.dispose()
 
 
-def test_live_lease_blocks_reclaim_past_the_abandon_deadline(tmp_path: Path) -> None:
-    """A worker that still refreshes its lease may run longer than the abandon window."""
+def test_live_lease_blocks_requeue_inside_the_abandon_window(tmp_path: Path) -> None:
+    """A live worker is not requeued while the build is still inside the window."""
     database: CatalogDatabase = _database(tmp_path)
     publisher: _RecordingBuilds = _RecordingBuilds()
     leases: _MemoryJobLeaseStore = _MemoryJobLeaseStore()
@@ -132,11 +170,48 @@ def test_live_lease_blocks_reclaim_past_the_abandon_deadline(tmp_path: Path) -> 
         job_id: UUID = _running_job(database, publisher)
         token: str | None = leases.try_acquire(job_id, 300)
         assert token is not None
-        _age(database, job_id, timedelta(hours=2))
+        _age(database, job_id, timedelta(minutes=5))
         reclaimed: int = _reclaimer(database, publisher, leases).reclaim(utc_now())
         assert reclaimed == 0
         assert publisher.job_ids == [job_id]
         assert _status(database, job_id) == "running"
+    finally:
+        database.dispose()
+
+
+def test_live_lease_fails_past_the_abandon_deadline(tmp_path: Path) -> None:
+    """A stuck worker is failed once the abandon window ends, and the trace closes."""
+    database: CatalogDatabase = _database(tmp_path)
+    publisher: _RecordingBuilds = _RecordingBuilds()
+    leases: _MemoryJobLeaseStore = _MemoryJobLeaseStore()
+    sink: MemoryBuildTrace = MemoryBuildTrace()
+    cancel: _MemoryCancel = _MemoryCancel()
+    try:
+        job_id: UUID = _running_job(database, publisher)
+        token: str | None = leases.try_acquire(job_id, 300)
+        assert token is not None
+        _age(database, job_id, timedelta(hours=2))
+        reclaimer: AbandonedJobReclaimer = AbandonedJobReclaimer(
+            CatalogJobStore(database),
+            leases,
+            publisher,
+            _RECLAIM_AFTER,
+            _ABANDON_AFTER,
+            sink,
+            cancel,
+            30,
+        )
+        reclaimed: int = reclaimer.reclaim(utc_now())
+        assert reclaimed == 1
+        assert publisher.job_ids == [job_id]
+        assert _status(database, job_id) == "failed"
+        assert cancel.requested == [job_id]
+        recorded: list[BuildTraceEvent] = sink.read(None)
+        assert len(recorded) == 1
+        assert recorded[0].step == "failed"
+        assert recorded[0].detail == ABANDONED_JOB_ERROR
+        assert recorded[0].kind == "table"
+        assert recorded[0].subject_name == "orders"
     finally:
         database.dispose()
 

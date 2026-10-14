@@ -161,6 +161,11 @@ def test_assemble_writes_pipeline_read_to_write_edges() -> None:
     assert derived[0].source.endswith(f":table:{customers.id}")
     assert derived[0].target.endswith(f":table:{orders.id}")
     assert derived[0].reason == "Iceberg append_sales_order"
+    assert {node.name for node in document.dags} == {"append_sales_order"}
+    touches: set[str] = {
+        edge.kind for edge in document.edges if edge.kind in {"READS", "WRITES"}
+    }
+    assert touches == {"READS", "WRITES"}
 
 
 def test_builder_counts_links_kept_from_the_previous_build() -> None:

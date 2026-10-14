@@ -148,13 +148,20 @@ def test_scope_agent_retries_until_the_link_is_in_scope() -> None:
 
 
 def test_scope_prompts_include_airflow_instance_context() -> None:
-    """Scope text and graph prompts carry the stored Airflow instance context."""
+    """Scope text uses table names. The graph prompt keeps table ids."""
     base: ScopeCatalogContext = _context()
+    orders: ScopeTableSummary = base.tables[0]
+    customers: ScopeTableSummary = base.tables[1]
+    outside: UUID = uuid4()
     pipeline: PipelineInput = PipelineInput(
         dag_row_id=uuid4(),
         dag_id="append_sales_order",
         instance_name="Iceberg",
         instance_context="Nightly sales loads.",
+        description="Append one order for an existing customer.",
+        reads=[customers.id],
+        writes=[orders.id],
+        unknown=[outside],
     )
     context: ScopeCatalogContext = base.model_copy(update={"pipelines": [pipeline]})
     prompts: list[str] = []
@@ -175,8 +182,12 @@ def test_scope_prompts_include_airflow_instance_context() -> None:
     )
     written: ScopeContextProposal = text_agent.propose(context)
     assert written.context == "append_sales_order appends orders."
-    assert "instance_context" in prompts[0]
-    assert "Nightly sales loads." in prompts[0]
+    text_pipeline: dict[str, object] = _pipeline_payload(prompts[0])
+    assert text_pipeline["instance_context"] == "Nightly sales loads."
+    assert text_pipeline["description"] == "Append one order for an existing customer."
+    assert text_pipeline["reads"] == ["customers"]
+    assert text_pipeline["writes"] == ["orders"]
+    assert text_pipeline["unknown"] == []
 
     def graph_respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         del info
@@ -193,8 +204,12 @@ def test_scope_prompts_include_airflow_instance_context() -> None:
         timeout_seconds=5.0,
     )
     graph_agent.propose(context)
-    assert "instance_context" in prompts[1]
-    assert "Nightly sales loads." in prompts[1]
+    graph_pipeline: dict[str, object] = _pipeline_payload(prompts[1])
+    assert graph_pipeline["instance_context"] == "Nightly sales loads."
+    assert graph_pipeline["description"] == "Append one order for an existing customer."
+    assert graph_pipeline["reads"] == [str(customers.id)]
+    assert graph_pipeline["writes"] == [str(orders.id)]
+    assert graph_pipeline["unknown"] == [str(outside)]
 
 
 def test_replace_keeps_non_llm_rows_and_rewrites_llm_rows(tmp_path: Path) -> None:
@@ -271,6 +286,16 @@ def test_replace_keeps_non_llm_rows_and_rewrites_llm_rows(tmp_path: Path) -> Non
     finally:
         session.close()
         database.dispose()
+
+
+def _pipeline_payload(prompt: str) -> dict[str, object]:
+    body: object = json.loads(prompt)
+    assert isinstance(body, dict)
+    pipelines: object = body["pipelines"]
+    assert isinstance(pipelines, list)
+    pipeline: object = pipelines[0]
+    assert isinstance(pipeline, dict)
+    return pipeline
 
 
 def _user_text(messages: list[ModelMessage]) -> str:

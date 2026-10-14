@@ -9,21 +9,21 @@ export function SpaceScopesDigest(props: {
   tableCounts: Map<string, number> | null
 }): ReactElement {
   return (
-    <section className="context-block" aria-label="Scopes">
+    <section className="scope-digest" aria-label="Scopes">
       <h2>Scopes</h2>
       {props.scopes.length === 0 ? <p className="note">No scopes yet.</p> : null}
-      <ul className="registry-list">
+      <ul className="scope-cards">
         {props.scopes.map((scope: ScopeRecord) => {
           const count: number | undefined = props.tableCounts?.get(scope.id)
           const shown: string = clip(scope.context)
           return (
-            <li key={scope.id}>
+            <li key={scope.id} className="scope-card">
               <Link to={`/scopes/${scope.id}`}>{scope.name}</Link>
               <span className="badge">{count === undefined ? "…" : countLabel(count)}</span>
               {scope.context_origin !== null ? (
                 <span className="badge context-origin">{scope.context_origin}</span>
               ) : null}
-              <span className={shown === "No context yet." ? "comment" : undefined}>{shown}</span>
+              <span className={shown === "No context yet." ? "comment" : "scope-card-context"}>{shown}</span>
             </li>
           )
         })}

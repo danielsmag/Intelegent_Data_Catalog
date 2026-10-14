@@ -76,6 +76,15 @@ def test_knowledge_node_from_row_reads_table_and_column_labels() -> None:
     assert column.kind == "column"
     assert column.name == "knowledge:city"
     assert column.resolved is True
+    dag: KnowledgeGraphNode | None = knowledge_node_from_row(
+        "dag-append",
+        "dag-row",
+        "append_sales_order",
+        True,
+        ["Dag"],
+    )
+    assert dag is not None
+    assert dag.kind == "dag"
     assert knowledge_node_from_row("job", "job", "load", True, ["Job"]) is None
     assert knowledge_node_from_row("", "id", "name", True, ["Table"]) is None
 

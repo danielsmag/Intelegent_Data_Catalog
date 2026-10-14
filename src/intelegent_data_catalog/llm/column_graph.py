@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.column_graph import (
@@ -128,6 +129,7 @@ class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelati
         temperature: float,
         max_tokens: int,
         timeout_seconds: float,
+        thinking: ThinkingLevel = False,
     ) -> None:
         self._call: ModelCall[ColumnGraphDeps, ColumnRelationSet] = ModelCall(
             _column_agent(model),
@@ -136,7 +138,7 @@ class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelati
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
 
     def propose(self, context: ColumnProposalContext) -> list[ColumnRelation]:

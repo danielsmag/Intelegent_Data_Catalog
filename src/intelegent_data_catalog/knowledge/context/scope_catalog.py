@@ -41,8 +41,6 @@ from intelegent_data_catalog.registry.repository import RegistryRepository
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 
-_MAX_TABLES: int = 40
-_MAX_COLUMNS: int = 400
 _MAX_TABLE_RELATIONS: int = 50
 _DESCRIPTION_LIMIT: int = 200
 _NEO4J_REASON: str = "Recorded in the table knowledge graph."
@@ -182,11 +180,15 @@ class PostgresScopeCatalogContextProvider:
         knowledge: ScopeTableKnowledgeReader,
         previous: PreviousScopeReader,
         pipelines: AttachedPipelineSource | None = None,
+        max_tables: int = 40,
+        max_columns: int = 400,
     ) -> None:
         self._repository: RegistryRepository = repository
         self._knowledge: ScopeTableKnowledgeReader = knowledge
         self._previous: PreviousScopeReader = previous
         self._pipelines: AttachedPipelineSource | None = pipelines
+        self._max_tables: int = max_tables
+        self._max_columns: int = max_columns
 
     def get_scope_context(
         self,
@@ -201,14 +203,14 @@ class PostgresScopeCatalogContextProvider:
         space: SpaceRow | None = self._repository.get_space(scope.space_id)
         if space is None:
             raise EntityNotFoundError("space", str(scope.space_id))
-        rows: list[CatalogTableRow] = self._repository.list_tables(scope_id)[:_MAX_TABLES]
+        rows: list[CatalogTableRow] = self._repository.list_tables(scope_id)[: self._max_tables]
         table_ids: set[UUID] = {row.id for row in rows}
         relationships: list[TableRelation] = _scope_relationships(self._repository, table_ids)
         foreign_keys: set[UUID] = _foreign_key_sources(relationships)
         tables: list[ScopeTableSummary] = []
         knowledge: list[TableKnowledgeInput] = []
         missing: list[UUID] = []
-        remaining: int = _MAX_COLUMNS
+        remaining: int = self._max_columns
         row: CatalogTableRow
         for row in rows:
             columns: list[ColumnMetadata]

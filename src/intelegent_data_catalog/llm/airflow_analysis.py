@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.airflow_graph import accept_airflow_findings
@@ -146,6 +147,7 @@ class AirflowAnalysisAgent(ProposalAgent[AirflowCatalogContext, AirflowProposal]
         temperature: float,
         max_tokens: int,
         timeout_seconds: float,
+        thinking: ThinkingLevel = False,
     ) -> None:
         self._call: ModelCall[AirflowCatalogContext, AirflowProposal] = ModelCall(
             _airflow_agent(model),
@@ -154,7 +156,7 @@ class AirflowAnalysisAgent(ProposalAgent[AirflowCatalogContext, AirflowProposal]
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
 
     def propose(self, context: AirflowCatalogContext) -> AirflowProposal:

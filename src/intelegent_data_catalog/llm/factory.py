@@ -7,13 +7,31 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ThinkingLevel
 
-from intelegent_data_catalog.core.settings import LlmSettings
+from intelegent_data_catalog.core.settings import LlmSettings, ReasoningEffort
 from intelegent_data_catalog.exceptions import LlmUnavailableError
+from intelegent_data_catalog.llm.airflow_analysis import AirflowAnalysisAgent
+from intelegent_data_catalog.llm.airflow_context import AirflowContextAgent
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
+from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
+from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
+from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
+from intelegent_data_catalog.llm.space_context import SpaceContextAgent
+from intelegent_data_catalog.llm.space_graph import SpaceSubgraphAgent
 
 
-def build_table_operation_agent(settings: LlmSettings) -> TableOperationAgent:
+def thinking_level(effort: ReasoningEffort) -> ThinkingLevel:
+    """Map a saved effort onto the model setting. ``off`` disables thinking."""
+    if effort == "off":
+        return False
+    return effort
+
+
+def build_table_operation_agent(
+    settings: LlmSettings,
+    thinking: ThinkingLevel = False,
+) -> TableOperationAgent:
     """Return an agent for ``settings.provider``. Ollama is the local default.
 
     Context writes share this agent, so the timeout matches the other structured calls.
@@ -24,6 +42,7 @@ def build_table_operation_agent(settings: LlmSettings) -> TableOperationAgent:
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
         timeout_seconds=max(settings.timeout_seconds, 600.0),
+        thinking=thinking,
     )
 
 
@@ -76,3 +95,80 @@ def _require_key(settings: LlmSettings, provider: str) -> str:
     if key is None:
         raise LlmUnavailableError(f"{provider} requires CATALOG_LLM__API_KEY")
     return key
+
+
+class CatalogModels:
+    """One profile's agents. Each agent gets its own model client."""
+
+    def __init__(
+        self,
+        settings: LlmSettings,
+        *,
+        text_chars: int,
+        column_graph: bool,
+        thinking: ThinkingLevel = False,
+    ) -> None:
+        timeout: float = max(settings.timeout_seconds, 600.0)
+        self.settings: LlmSettings = settings
+        self.thinking: ThinkingLevel = thinking
+        self.operation: TableOperationAgent = build_table_operation_agent(settings, thinking)
+        self.column: ColumnSubgraphAgent | None = None
+        if column_graph:
+            self.column = ColumnSubgraphAgent(
+                build_model(settings),
+                max_requests=settings.max_tool_steps,
+                temperature=settings.temperature,
+                max_tokens=settings.max_tokens,
+                timeout_seconds=timeout,
+                thinking=thinking,
+            )
+        self.scope_proposer: ScopeSubgraphAgent = ScopeSubgraphAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )
+        self.scope_describer: ScopeContextAgent = ScopeContextAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            text_chars=text_chars,
+            thinking=thinking,
+        )
+        self.space_proposer: SpaceSubgraphAgent = SpaceSubgraphAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )
+        self.space_describer: SpaceContextAgent = SpaceContextAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            text_chars=text_chars,
+            thinking=thinking,
+        )
+        self.airflow_proposer: AirflowAnalysisAgent = AirflowAnalysisAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )
+        self.airflow_describer: AirflowContextAgent = AirflowContextAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )

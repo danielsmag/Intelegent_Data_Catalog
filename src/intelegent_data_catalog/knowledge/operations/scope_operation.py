@@ -77,7 +77,10 @@ class ScopeAgent:
                 summary=None,
                 tables_without_context=list(loaded.tables_without_context),
                 previous_links_kept=0,
-                pipelines=pipeline_summaries(loaded.pipelines),
+                pipelines=pipeline_summaries(
+                    loaded.pipelines,
+                    {table.id: table.name for table in loaded.tables},
+                ),
             )
         written: ScopeAnalysisContext = self._graph_builder.apply(
             loaded,

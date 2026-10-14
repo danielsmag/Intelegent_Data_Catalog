@@ -23,6 +23,7 @@ from intelegent_data_catalog.jobs.models import (
     SpaceBuildJobRead,
 )
 from intelegent_data_catalog.jobs.publisher import BuildJobPublisher
+from intelegent_data_catalog.jobs.trace import BuildTraceSink, TraceStep, close_build_trace
 from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
@@ -159,13 +160,30 @@ class CatalogJobStore:
         finally:
             session.close()
 
-    def complete(self, job_id: UUID, status: KnowledgeBuildState, error: str | None) -> None:
+    def statuses(self, job_ids: set[UUID]) -> list[CatalogJobRow]:
+        """Return the rows for these jobs. Missing ids are omitted."""
+        if len(job_ids) == 0:
+            return []
+        session: Session = self._database.session()
+        try:
+            statement: Select[CatalogJobRow] = select(CatalogJobRow).where(
+                CatalogJobRow.id.in_(job_ids),
+            )
+            rows: list[CatalogJobRow] = list(session.scalars(statement))
+            row: CatalogJobRow
+            for row in rows:
+                session.expunge(row)
+            return rows
+        finally:
+            session.close()
+
+    def complete(self, job_id: UUID, status: KnowledgeBuildState, error: str | None) -> bool:
         """Mark a running job finished. A second completion is ignored."""
         session: Session = self._database.session()
         try:
             row: CatalogJobRow | None = session.get(CatalogJobRow, job_id)
             if row is None or row.status != CatalogJobStatus.RUNNING.value:
-                return
+                return False
             row.status = status
             row.error = error
             row.finished_at = utc_now()
@@ -175,6 +193,7 @@ class CatalogJobStore:
             raise
         finally:
             session.close()
+        return True
 
 
 class CatalogJobs:
@@ -312,6 +331,7 @@ class CatalogJobs:
         job_id: UUID,
         signal: CancelSignal,
         signal_ttl_seconds: int,
+        trace: BuildTraceSink | None = None,
     ) -> CatalogJobCancelRead | None:
         """Stop one running build.
 
@@ -328,7 +348,9 @@ class CatalogJobs:
             signal.request(job_id, signal_ttl_seconds)
         except Exception:
             _LOGGER.exception("catalog job cancel signal failed job_id=%s", job_id)
-        self._store.complete(job_id, "failed", CANCELLED_JOB_ERROR)
+        wrote: bool = self._store.complete(job_id, "failed", CANCELLED_JOB_ERROR)
+        if wrote and trace is not None:
+            _close_trace(trace, row, "failed", CANCELLED_JOB_ERROR)
         updated: CatalogJobRow | None = self._store.get(job_id)
         if updated is None:
             return None
@@ -365,6 +387,23 @@ class CatalogJobs:
         if row is None:
             raise ConflictError("catalog job could not be started")
         return row
+
+
+def _close_trace(sink: BuildTraceSink, row: CatalogJobRow, step: TraceStep, detail: str) -> None:
+    """Publish a terminal trace step. A broker error does not undo the row."""
+    try:
+        close_build_trace(
+            sink,
+            job_id=row.id,
+            kind=row.kind,
+            subject_id=row.subject_id,
+            subject_name=row.subject_name,
+            options=row.options,
+            step=step,
+            detail=detail,
+        )
+    except Exception:
+        _LOGGER.exception("catalog job trace close failed job_id=%s", row.id)
 
 
 def _cancel_read(row: CatalogJobRow) -> CatalogJobCancelRead:

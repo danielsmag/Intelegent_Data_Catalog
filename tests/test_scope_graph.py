@@ -21,16 +21,20 @@ from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
     PipelineInput,
+    PipelineSummary,
     PreviousScopeFindings,
     ScopeAnalysisContext,
     ScopeCatalogContext,
     ScopeProposal,
     ScopeSummary,
     ScopeTableSummary,
+    SpaceAnalysisContext,
+    SpaceScopeSummary,
     SpaceSummary,
     TableLink,
     TableLinkKind,
     TableRelation,
+    pipeline_summaries,
 )
 from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
@@ -170,12 +174,20 @@ def test_assemble_writes_pipeline_read_to_write_edges() -> None:
         [],
         [first, second],
     )
-    derived: list[str] = [edge.kind for edge in document.edges]
-    assert derived == ["DERIVED_FROM"]
-    written: KnowledgeEdgeWrite = document.edges[0]
+    derived: list[KnowledgeEdgeWrite] = [
+        edge for edge in document.edges if edge.kind == "DERIVED_FROM"
+    ]
+    assert len(derived) == 1
+    written: KnowledgeEdgeWrite = derived[0]
     assert written.source == f"knowledge:scope:{context.scope.id}:table:{customers.id}"
     assert written.target == f"knowledge:scope:{context.scope.id}:table:{orders.id}"
     assert written.reason == "Iceberg append_sales_order; Iceberg append_sales_customer"
+    assert {node.name for node in document.dags} == {"append_sales_order", "append_sales_customer"}
+    writes: list[KnowledgeEdgeWrite] = [edge for edge in document.edges if edge.kind == "WRITES"]
+    assert {edge.target for edge in writes} == {
+        f"knowledge:scope:{context.scope.id}:table:{orders.id}",
+        f"knowledge:scope:{context.scope.id}:table:{customers.id}",
+    }
 
 
 def test_builder_counts_links_kept_from_the_previous_build() -> None:
@@ -231,6 +243,48 @@ def test_builder_counts_links_kept_from_the_previous_build() -> None:
     assert replaced == [[kept]]
     assert writes[0].owner_kind == "scope"
     assert publisher.calls == 1
+
+
+def test_snapshots_keep_the_airflow_instance_summary() -> None:
+    """Scope and space snapshots keep the Airflow instance summary on each pipeline."""
+    context: ScopeCatalogContext = _context()
+    text: str = "Nightly sales loads land in Iceberg."
+    stored: list[PipelineSummary] = pipeline_summaries(
+        [
+            PipelineInput(
+                dag_row_id=uuid4(),
+                dag_id="append_sales_order",
+                instance_name="Iceberg",
+                instance_summary=text,
+            )
+        ]
+    )
+    assert stored[0].instance_summary == text
+    scope: ScopeAnalysisContext = ScopeAnalysisContext(
+        scope=context.scope,
+        space=context.space,
+        tables=context.tables,
+        existing_relationships=[],
+        pipelines=stored,
+    )
+    scope_again: ScopeAnalysisContext = ScopeAnalysisContext.model_validate(scope.model_dump())
+    assert scope_again.pipelines[0].instance_summary == text
+    space: SpaceAnalysisContext = SpaceAnalysisContext(
+        space=context.space,
+        scopes=[
+            SpaceScopeSummary(
+                id=context.scope.id,
+                name=context.scope.name,
+                slug=context.scope.slug,
+                description=context.scope.description,
+                tables=context.tables,
+            )
+        ],
+        existing_relationships=[],
+        pipelines=stored,
+    )
+    space_again: SpaceAnalysisContext = SpaceAnalysisContext.model_validate(space.model_dump())
+    assert space_again.pipelines[0].instance_summary == text
 
 
 def _context() -> ScopeCatalogContext:

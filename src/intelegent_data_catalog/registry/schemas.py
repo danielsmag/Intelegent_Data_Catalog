@@ -35,6 +35,16 @@ def _optional_credential_ref(value: str | None) -> str | None:
     return value
 
 
+def _optional_display_name(value: str | None) -> str | None:
+    """Trim a patched name. Blank text is rejected; an omitted name stays omitted."""
+    if value is None:
+        return None
+    name: str = value.strip()
+    if name == "":
+        raise ValueError("name cannot be blank")
+    return name
+
+
 def _secret_free_configuration(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
     assert_no_secrets(value, "configuration")
     return value
@@ -139,7 +149,10 @@ class SpaceCreate(BaseModel):
 
 
 class SpaceUpdate(BaseModel):
-    """Patch user-facing space fields. Omitted slug stays unchanged."""
+    """Patch user-facing space fields.
+
+    A new name refreshes the slug unless this patch also sends one.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -147,6 +160,11 @@ class SpaceUpdate(BaseModel):
     slug: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
     context: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return _optional_display_name(value)
 
     @field_validator("slug")
     @classmethod
@@ -189,7 +207,10 @@ class ScopeCreate(BaseModel):
 
 
 class ScopeUpdate(BaseModel):
-    """Patch a scope. Slug stays put unless the client sends one."""
+    """Patch a scope.
+
+    A new name refreshes the slug unless this patch also sends one.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -197,6 +218,11 @@ class ScopeUpdate(BaseModel):
     slug: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
     context: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str | None) -> str | None:
+        return _optional_display_name(value)
 
     @field_validator("slug")
     @classmethod

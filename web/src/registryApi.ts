@@ -180,6 +180,14 @@ export async function deleteScope(scopeId: string): Promise<void> {
   await removeRecord(`/api/v1/scopes/${scopeId}`)
 }
 
+export async function renameSpace(spaceId: string, name: string): Promise<SpaceRecord> {
+  return patchName<SpaceRecord>(`/api/v1/spaces/${spaceId}`, name)
+}
+
+export async function renameScope(scopeId: string, name: string): Promise<ScopeRecord> {
+  return patchName<ScopeRecord>(`/api/v1/scopes/${scopeId}`, name)
+}
+
 export async function fetchScopes(spaceId: string, signal: AbortSignal): Promise<ScopeRecord[]> {
   return readJson<ScopeRecord[]>(`/api/v1/spaces/${spaceId}/scopes`, signal)
 }
@@ -426,9 +434,26 @@ export type ScopeTableLink = {
   reason: string
 }
 
+export type PipelineTask = {
+  task_id: string
+  operator_name: string | null
+}
+
+export type PipelineTableRef = {
+  table_id: string
+  name: string
+  direction: "READS" | "WRITES" | "MENTIONS"
+}
+
 export type PipelineSummary = {
   dag_id: string
   instance_name: string
+  instance_summary?: string | null
+  description?: string | null
+  schedule?: string | null
+  summary?: string | null
+  tasks?: PipelineTask[]
+  tables?: PipelineTableRef[]
 }
 
 export type ScopeKnowledgeContext = {
@@ -862,22 +887,39 @@ export type BuildTraceEvent = {
   detail: string
 }
 
+export type BuildTraceJob = {
+  job_id: string
+  status: "running" | "succeeded" | "failed"
+  error: string | null
+  finished_at: string | null
+}
+
 export type BuildTracePage = {
   events: BuildTraceEvent[]
   cursor: string | null
+  jobs: BuildTraceJob[]
 }
 
 export async function fetchBuildTraces(
   after: string | null,
+  openJobIds: readonly string[],
   signal: AbortSignal,
 ): Promise<BuildTracePage> {
   const params: URLSearchParams = new URLSearchParams()
   if (after !== null && after !== "") {
     params.set("after", after)
   }
+  if (openJobIds.length > 0) {
+    params.set("jobs", openJobIds.slice(0, 80).join(","))
+  }
   const query: string = params.toString()
   const path: string = query === "" ? "/api/v1/build-traces" : `/api/v1/build-traces?${query}`
-  return readJson<BuildTracePage>(path, signal)
+  const page: BuildTracePage = await readJson<BuildTracePage>(path, signal)
+  return {
+    events: page.events,
+    cursor: page.cursor,
+    jobs: page.jobs ?? [],
+  }
 }
 
 export { isAbortError }
@@ -911,6 +953,18 @@ async function removeRecord(path: string): Promise<void> {
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
+}
+
+async function patchName<T>(path: string, name: string): Promise<T> {
+  const response: Response = await fetch(path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as T
 }
 
 async function readDetail(response: Response): Promise<string> {

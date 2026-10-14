@@ -1,6 +1,7 @@
 import type { ReactElement } from "react"
 import { Link } from "react-router-dom"
-import type { PipelineSummary, SpaceKnowledgeContext, SpaceScopeSummary, SpaceTableLink } from "./registryApi"
+import type { SpaceKnowledgeContext, SpaceScopeSummary, SpaceTableLink } from "./registryApi"
+import { PipelineList } from "./ScopeContextPanel"
 
 export function SpaceContextPanel(props: { context: SpaceKnowledgeContext }): ReactElement {
   const context: SpaceKnowledgeContext = props.context
@@ -23,16 +24,7 @@ export function SpaceContextPanel(props: { context: SpaceKnowledgeContext }): Re
         <dt>Pipelines</dt>
         <dd>{context.pipelines.length}</dd>
       </dl>
-      {context.pipelines.length > 0 ? (
-        <ul className="registry-list">
-          {context.pipelines.map((pipeline: PipelineSummary) => (
-            <li key={`${pipeline.instance_name}-${pipeline.dag_id}`}>
-              <span className="badge">{pipeline.instance_name}</span>
-              <span>{pipeline.dag_id}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      {context.pipelines.length > 0 ? <PipelineList pipelines={context.pipelines} /> : null}
       {missing.length > 0 ? (
         <p className="comment">
           {missing.length === 1

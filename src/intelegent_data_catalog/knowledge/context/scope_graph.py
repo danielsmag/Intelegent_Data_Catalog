@@ -1,7 +1,7 @@
 """Turn a scope catalog into cross-table links and a scope-owned subgraph."""
 
 import logging
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
@@ -136,7 +136,10 @@ class ScopeGraphBuilder(ScopeGraphAppender):
             summary=summary,
             tables_without_context=list(context.tables_without_context),
             previous_links_kept=_previous_links_kept(context, accepted),
-            pipelines=pipeline_summaries(context.pipelines),
+            pipelines=pipeline_summaries(
+                context.pipelines,
+                {table.id: table.name for table in context.tables},
+            ),
         )
 
 
@@ -236,12 +239,76 @@ def assemble_scope_subgraph(
         )
     selected: list[PipelineInput] = [] if pipelines is None else pipelines
     edges.extend(pipeline_derived_edges(nodes, selected))
+    dag_nodes: list[KnowledgeNodeWrite]
+    dag_edges: list[KnowledgeEdgeWrite]
+    dag_nodes, dag_edges = pipeline_dag_edges("scope", scope_id, nodes, selected)
+    edges.extend(dag_edges)
     return KnowledgeSubgraphWrite(
         owner_table_id=str(scope_id),
         owner_kind="scope",
         tables=list(nodes.values()),
+        dags=dag_nodes,
         columns=[],
         edges=edges,
+    )
+
+
+def pipeline_dag_edges(
+    owner_kind: Literal["scope", "space"],
+    owner_id: UUID,
+    table_nodes: dict[UUID, KnowledgeNodeWrite],
+    pipelines: list[PipelineInput],
+) -> tuple[list[KnowledgeNodeWrite], list[KnowledgeEdgeWrite]]:
+    """One DAG node, plus an edge to each table that DAG reads, writes, or mentions."""
+    nodes: dict[UUID, KnowledgeNodeWrite] = {}
+    edges: list[KnowledgeEdgeWrite] = []
+    pipeline: PipelineInput
+    for pipeline in pipelines:
+        node: KnowledgeNodeWrite | None = nodes.get(pipeline.dag_row_id)
+        if node is None:
+            node = KnowledgeNodeWrite(
+                node_id=f"knowledge:{owner_kind}:{owner_id}:dag:{pipeline.dag_row_id}",
+                catalog_id=str(pipeline.dag_row_id),
+                name=pipeline.dag_id,
+            )
+            nodes[pipeline.dag_row_id] = node
+        chosen: dict[UUID, str] = {}
+        table_id: UUID
+        for table_id in pipeline.unknown:
+            chosen[table_id] = "MENTIONS"
+        for table_id in pipeline.reads:
+            chosen[table_id] = "READS"
+        for table_id in pipeline.writes:
+            chosen[table_id] = "WRITES"
+        kind: str
+        for table_id, kind in chosen.items():
+            _dag_edge(edges, node, table_nodes, table_id, kind, pipeline.instance_name)
+    return list(nodes.values()), edges
+
+
+def _dag_edge(
+    edges: list[KnowledgeEdgeWrite],
+    dag: KnowledgeNodeWrite,
+    table_nodes: dict[UUID, KnowledgeNodeWrite],
+    table_id: UUID,
+    kind: str,
+    instance_name: str,
+) -> None:
+    table: KnowledgeNodeWrite | None = table_nodes.get(table_id)
+    if table is None:
+        return
+    key: tuple[str, str, str] = (dag.node_id, table.node_id, kind)
+    existing: tuple[str, str, str]
+    for existing in ((edge.source, edge.target, edge.kind) for edge in edges):
+        if existing == key:
+            return
+    edges.append(
+        KnowledgeEdgeWrite(
+            source=dag.node_id,
+            target=table.node_id,
+            kind=kind,
+            reason=instance_name,
+        )
     )
 
 

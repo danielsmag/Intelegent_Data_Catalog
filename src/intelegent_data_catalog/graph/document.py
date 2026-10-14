@@ -50,7 +50,7 @@ _HIERARCHY: frozenset[str] = frozenset({"HAS_SCOPE", "HAS_TABLE", "HAS_COLUMN"})
 _RELATIONSHIP: frozenset[str] = frozenset(
     {"REFERENCES", "RELATED_TO", "JOINS_ON", "DERIVED_FROM", "SAME_MEANING"}
 )
-_LINEAGE: frozenset[str] = frozenset({"INPUT_TO", "OUTPUTS"})
+_LINEAGE: frozenset[str] = frozenset({"INPUT_TO", "OUTPUTS", "READS", "WRITES", "MENTIONS"})
 
 
 def edge_style(kind: str) -> str:

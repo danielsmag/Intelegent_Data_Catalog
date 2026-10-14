@@ -11,14 +11,22 @@ import { PanelChevron } from "./icons"
 import { ResizeHandle } from "./ResizeHandle"
 import {
   DEFAULT_REFRESH_MINUTES,
+  EFFORT_LEVELS,
   MAX_REFRESH_MINUTES,
   MIN_REFRESH_MINUTES,
+  MODEL_OPTIONS,
+  effortId,
+  effortLevel,
   formatRefreshMinutes,
   minutesFromSeconds,
+  modelId,
   parseRefreshMinutes,
   secondsFromMinutes,
   useRefreshTimer,
+  type EffortLevel,
+  type ModelId,
   type OptionField,
+  type ReasoningEffort,
 } from "./refreshSettings"
 
 const TAB_KEY: string = "idc-side-tab"
@@ -137,6 +145,8 @@ export type ConfigOption = {
 export function ConfigRail(props: {
   minutes: number
   enabled: boolean
+  model: ModelId
+  effort: ReasoningEffort
   busy: boolean
   error: string | null
   detail: string | null
@@ -145,11 +155,16 @@ export function ConfigRail(props: {
     minutes: number,
     enabled: boolean,
     options: Readonly<Record<string, boolean>>,
+    model: ModelId,
+    effort: ReasoningEffort,
   ) => void
   onOption?: (key: string, checked: boolean) => void
 }): ReactElement {
   const [draft, setDraft] = useState<string>(formatRefreshMinutes(props.minutes))
   const [draftEnabled, setDraftEnabled] = useState<boolean>(props.enabled)
+  const [draftModel, setDraftModel] = useState<ModelId>(props.model)
+  const [thinkingOn, setThinkingOn] = useState<boolean>(props.effort !== "off")
+  const [draftLevel, setDraftLevel] = useState<EffortLevel>(effortLevel(props.effort))
   const [optionDraft, setOptionDraft] = useState<Record<string, boolean>>(() => optionMap(props.options))
   const savedOptions: string = optionKey(props.options)
   useEffect(() => {
@@ -159,21 +174,33 @@ export function ConfigRail(props: {
     setDraftEnabled(props.enabled)
   }, [props.enabled])
   useEffect(() => {
+    setDraftModel(props.model)
+  }, [props.model])
+  useEffect(() => {
+    setThinkingOn(props.effort !== "off")
+    setDraftLevel(effortLevel(props.effort))
+  }, [props.effort])
+  useEffect(() => {
     setOptionDraft(optionMap(props.options))
   }, [savedOptions])
 
   const parsed: number | null = parseRefreshMinutes(draft)
+  const committedEffort: ReasoningEffort = thinkingOn ? draftLevel : "off"
   const optionsDirty: boolean = props.options.some(
     (option: ConfigOption) => optionDraft[option.key] !== option.checked,
   )
   const dirty: boolean =
-    (parsed !== null && parsed !== props.minutes) || draftEnabled !== props.enabled || optionsDirty
+    (parsed !== null && parsed !== props.minutes) ||
+    draftEnabled !== props.enabled ||
+    draftModel !== props.model ||
+    committedEffort !== props.effort ||
+    optionsDirty
 
   function save(): void {
     if (parsed === null || props.busy) {
       return
     }
-    props.onCommit(parsed, draftEnabled, optionDraft)
+    props.onCommit(parsed, draftEnabled, optionDraft, draftModel, committedEffort)
   }
 
   return (
@@ -219,6 +246,52 @@ export function ConfigRail(props: {
                   }}
                 />
                 Automatic refresh
+              </label>
+              <label className="config-field">
+                <span>Model</span>
+                <select
+                  value={draftModel}
+                  disabled={props.busy}
+                  aria-label="Model"
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                    setDraftModel(modelId(event.target.value))
+                  }}
+                >
+                  {MODEL_OPTIONS.map((choice: (typeof MODEL_OPTIONS)[number]) => (
+                    <option key={choice.id} value={choice.id}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="config-check">
+                <input
+                  type="checkbox"
+                  checked={thinkingOn}
+                  disabled={props.busy}
+                  aria-label="Thinking"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    setThinkingOn(event.target.checked)
+                  }}
+                />
+                Thinking
+              </label>
+              <label className="config-field">
+                <span>Effort</span>
+                <select
+                  value={draftLevel}
+                  disabled={props.busy || !thinkingOn}
+                  aria-label="Reasoning effort"
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                    setDraftLevel(effortLevel(event.target.value))
+                  }}
+                >
+                  {EFFORT_LEVELS.map((choice: (typeof EFFORT_LEVELS)[number]) => (
+                    <option key={choice.id} value={choice.id}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               {props.detail !== null ? <p className="comment">{props.detail}</p> : null}
               {props.error !== null ? <p className="error-text">{props.error}</p> : null}
@@ -295,6 +368,8 @@ export function AirflowConfigRail(props: { instanceId: string }): ReactElement {
   const minutes: number =
     schedule === null ? DEFAULT_REFRESH_MINUTES : minutesFromSeconds(schedule.interval_seconds)
   const enabled: boolean = schedule?.enabled ?? true
+  const model: ModelId = modelId(schedule?.model)
+  const effort: ReasoningEffort = effortId(schedule?.effort)
 
   useEffect(() => {
     const controller: AbortController = new AbortController()
@@ -306,20 +381,12 @@ export function AirflowConfigRail(props: { instanceId: string }): ReactElement {
         if (controller.signal.aborted) {
           return
         }
-        if (loaded !== null) {
-          setSchedule(loaded)
+        if (loaded === null) {
+          setError("Airflow schedule is missing")
           setBusy(false)
           return
         }
-        const created: SyncSchedule = await saveAirflowSchedule(
-          props.instanceId,
-          secondsFromMinutes(DEFAULT_REFRESH_MINUTES),
-          true,
-        )
-        if (controller.signal.aborted) {
-          return
-        }
-        setSchedule(created)
+        setSchedule(loaded)
         setBusy(false)
       })
       .catch((err: unknown) => {
@@ -372,12 +439,20 @@ export function AirflowConfigRail(props: { instanceId: string }): ReactElement {
     nextMinutes: number,
     nextEnabled: boolean,
     _options: Readonly<Record<string, boolean>>,
+    model: ModelId,
+    effort: ReasoningEffort,
   ): void {
     const requestId: number = saveId.current + 1
     saveId.current = requestId
     setBusy(true)
     setError(null)
-    void saveAirflowSchedule(props.instanceId, secondsFromMinutes(nextMinutes), nextEnabled)
+    void saveAirflowSchedule(
+      props.instanceId,
+      secondsFromMinutes(nextMinutes),
+      nextEnabled,
+      model,
+      effort,
+    )
       .then((saved: SyncSchedule) => {
         if (saveId.current !== requestId) {
           return
@@ -408,6 +483,8 @@ export function AirflowConfigRail(props: { instanceId: string }): ReactElement {
     <ConfigRail
       minutes={minutes}
       enabled={enabled}
+      model={model}
+      effort={effort}
       busy={busy}
       error={error}
       detail={detail}

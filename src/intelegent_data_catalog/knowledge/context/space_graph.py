@@ -15,7 +15,10 @@ from intelegent_data_catalog.knowledge.context.column_graph import (
     GraphBuilder,
     KnowledgeSubgraphWriter,
 )
-from intelegent_data_catalog.knowledge.context.scope_graph import pipeline_derived_edges
+from intelegent_data_catalog.knowledge.context.scope_graph import (
+    pipeline_dag_edges,
+    pipeline_derived_edges,
+)
 from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
@@ -128,7 +131,7 @@ class SpaceGraphBuilder(SpaceGraphAppender):
             summary=summary,
             scopes_without_context=list(context.scopes_without_context),
             previous_links_kept=_previous_links_kept(context, accepted),
-            pipelines=pipeline_summaries(context.pipelines),
+            pipelines=pipeline_summaries(context.pipelines, _table_names(context)),
         )
 
 
@@ -262,14 +265,27 @@ def assemble_space_subgraph(
         )
     selected: list[PipelineInput] = [] if pipelines is None else pipelines
     edges.extend(pipeline_derived_edges(table_nodes, selected))
+    dag_nodes: list[KnowledgeNodeWrite]
+    dag_edges: list[KnowledgeEdgeWrite]
+    dag_nodes, dag_edges = pipeline_dag_edges("space", space_id, table_nodes, selected)
+    edges.extend(dag_edges)
     return KnowledgeSubgraphWrite(
         owner_table_id=str(space_id),
         owner_kind="space",
         scopes=list(scope_nodes.values()),
         tables=list(table_nodes.values()),
+        dags=dag_nodes,
         columns=[],
         edges=edges,
     )
+
+
+def _table_names(context: SpaceCatalogContext) -> dict[UUID, str]:
+    found: dict[UUID, str] = {}
+    for scope in context.scopes:
+        for table in scope.tables:
+            found[table.id] = table.name
+    return found
 
 
 def _scope_of(context: SpaceCatalogContext) -> dict[UUID, UUID]:

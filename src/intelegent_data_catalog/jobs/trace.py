@@ -13,13 +13,13 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from redis import Redis
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
+from intelegent_data_catalog.core.settings import load_settings
 
 _LOGGER: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.jobs")
 
 _LIST_KEY: str = "catalog:build-trace"
 _SEQ_KEY: str = "catalog:build-trace:seq"
 _LIMIT: int = 400
-_DETAIL_LIMIT: int = 2000
 
 TraceKind = Literal["table", "scope", "space", "airflow"]
 TraceStep = Literal[
@@ -58,6 +58,17 @@ class BuildTraceEvent(BuildTraceWrite):
     id: str
 
 
+class BuildTraceJob(BaseModel):
+    """Catalog row for one trace card. The panel stops its clock from this."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: UUID
+    status: Literal["running", "succeeded", "failed"]
+    error: str | None = None
+    finished_at: datetime | None = None
+
+
 class BuildTraceList(BaseModel):
     """A page of steps newer than the caller's cursor."""
 
@@ -65,6 +76,7 @@ class BuildTraceList(BaseModel):
 
     events: list[BuildTraceEvent]
     cursor: str | None
+    jobs: list[BuildTraceJob] = []
 
 
 class BuildTraceSubject:
@@ -161,6 +173,28 @@ def build_trace_scope(subject: BuildTraceSubject, sink: BuildTraceSink) -> Itera
         _subject.reset(subject_token)
 
 
+def close_build_trace(
+    sink: BuildTraceSink,
+    *,
+    job_id: UUID,
+    kind: str,
+    subject_id: UUID,
+    subject_name: str,
+    options: dict[str, object],
+    step: TraceStep,
+    detail: str,
+) -> None:
+    """Store a terminal step for a job that ended outside the worker scope."""
+    subject: BuildTraceSubject = BuildTraceSubject(
+        job_id,
+        trace_kind_for_job(kind, options),
+        subject_id,
+        subject_name,
+    )
+    with build_trace_scope(subject, sink):
+        publish_build_step("", step, detail)
+
+
 def publish_build_step(agent: str, step: TraceStep, body: str) -> None:
     """Store one step when a build subject is bound. A sink error does not fail the build."""
     subject: BuildTraceSubject | None = _subject.get()
@@ -221,8 +255,9 @@ def trace_kind_for_job(kind: str, options: dict[str, object]) -> TraceKind:
 def step_copy(step: str, body: str) -> tuple[str, str]:
     """Title and clipped detail for one step."""
     detail: str = body.strip()
-    if len(detail) > _DETAIL_LIMIT:
-        detail = f"{detail[:_DETAIL_LIMIT]}..."
+    detail_chars: int = load_settings().context.trace_detail_chars
+    if len(detail) > detail_chars:
+        detail = f"{detail[:detail_chars]}..."
     if step == "started":
         return "Build started", detail
     if step == "ask":

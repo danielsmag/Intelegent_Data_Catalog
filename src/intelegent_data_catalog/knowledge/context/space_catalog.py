@@ -45,9 +45,6 @@ from intelegent_data_catalog.registry.repository import RegistryRepository
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 
-_MAX_SCOPES: int = 20
-_MAX_TABLES: int = 60
-_MAX_COLUMNS: int = 600
 _MAX_SCOPE_EDGES: int = 50
 _REASON_LIMIT: int = 280
 KnowledgeSource = Literal["postgres", "neo4j", "both"]
@@ -215,11 +212,17 @@ class PostgresSpaceCatalogContextProvider:
         knowledge: SpaceScopeKnowledgeReader,
         previous: PreviousSpaceReader,
         pipelines: AttachedPipelineSource | None = None,
+        max_scopes: int = 20,
+        max_tables: int = 60,
+        max_columns: int = 600,
     ) -> None:
         self._repository: RegistryRepository = repository
         self._knowledge: SpaceScopeKnowledgeReader = knowledge
         self._previous: PreviousSpaceReader = previous
         self._pipelines: AttachedPipelineSource | None = pipelines
+        self._max_scopes: int = max_scopes
+        self._max_tables: int = max_tables
+        self._max_columns: int = max_columns
 
     def get_space_context(
         self,
@@ -234,6 +237,8 @@ class PostgresSpaceCatalogContextProvider:
         scope_rows: list[tuple[ScopeRow, list[CatalogTableRow]]] = _bounded_scopes(
             self._repository,
             space_id,
+            self._max_scopes,
+            self._max_tables,
         )
         table_scope: dict[UUID, UUID] = {
             table.id: scope.id for scope, tables in scope_rows for table in tables
@@ -248,7 +253,7 @@ class PostgresSpaceCatalogContextProvider:
         scopes: list[SpaceScopeSummary] = []
         knowledge: list[ScopeKnowledgeInput] = []
         missing: list[UUID] = []
-        remaining: int = _MAX_COLUMNS
+        remaining: int = self._max_columns
         item: tuple[ScopeRow, list[CatalogTableRow]]
         for item in scope_rows:
             scope_row: ScopeRow = item[0]
@@ -385,11 +390,13 @@ def _source_name(origins: set[str]) -> KnowledgeSource | None:
 def _bounded_scopes(
     repository: RegistryRepository,
     space_id: UUID,
+    max_scopes: int,
+    max_tables: int,
 ) -> list[tuple[ScopeRow, list[CatalogTableRow]]]:
     chosen: list[tuple[ScopeRow, list[CatalogTableRow]]] = []
-    remaining: int = _MAX_TABLES
+    remaining: int = max_tables
     scope: ScopeRow
-    for scope in repository.list_scopes(space_id)[:_MAX_SCOPES]:
+    for scope in repository.list_scopes(space_id)[:max_scopes]:
         if remaining <= 0:
             break
         tables: list[CatalogTableRow] = repository.list_tables(scope.id)[:remaining]

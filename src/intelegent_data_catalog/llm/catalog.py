@@ -12,6 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.access import accept_named_column_contexts
@@ -242,6 +243,7 @@ class TableOperationAgent(TableModelAgent):
         temperature: float,
         max_tokens: int,
         timeout_seconds: float,
+        thinking: ThinkingLevel = False,
     ) -> None:
         self._operation: ModelCall[TableToolSource, str] = ModelCall(
             _operation_agent(model),
@@ -250,6 +252,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            thinking=thinking,
         )
         self._table: ModelCall[TableContextInput, TableContextProposal] = ModelCall(
             _table_context_agent(model),
@@ -258,7 +261,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
         self._columns: ModelCall[_ColumnsDeps, _NamedColumns] = ModelCall(
             _columns_context_agent(model),
@@ -267,7 +270,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
         self._column: ModelCall[ColumnContextInput, ColumnContextProposal] = ModelCall(
             _column_context_agent(model),
@@ -276,7 +279,7 @@ class TableOperationAgent(TableModelAgent):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
 
     def run(self, instruction: str, source: TableToolSource, instructions: str) -> str:

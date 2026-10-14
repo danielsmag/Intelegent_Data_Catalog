@@ -26,6 +26,7 @@ from intelegent_data_catalog.jobs.trace import (
     BuildTraceSubject,
     RedisBuildTrace,
     build_trace_scope,
+    close_build_trace,
     publish_build_step,
     trace_kind_for_job,
 )
@@ -73,7 +74,21 @@ def execute_catalog_job(job_id: UUID) -> None:
     broker_url: str = celery_settings.broker_url
     cancels: CancelSignal = RedisCancelSignal.from_url(broker_url)
     if cancels.is_requested(job_id):
-        store.complete(job_id, "failed", CANCELLED_JOB_ERROR)
+        wrote: bool = store.complete(job_id, "failed", CANCELLED_JOB_ERROR)
+        if wrote:
+            try:
+                close_build_trace(
+                    RedisBuildTrace.from_url(broker_url),
+                    job_id=job_id,
+                    kind=row.kind,
+                    subject_id=row.subject_id,
+                    subject_name=row.subject_name,
+                    options=row.options,
+                    step="failed",
+                    detail=CANCELLED_JOB_ERROR,
+                )
+            except Exception:
+                _LOGGER.exception("catalog job trace close failed job_id=%s", job_id)
         cancels.clear(job_id)
         return
     leases: JobLeaseStore = RedisJobLeaseStore.from_url(broker_url)

@@ -5,6 +5,28 @@ export const DEFAULT_REFRESH_MINUTES: number = 10
 export const MIN_REFRESH_MINUTES: number = 1 / 60
 export const MAX_REFRESH_MINUTES: number = 1440
 
+export type ModelId = "llama3.2" | "qwen3:4b" | "gpt-4.1" | "gpt-4.1-mini" | "gpt-6-astra"
+
+export const MODEL_OPTIONS: readonly { id: ModelId; label: string }[] = [
+  { id: "llama3.2", label: "Llama 3.2" },
+  { id: "qwen3:4b", label: "Qwen3 4B" },
+  { id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
+  { id: "gpt-4.1", label: "GPT-4.1" },
+  { id: "gpt-6-astra", label: "GPT-6 Astra" },
+]
+
+export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+
+export type EffortLevel = Exclude<ReasoningEffort, "off">
+
+export const EFFORT_LEVELS: readonly { id: EffortLevel; label: string }[] = [
+  { id: "minimal", label: "Minimal" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Extra high" },
+]
+
 export type OptionField = {
   key: string
   label: string
@@ -14,6 +36,8 @@ export type OptionField = {
 export type EntityConfig = {
   minutes: number
   enabled: boolean
+  model: ModelId
+  effort: ReasoningEffort
   options: Record<string, boolean>
   nextRunAt: string | null
 }
@@ -21,6 +45,8 @@ export type EntityConfig = {
 export type EntityConfigController = {
   minutes: number
   enabled: boolean
+  model: ModelId
+  effort: ReasoningEffort
   options: Readonly<Record<string, boolean>>
   nextRunAt: string | null
   busy: boolean
@@ -30,6 +56,8 @@ export type EntityConfigController = {
     minutes: number,
     enabled: boolean,
     options: Readonly<Record<string, boolean>>,
+    model: ModelId,
+    effort: ReasoningEffort,
   ) => void
 }
 
@@ -109,12 +137,16 @@ export function useEntityConfig(
     minutes: number,
     enabled: boolean,
     options: Readonly<Record<string, boolean>>,
+    model: ModelId,
+    effort: ReasoningEffort,
   ): void {
     setBusy(true)
     setError(null)
     const saved: EntityConfig = {
       minutes: clampMinutes(minutes),
       enabled,
+      model,
+      effort,
       options: { ...options },
       nextRunAt: null,
     }
@@ -133,6 +165,8 @@ export function useEntityConfig(
   return {
     minutes: config.minutes,
     enabled: config.enabled,
+    model: config.model,
+    effort: config.effort,
     options: config.options,
     nextRunAt: config.nextRunAt,
     busy,
@@ -199,6 +233,8 @@ function defaultConfig(fields: readonly OptionField[]): EntityConfig {
   return {
     minutes: DEFAULT_REFRESH_MINUTES,
     enabled: true,
+    model: "gpt-4.1",
+    effort: "low",
     options: defaults(fields),
     nextRunAt: null,
   }
@@ -215,6 +251,8 @@ function mergeConfig(config: EntityConfig, fields: readonly OptionField[]): Enti
   return {
     minutes: clampMinutes(config.minutes),
     enabled: config.enabled,
+    model: config.model,
+    effort: config.effort,
     options,
     nextRunAt: config.nextRunAt,
   }
@@ -243,6 +281,8 @@ async function saveEntityConfiguration(
     body: JSON.stringify({
       interval_seconds: secondsFromMinutes(config.minutes),
       enabled: config.enabled,
+      model: config.model,
+      effort: config.effort,
       options: config.options,
     }),
   })
@@ -284,9 +324,49 @@ function configFromBody(body: unknown): EntityConfig {
   return {
     minutes,
     enabled: record.enabled !== false,
+    model: modelId(record.model),
+    effort: effortId(record.effort),
     options,
     nextRunAt: typeof nextRunAt === "string" && nextRunAt !== "" ? nextRunAt : null,
   }
+}
+
+export function modelId(value: unknown): ModelId {
+  if (
+    value === "llama3.2" ||
+    value === "qwen3:4b" ||
+    value === "gpt-4.1" ||
+    value === "gpt-4.1-mini" ||
+    value === "gpt-6-astra"
+  ) {
+    return value
+  }
+  if (value === "gpt") {
+    return "gpt-4.1"
+  }
+  return "gpt-4.1"
+}
+
+export function effortId(value: unknown): ReasoningEffort {
+  if (
+    value === "off" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+  ) {
+    return value
+  }
+  return "low"
+}
+
+export function effortLevel(value: unknown): EffortLevel {
+  const effort: ReasoningEffort = effortId(value)
+  if (effort === "off") {
+    return "low"
+  }
+  return effort
 }
 
 async function readDetail(response: Response): Promise<string> {

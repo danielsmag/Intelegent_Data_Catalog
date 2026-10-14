@@ -9,6 +9,7 @@ import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { ConfigRail, optionsFromFields } from "./ConfigRail"
 import { CreateRecordForm } from "./CreateRecordForm"
+import { RenameRecordForm } from "./RenameRecordForm"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { ContextEditor } from "./ContextEditor"
 import { ScopeContextPanel } from "./ScopeContextPanel"
@@ -49,6 +50,8 @@ import {
   fetchSpaceKnowledgeContext,
   createScope,
   createSpace,
+  renameScope,
+  renameSpace,
   fetchBindings,
   fetchCatalogColumns,
   fetchCatalogTable,
@@ -320,6 +323,7 @@ export function SpacePage(): ReactElement {
   const [buildJobId, setBuildJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<boolean>(false)
+  const [renaming, setRenaming] = useState<boolean>(false)
   const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
   const config: EntityConfigController = useEntityConfig("space", spaceId, SPACE_OPTION_FIELDS)
   const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
@@ -334,6 +338,7 @@ export function SpacePage(): ReactElement {
   )
   useEffect(() => {
     setCreating(false)
+    setRenaming(false)
     setAttachingAirflow(false)
     setBuilding(false)
     setBuildJobId(null)
@@ -488,6 +493,8 @@ export function SpacePage(): ReactElement {
         <ConfigRail
           minutes={config.minutes}
           enabled={config.enabled}
+          model={config.model}
+          effort={config.effort}
           busy={config.busy}
           error={config.error}
           detail={rebuildDetail(config, rebuildLabel)}
@@ -503,7 +510,21 @@ export function SpacePage(): ReactElement {
               <p className="crumb">
                 <Link to="/spaces">Spaces</Link>
               </p>
-              <h1>{space?.name ?? "Space"}</h1>
+              <div className="catalog-title-line">
+                <h1>{space?.name ?? "Space"}</h1>
+                <button
+                  type="button"
+                  className="button secondary title-rename"
+                  aria-expanded={renaming}
+                  disabled={space === null}
+                  onClick={() => {
+                    setRenaming((open: boolean) => !open)
+                    setCreating(false)
+                  }}
+                >
+                  {renaming ? "Close" : "Rename"}
+                </button>
+              </div>
             </div>
             <div className="catalog-hero-actions">
             {scopes !== null ? (
@@ -528,6 +549,7 @@ export function SpacePage(): ReactElement {
               disabled={space === null}
               onClick={() => {
                 setCreating((open: boolean) => !open)
+                setRenaming(false)
                 selectTab("scopes")
               }}
             >
@@ -550,6 +572,24 @@ export function SpacePage(): ReactElement {
           </div>
           <p className="catalog-lead">{lead}</p>
         </header>
+        {renaming && space !== null ? (
+          <div className="catalog-panel">
+            <RenameRecordForm
+              idPrefix="page-space-rename"
+              nameLabel="Space name"
+              initialName={space.name}
+              onCancel={() => {
+                setRenaming(false)
+              }}
+              onRename={async (name: string) => {
+                const updated: SpaceRecord = await renameSpace(spaceId, name)
+                setSpace(updated)
+                setRenaming(false)
+                bumpCatalogRevision()
+              }}
+            />
+          </div>
+        ) : null}
         {building ? (
           <BuildingBanner
             jobId={buildJobId}
@@ -715,6 +755,7 @@ export function ScopePage(): ReactElement {
   const [building, setBuilding] = useState<boolean>(false)
   const [buildJobId, setBuildJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<boolean>(false)
   const [attaching, setAttaching] = useState<boolean>(false)
   const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
   const config: EntityConfigController = useEntityConfig("scope", scopeId, SCOPE_OPTION_FIELDS)
@@ -731,6 +772,7 @@ export function ScopePage(): ReactElement {
   useEffect(() => {
     setAttaching(false)
     setAttachingAirflow(false)
+    setRenaming(false)
     setSpaceName(null)
     setBuilding(false)
     setBuildJobId(null)
@@ -885,6 +927,8 @@ export function ScopePage(): ReactElement {
         <ConfigRail
           minutes={config.minutes}
           enabled={config.enabled}
+          model={config.model}
+          effort={config.effort}
           busy={config.busy}
           error={config.error}
           detail={rebuildDetail(config, rebuildLabel)}
@@ -906,7 +950,21 @@ export function ScopePage(): ReactElement {
                   </>
                 ) : null}
               </p>
-              <h1>{scope?.name ?? "Scope"}</h1>
+              <div className="catalog-title-line">
+                <h1>{scope?.name ?? "Scope"}</h1>
+                <button
+                  type="button"
+                  className="button secondary title-rename"
+                  aria-expanded={renaming}
+                  disabled={scope === null}
+                  onClick={() => {
+                    setRenaming((open: boolean) => !open)
+                    setAttaching(false)
+                  }}
+                >
+                  {renaming ? "Close" : "Rename"}
+                </button>
+              </div>
             </div>
             <div className="catalog-hero-actions">
             {tables !== null ? (
@@ -931,6 +989,7 @@ export function ScopePage(): ReactElement {
               disabled={scope === null}
               onClick={() => {
                 setAttaching((open: boolean) => !open)
+                setRenaming(false)
                 selectTab("tables")
               }}
             >
@@ -953,6 +1012,24 @@ export function ScopePage(): ReactElement {
           </div>
           <p className="catalog-lead">{lead}</p>
         </header>
+        {renaming && scope !== null ? (
+          <div className="catalog-panel">
+            <RenameRecordForm
+              idPrefix="page-scope-rename"
+              nameLabel="Scope name"
+              initialName={scope.name}
+              onCancel={() => {
+                setRenaming(false)
+              }}
+              onRename={async (name: string) => {
+                const updated: ScopeRecord = await renameScope(scopeId, name)
+                setScope(updated)
+                setRenaming(false)
+                bumpCatalogRevision()
+              }}
+            />
+          </div>
+        ) : null}
         {building ? (
           <BuildingBanner
             jobId={buildJobId}
@@ -1356,6 +1433,8 @@ export function RegistryTablePage(): ReactElement {
         <ConfigRail
           minutes={config.minutes}
           enabled={config.enabled}
+          model={config.model}
+          effort={config.effort}
           busy={config.busy}
           error={config.error}
           detail={rebuildDetail(config, rebuildLabel)}

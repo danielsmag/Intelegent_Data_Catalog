@@ -38,7 +38,6 @@ from intelegent_data_catalog.persistence.enums import (
     EngineConnectionStatus,
     EngineType,
     MetadataOrigin,
-    RefreshSubjectKind,
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
@@ -859,6 +858,14 @@ class SyncScheduleRow(Base):
             name="ck_sync_schedules_one_target",
         ),
         CheckConstraint("interval_seconds >= 1", name="ck_sync_schedules_interval"),
+        CheckConstraint(
+            "model IN ('llama3.2', 'qwen3:4b', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-6-astra')",
+            name="ck_sync_schedules_model",
+        ),
+        CheckConstraint(
+            "effort IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh')",
+            name="ck_sync_schedules_effort",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -874,6 +881,18 @@ class SyncScheduleRow(Base):
     )
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    model: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="gpt-4.1",
+        server_default=text("'gpt-4.1'"),
+    )
+    effort: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="low",
+        server_default=text("'low'"),
+    )
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -934,6 +953,14 @@ class EntityConfigurationRow(Base):
         UniqueConstraint("catalog_table_id", name="uq_entity_configurations_table"),
         CheckConstraint(_ONE_CONFIGURATION, name="ck_entity_configurations_one_subject"),
         CheckConstraint("interval_seconds >= 1", name="ck_entity_configurations_interval"),
+        CheckConstraint(
+            "model IN ('llama3.2', 'qwen3:4b', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-6-astra')",
+            name="ck_entity_configurations_model",
+        ),
+        CheckConstraint(
+            "effort IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh')",
+            name="ck_entity_configurations_effort",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -954,6 +981,18 @@ class EntityConfigurationRow(Base):
     )
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    model: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="gpt-4.1",
+        server_default=text("'gpt-4.1'"),
+    )
+    effort: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="low",
+        server_default=text("'low'"),
+    )
     options: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

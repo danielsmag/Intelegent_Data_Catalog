@@ -124,15 +124,15 @@ class RegistryService:
         return space_read(self._space(space_id))
 
     def update_space(self, space_id: UUID, patch: SpaceUpdate) -> SpaceRead:
-        """Patch a space. An omitted slug is left unchanged."""
+        """Patch a space. A new name refreshes the slug unless the patch includes one."""
         row: SpaceRow = self._space(space_id)
         changes: dict[str, object] = patch.model_dump(exclude_unset=True)
         if "name" in changes:
             row.name = _required(patch.name, "name")
-        if "slug" in changes:
-            slug: str = _required(patch.slug, "slug")
-            self._ensure_space_slug(slug, row.id)
-            row.slug = slug
+        next_slug: str | None = _slug_after_patch(row.name, changes, patch.slug)
+        if next_slug is not None:
+            self._ensure_space_slug(next_slug, row.id)
+            row.slug = next_slug
         if "description" in changes:
             row.description = patch.description
         if "context" in changes:
@@ -173,15 +173,15 @@ class RegistryService:
         return scope_read(self._scope(scope_id))
 
     def update_scope(self, scope_id: UUID, patch: ScopeUpdate) -> ScopeRead:
-        """Patch a scope."""
+        """Patch a scope. A new name refreshes the slug unless the patch includes one."""
         row: ScopeRow = self._scope(scope_id)
         changes: dict[str, object] = patch.model_dump(exclude_unset=True)
         if "name" in changes:
             row.name = _required(patch.name, "name")
-        if "slug" in changes:
-            slug: str = _required(patch.slug, "slug")
-            self._ensure_scope_slug(row.space_id, slug, row.id)
-            row.slug = slug
+        next_slug: str | None = _slug_after_patch(row.name, changes, patch.slug)
+        if next_slug is not None:
+            self._ensure_scope_slug(row.space_id, next_slug, row.id)
+            row.slug = next_slug
         if "description" in changes:
             row.description = patch.description
         if "context" in changes:
@@ -191,12 +191,11 @@ class RegistryService:
         return scope_read(row)
 
     def delete_scope(self, scope_id: UUID) -> None:
-        """Delete a scope that has no tables and is not a default scope."""
+        """Delete a scope that has no tables. Bindings lose this default scope."""
         row: ScopeRow = self._scope(scope_id)
         if self._repo.count_tables_in_scope(scope_id) > 0:
             raise ConflictError("scope still has tables")
-        if self._repo.count_default_scope_bindings(scope_id) > 0:
-            raise ConflictError("scope is the default for a source binding")
+        self._repo.clear_default_scope(scope_id)
         self._repo.delete(row)
         self._repo.commit()
 
@@ -1070,6 +1069,19 @@ def _slug_for(name: str, explicit: str | None) -> str:
         return slugify(name)
     except ValueError as err:
         raise ValidationAppError(str(err), field="slug") from err
+
+
+def _slug_after_patch(
+    name: str,
+    changes: dict[str, object],
+    explicit_slug: str | None,
+) -> str | None:
+    """Slug to store after a patch. None leaves the current slug in place."""
+    if "slug" in changes:
+        return _required(explicit_slug, "slug")
+    if "name" in changes:
+        return _slug_for(name, None)
+    return None
 
 
 def _required[T](value: T | None, field: str) -> T:

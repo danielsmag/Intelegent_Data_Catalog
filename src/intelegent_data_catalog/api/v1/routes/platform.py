@@ -7,12 +7,19 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from intelegent_data_catalog.api.container import AppContainer
-from intelegent_data_catalog.api.dependencies import CatalogJobsDep, PlatformDep, get_container
+from intelegent_data_catalog.api.dependencies import (
+    CatalogJobsDep,
+    EntityConfigurationDep,
+    PlatformDep,
+    SyncScheduleDep,
+    get_container,
+)
 from intelegent_data_catalog.catalog.models import QueryResult
-from intelegent_data_catalog.core.settings import CelerySettings
+from intelegent_data_catalog.core.settings import CelerySettings, ModelId, ReasoningEffort
 from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
 from intelegent_data_catalog.graph.document import GraphView
 from intelegent_data_catalog.jobs.cancel import CancelSignal, RedisCancelSignal
+from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobStore
 from intelegent_data_catalog.jobs.models import (
     AirflowBuildJobRead,
     CatalogJobCancelRead,
@@ -21,7 +28,12 @@ from intelegent_data_catalog.jobs.models import (
     ScopeBuildJobRead,
     SpaceBuildJobRead,
 )
-from intelegent_data_catalog.jobs.trace import BuildTraceEvent, BuildTraceList, RedisBuildTrace
+from intelegent_data_catalog.jobs.trace import (
+    BuildTraceEvent,
+    BuildTraceJob,
+    BuildTraceList,
+    RedisBuildTrace,
+)
 from intelegent_data_catalog.knowledge.models import (
     AirflowAnalysisContext,
     AirflowContextOptions,
@@ -34,6 +46,8 @@ from intelegent_data_catalog.knowledge.models import (
     TableAnalysisContext,
     TableContextOptions,
 )
+from intelegent_data_catalog.persistence.enums import RefreshSubjectKind
+from intelegent_data_catalog.persistence.models import CatalogJobRow
 from intelegent_data_catalog.query.spark_bridge import (
     NOT_CONFIGURED,
     SparkQueryPreview,
@@ -46,7 +60,7 @@ from intelegent_data_catalog.registry.annotations import (
     TagRead,
     TagWrite,
 )
-from intelegent_data_catalog.registry.schemas import SyncRunRead
+from intelegent_data_catalog.registry.schemas import ColumnRead, SyncRunRead
 
 router: APIRouter = APIRouter()
 
@@ -221,6 +235,7 @@ def build_knowledge_context(
     table_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
     body: KnowledgeContextRequest | None = None,
 ) -> KnowledgeBuildJobRead:
     """Start a context build and return before the model finishes.
@@ -234,6 +249,8 @@ def build_knowledge_context(
         include_data_profile=selected.include_data_profile,
         include_graph=selected.include_graph,
         include_lineage=selected.include_lineage,
+        model=configurations.saved_model(RefreshSubjectKind.TABLE, table_id),
+        effort=configurations.saved_effort(RefreshSubjectKind.TABLE, table_id),
     )
     return builds.start_knowledge(table_id, table_name, options)
 
@@ -301,6 +318,7 @@ def build_scope_knowledge_context(
     scope_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
     body: ScopeContextRequest | None = None,
 ) -> ScopeBuildJobRead:
     """Start a scope build and return before the model finishes.
@@ -314,6 +332,8 @@ def build_scope_knowledge_context(
         include_previous=selected.include_previous,
         include_summary=selected.include_summary,
         include_airflow=selected.include_airflow,
+        model=configurations.saved_model(RefreshSubjectKind.SCOPE, scope_id),
+        effort=configurations.saved_effort(RefreshSubjectKind.SCOPE, scope_id),
     )
     return builds.start_scope(scope_id, scope_name, options)
 
@@ -360,6 +380,7 @@ def build_space_knowledge_context(
     space_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
     body: SpaceContextRequest | None = None,
 ) -> SpaceBuildJobRead:
     """Start a space build and return before the model finishes.
@@ -373,6 +394,8 @@ def build_space_knowledge_context(
         include_previous=selected.include_previous,
         include_summary=selected.include_summary,
         include_airflow=selected.include_airflow,
+        model=configurations.saved_model(RefreshSubjectKind.SPACE, space_id),
+        effort=configurations.saved_effort(RefreshSubjectKind.SPACE, space_id),
     )
     return builds.start_space(space_id, space_name, options)
 
@@ -387,7 +410,12 @@ def cancel_catalog_job(
     celery_settings: CelerySettings = container.settings().celery
     signal: CancelSignal = RedisCancelSignal.from_url(celery_settings.broker_url)
     ttl_seconds: int = max(int(celery_settings.visibility_timeout_seconds), 1)
-    cancelled: CatalogJobCancelRead | None = builds.cancel(job_id, signal, ttl_seconds)
+    cancelled: CatalogJobCancelRead | None = builds.cancel(
+        job_id,
+        signal,
+        ttl_seconds,
+        trace=RedisBuildTrace.from_url(celery_settings.broker_url),
+    )
     if cancelled is None:
         raise EntityNotFoundError("catalog job", str(job_id))
     return cancelled
@@ -423,10 +451,18 @@ def generate_space_context(
     space_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a space context write and return before the model finishes."""
     space_name: str = platform.registry.get_space(space_id).name
-    return _start_context(builds, space_id, space_name, "space")
+    return _start_context(
+        builds,
+        space_id,
+        space_name,
+        "space",
+        configurations.saved_model(RefreshSubjectKind.SPACE, space_id),
+        configurations.saved_effort(RefreshSubjectKind.SPACE, space_id),
+    )
 
 
 @router.get("/spaces/{space_id}/context/generation", response_model=ContextGenerationJobRead)
@@ -447,10 +483,18 @@ def generate_scope_context(
     scope_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a scope context write and return before the model finishes."""
     scope_name: str = platform.registry.get_scope(scope_id).name
-    return _start_context(builds, scope_id, scope_name, "scope")
+    return _start_context(
+        builds,
+        scope_id,
+        scope_name,
+        "scope",
+        configurations.saved_model(RefreshSubjectKind.SCOPE, scope_id),
+        configurations.saved_effort(RefreshSubjectKind.SCOPE, scope_id),
+    )
 
 
 @router.post(
@@ -462,10 +506,18 @@ def generate_table_context(
     table_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a table context write and return before the model finishes."""
     table_name: str = platform.registry.get_table(table_id).name
-    return _start_context(builds, table_id, table_name, "table")
+    return _start_context(
+        builds,
+        table_id,
+        table_name,
+        "table",
+        configurations.saved_model(RefreshSubjectKind.TABLE, table_id),
+        configurations.saved_effort(RefreshSubjectKind.TABLE, table_id),
+    )
 
 
 @router.post(
@@ -477,10 +529,18 @@ def generate_table_column_contexts(
     table_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start context writes for every column on the table."""
     table_name: str = platform.registry.get_table(table_id).name
-    return _start_context(builds, table_id, f"{table_name} columns", "table_columns")
+    return _start_context(
+        builds,
+        table_id,
+        f"{table_name} columns",
+        "table_columns",
+        configurations.saved_model(RefreshSubjectKind.TABLE, table_id),
+        configurations.saved_effort(RefreshSubjectKind.TABLE, table_id),
+    )
 
 
 @router.post(
@@ -492,10 +552,18 @@ def generate_column_context(
     column_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a column context write and return before the model finishes."""
-    column_name: str = platform.registry.get_column(column_id).name
-    return _start_context(builds, column_id, column_name, "column")
+    column: ColumnRead = platform.registry.get_column(column_id)
+    return _start_context(
+        builds,
+        column_id,
+        column.name,
+        "column",
+        configurations.saved_model(RefreshSubjectKind.TABLE, column.table_id),
+        configurations.saved_effort(RefreshSubjectKind.TABLE, column.table_id),
+    )
 
 
 @router.get("/context-generations/{job_id}", response_model=ContextGenerationJobRead)
@@ -556,6 +624,7 @@ def build_airflow_knowledge_context(
     instance_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    schedules: SyncScheduleDep,
     body: AirflowContextRequest | None = None,
 ) -> AirflowBuildJobRead:
     """Start an Airflow build and return before the model finishes.
@@ -568,6 +637,8 @@ def build_airflow_knowledge_context(
         include_source=selected.include_source,
         include_previous=selected.include_previous,
         include_summary=selected.include_summary,
+        model=schedules.saved_model(instance_id),
+        effort=schedules.saved_effort(instance_id),
     )
     return builds.start_airflow(instance_id, instance_name, options)
 
@@ -602,10 +673,18 @@ def generate_airflow_context(
     instance_id: UUID,
     platform: PlatformDep,
     builds: CatalogJobsDep,
+    schedules: SyncScheduleDep,
 ) -> ContextGenerationJobRead:
     """Start an Airflow context write and return before the model finishes."""
     instance_name: str = platform.airflow_instance_name(instance_id)
-    return _start_context(builds, instance_id, instance_name, "airflow")
+    return _start_context(
+        builds,
+        instance_id,
+        instance_name,
+        "airflow",
+        schedules.saved_model(instance_id),
+        schedules.saved_effort(instance_id),
+    )
 
 
 @router.get(
@@ -624,13 +703,62 @@ def read_latest_airflow_context_generation(
 def read_build_traces(
     container: Annotated[AppContainer, Depends(get_container)],
     after: Annotated[str | None, Query()] = None,
+    jobs: Annotated[str | None, Query()] = None,
 ) -> BuildTraceList:
-    """Return context-build steps newer than the cursor."""
+    """Return context-build steps newer than the cursor, plus job row status.
+
+    The row status closes a card whose terminal step never reached Redis.
+    """
     broker_url: str = container.settings().celery.broker_url
     sink: RedisBuildTrace = RedisBuildTrace.from_url(broker_url)
     events: list[BuildTraceEvent] = sink.read(after)
     cursor: str | None = events[-1].id if len(events) > 0 else after
-    return BuildTraceList(events=events, cursor=cursor)
+    wanted: set[UUID] = {event.job_id for event in events}
+    wanted.update(_trace_job_ids(jobs))
+    rows: list[CatalogJobRow] = CatalogJobStore(container.database()).statuses(wanted)
+    states: list[BuildTraceJob] = []
+    row: CatalogJobRow
+    for row in rows:
+        status: Literal["running", "succeeded", "failed"] | None = _trace_status(row.status)
+        if status is None:
+            continue
+        states.append(
+            BuildTraceJob(
+                job_id=row.id,
+                status=status,
+                error=row.error,
+                finished_at=row.finished_at,
+            ),
+        )
+    return BuildTraceList(events=events, cursor=cursor, jobs=states)
+
+
+_TRACE_JOB_LIMIT: int = 80
+
+
+def _trace_job_ids(raw: str | None) -> set[UUID]:
+    """Parse the job ids the panel still shows as running."""
+    found: set[UUID] = set()
+    if raw is None or raw.strip() == "":
+        return found
+    part: str
+    for part in raw.split(","):
+        token: str = part.strip()
+        if token == "":
+            continue
+        try:
+            found.add(UUID(token))
+        except ValueError:
+            continue
+        if len(found) >= _TRACE_JOB_LIMIT:
+            break
+    return found
+
+
+def _trace_status(value: str) -> Literal["running", "succeeded", "failed"] | None:
+    if value == "running" or value == "succeeded" or value == "failed":
+        return value
+    return None
 
 
 def _start_context(
@@ -638,11 +766,13 @@ def _start_context(
     subject_id: UUID,
     subject_name: str,
     kind: ContextSubjectKind,
+    model: ModelId,
+    effort: ReasoningEffort,
 ) -> ContextGenerationJobRead:
     return builds.start_context(
         subject_id,
         subject_name,
-        ContextGenerationOptions(kind=kind),
+        ContextGenerationOptions(kind=kind, model=model, effort=effort),
         lane=kind,
     )
 

@@ -1,3 +1,5 @@
+import { type ModelId, type ReasoningEffort } from "./refreshSettings"
+
 export type AirflowInstanceStatus = "ACTIVE" | "DISABLED"
 export type AirflowMappingOrigin = "ASSET" | "SOURCE_MATCH" | "MANUAL" | "LLM"
 export type AirflowMappingDirection = "INPUT" | "OUTPUT" | "UNKNOWN"
@@ -228,6 +230,8 @@ export type SyncSchedule = {
   airflow_instance_id: string | null
   interval_seconds: number
   enabled: boolean
+  model: ModelId
+  effort: ReasoningEffort
   next_run_at: string
 }
 
@@ -249,10 +253,14 @@ export async function saveAirflowSchedule(
   instanceId: string,
   intervalSeconds: number,
   enabled: boolean,
+  model: ModelId,
+  effort: ReasoningEffort,
 ): Promise<SyncSchedule> {
   return sendJson<SyncSchedule>(`/api/v1/airflow/instances/${instanceId}/schedule`, "PUT", {
     interval_seconds: intervalSeconds,
     enabled,
+    model,
+    effort,
   })
 }
 

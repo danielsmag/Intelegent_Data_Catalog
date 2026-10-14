@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.knowledge.models import (
     PipelineInput,
@@ -25,15 +26,17 @@ _INSTRUCTIONS: str = (
     "Return two to four sentences on what this space describes and how its scopes fit together. "
     "pipelines lists Airflow DAGs attached to this space. "
     "instance_context is the business meaning already written for that Airflow instance. "
+    "description is the DAG text. "
+    "reads, writes, and unknown are table names. "
+    "unknown means the DAG mentions the table and the direction is not known. "
     "Tables written by one pipeline from the same inputs usually share keys. "
     "Use pipelines and instance_context to describe the business process. "
     "When pipelines is not empty, name every dag_id and say what that pipeline does. "
+    "Use the description and those table names in that sentence. "
     "Do that even when the space has one scope and no cross-scope link. "
     "Do not invent scopes or tables. "
     "Do not invent facts that the names, descriptions, or context do not support."
 )
-
-_TEXT_LIMIT: int = 200
 
 
 class _PromptTable(BaseModel):
@@ -64,8 +67,12 @@ class _PromptPipeline(BaseModel):
     dag_id: str
     instance_name: str
     instance_context: str | None
+    description: str | None
     summary: str | None
     schedule: str | None
+    reads: list[str]
+    writes: list[str]
+    unknown: list[str]
 
 
 class _SpacePrompt(BaseModel):
@@ -93,7 +100,10 @@ class SpaceContextAgent(ProposalAgent[SpaceCatalogContext, SpaceContextProposal]
         temperature: float,
         max_tokens: int,
         timeout_seconds: float,
+        text_chars: int = 200,
+        thinking: ThinkingLevel = False,
     ) -> None:
+        self._text_chars: int = text_chars
         self._call: ModelCall[SpaceCatalogContext, SpaceContextProposal] = ModelCall(
             _space_agent(model),
             name="space-context",
@@ -101,12 +111,13 @@ class SpaceContextAgent(ProposalAgent[SpaceCatalogContext, SpaceContextProposal]
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
 
     def propose(self, context: SpaceCatalogContext) -> SpaceContextProposal:
         """Return the context the model wrote for the space."""
-        return self._call.run(_prompt(context).model_dump_json(exclude_none=True), context)
+        prompt: _SpacePrompt = _prompt(context, self._text_chars)
+        return self._call.run(prompt.model_dump_json(exclude_none=True), context)
 
 
 def _space_agent(model: Model) -> Agent[SpaceCatalogContext, SpaceContextProposal]:
@@ -134,48 +145,67 @@ def _accept_output(
     return proposed
 
 
-def _prompt(context: SpaceCatalogContext) -> _SpacePrompt:
+def _prompt(context: SpaceCatalogContext, text_chars: int) -> _SpacePrompt:
     scopes: list[_PromptScope] = []
+    names: dict[UUID, str] = {}
     scope: SpaceScopeSummary
     for scope in context.scopes:
         tables: list[_PromptTable] = []
         table: ScopeTableSummary
         for table in scope.tables:
-            tables.append(_PromptTable(name=table.name, context=_clip(table.context)))
+            names[table.id] = table.name
+            tables.append(_PromptTable(name=table.name, context=_clip(table.context, text_chars)))
         scopes.append(
             _PromptScope(
                 name=scope.name,
-                description=_clip(scope.description),
-                context=_clip(scope.context),
+                description=_clip(scope.description, text_chars),
+                context=_clip(scope.context, text_chars),
                 tables=tables,
             )
         )
-    summary: str | None = None if context.previous is None else _clip(context.previous.summary)
+    summary: str | None = (
+        None if context.previous is None else _clip(context.previous.summary, text_chars)
+    )
     return _SpacePrompt(
         space_id=context.space.id,
         space_name=context.space.name,
-        description=_clip(context.space.description),
-        existing_context=_clip(context.space.context),
+        description=_clip(context.space.description, text_chars),
+        existing_context=_clip(context.space.context, text_chars),
         summary=summary,
         scopes=scopes,
-        pipelines=[_pipeline(item) for item in context.pipelines],
+        pipelines=[_pipeline(item, names, text_chars) for item in context.pipelines],
     )
 
 
-def _pipeline(item: PipelineInput) -> _PromptPipeline:
+def _pipeline(item: PipelineInput, names: dict[UUID, str], text_chars: int) -> _PromptPipeline:
     return _PromptPipeline(
         dag_id=item.dag_id,
         instance_name=item.instance_name,
         instance_context=item.instance_context,
+        description=_clip(item.description, text_chars),
         summary=item.summary,
         schedule=item.schedule,
+        reads=_table_names(item.reads, names),
+        writes=_table_names(item.writes, names),
+        unknown=_table_names(item.unknown, names),
     )
 
 
-def _clip(value: str | None) -> str | None:
+def _table_names(table_ids: list[UUID], names: dict[UUID, str]) -> list[str]:
+    found: list[str] = []
+    table_id: UUID
+    for table_id in table_ids:
+        name: str | None = names.get(table_id)
+        if name is None:
+            continue
+        found.append(name)
+    return found
+
+
+def _clip(value: str | None, limit: int) -> str | None:
     if value is None:
         return None
     text: str = value.strip()
     if text == "":
         return None
-    return text[:_TEXT_LIMIT]
+    return text[:limit]

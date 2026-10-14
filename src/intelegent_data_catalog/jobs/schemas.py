@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from intelegent_data_catalog.core.settings import ModelId, ReasoningEffort
+
 
 class SyncScheduleWrite(BaseModel):
     """Create or replace the interval for one sync target."""
@@ -13,6 +15,8 @@ class SyncScheduleWrite(BaseModel):
 
     interval_seconds: int = Field(ge=1, le=2_147_483_647)
     enabled: bool
+    model: ModelId = "gpt-4.1"
+    effort: ReasoningEffort = "low"
 
 
 class SyncScheduleRead(BaseModel):
@@ -25,4 +29,6 @@ class SyncScheduleRead(BaseModel):
     airflow_instance_id: UUID | None
     interval_seconds: int
     enabled: bool
+    model: ModelId
+    effort: ReasoningEffort
     next_run_at: datetime

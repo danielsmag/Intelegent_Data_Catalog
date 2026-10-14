@@ -2,10 +2,19 @@
 
 import os
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -131,6 +140,12 @@ class TrinoSettings(BaseModel):
 
 
 LlmProvider = Literal["claude", "openai", "ollama"]
+ModelKind = Literal["local", "gpt"]
+ModelId = Literal["llama3.2", "qwen3:4b", "gpt-4.1", "gpt-4.1-mini", "gpt-6-astra"]
+ReasoningEffort = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+_EFFORTS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
+
+_DEFAULT_MODEL_ID: ModelId = "llama3.2"
 
 _DEFAULT_LLM_MODELS: dict[LlmProvider, str] = {
     "claude": "claude-sonnet-4-5",
@@ -144,6 +159,53 @@ _DEFAULT_LLM_BASE_URLS: dict[LlmProvider, str] = {
     "ollama": "http://127.0.0.1:11434",
 }
 
+_PROFILE_PROVIDERS: dict[ModelKind, LlmProvider] = {
+    "local": "ollama",
+    "gpt": "openai",
+}
+
+
+@dataclass(frozen=True)
+class ModelChoice:
+    """One model the configuration rail can select."""
+
+    id: ModelId
+    label: str
+    kind: ModelKind
+    model: str
+
+
+MODEL_CHOICES: tuple[ModelChoice, ...] = (
+    ModelChoice(id="llama3.2", label="Llama 3.2", kind="local", model="llama3.2"),
+    ModelChoice(id="qwen3:4b", label="Qwen3 4B", kind="local", model="qwen3:4b"),
+    ModelChoice(id="gpt-4.1", label="GPT-4.1", kind="gpt", model="gpt-4.1"),
+    ModelChoice(id="gpt-4.1-mini", label="GPT-4.1 mini", kind="gpt", model="gpt-4.1-mini"),
+    ModelChoice(id="gpt-6-astra", label="GPT-6 Astra", kind="gpt", model="gpt-6-astra"),
+)
+
+_CHOICE_BY_ID: dict[str, ModelChoice] = {choice.id: choice for choice in MODEL_CHOICES}
+
+
+class ModelEndpoint(BaseModel):
+    """Optional override for one model key. Blank fields mean the section is unset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: LlmProvider | None = None
+    model: str = ""
+    api_key: SecretStr = Field(default=SecretStr(""))
+    base_url: str = ""
+
+    def configured(self) -> bool:
+        """Return whether any endpoint field was given a value."""
+        if self.provider is not None:
+            return True
+        if self.model.strip() != "":
+            return True
+        if self.api_key.get_secret_value().strip() != "":
+            return True
+        return self.base_url.strip() != ""
+
 
 class LlmSettings(BaseModel):
     """Which Pydantic AI model a table agent calls.
@@ -151,6 +213,11 @@ class LlmSettings(BaseModel):
     ``provider`` is ``claude``, ``openai``, or ``ollama``. An empty ``model`` or
     ``base_url`` uses that provider's default. Claude and OpenAI need
     ``CATALOG_LLM__API_KEY``. Ollama talks to a local server and does not.
+
+    ``profile`` resolves a specific model id. ``llama3.2`` and ``qwen3:4b`` are
+    local Ollama models. ``gpt-4.1-mini``, ``gpt-4.1``, and ``gpt-6-astra`` are OpenAI and read
+    ``CATALOG_LLM__GPT__API_KEY`` when that section is set. Legacy ids ``local``
+    and ``gpt`` still resolve to the matching provider block.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -160,9 +227,12 @@ class LlmSettings(BaseModel):
     api_key: SecretStr = Field(default=SecretStr(""))
     base_url: str = ""
     timeout_seconds: float = Field(default=60.0, gt=0, le=600)
-    max_tokens: int = Field(default=2048, ge=1, le=32000)
+    max_tokens: int = Field(default=2048, ge=1, le=200000)
     temperature: float = Field(default=0.0, ge=0, le=2)
     max_tool_steps: int = Field(default=6, ge=1, le=20)
+    effort: ReasoningEffort = "low"
+    local: ModelEndpoint = Field(default_factory=ModelEndpoint)
+    gpt: ModelEndpoint = Field(default_factory=ModelEndpoint)
 
     @model_validator(mode="after")
     def _fill_provider_defaults(self) -> LlmSettings:
@@ -175,6 +245,120 @@ class LlmSettings(BaseModel):
         self.model = model_name
         self.base_url = base_url
         return self
+
+    def default_model_id(self) -> ModelId:
+        """Return the catalog id that matches this process, or the local default."""
+        current: ModelChoice | None = _CHOICE_BY_ID.get(self.model)
+        if current is not None and _PROFILE_PROVIDERS[current.kind] == self.provider:
+            return current.id
+        if self.provider == "openai":
+            return "gpt-4.1"
+        return _DEFAULT_MODEL_ID
+
+    def profile(self, model_id: str) -> LlmSettings:
+        """Return generation settings for one catalog model."""
+        choice: ModelChoice | None = _CHOICE_BY_ID.get(model_id)
+        if choice is not None:
+            return self._for_choice(choice)
+        if model_id == "gpt":
+            return self._kind_profile("gpt")
+        return self._kind_profile("local")
+
+    def _for_choice(self, choice: ModelChoice) -> LlmSettings:
+        endpoint: ModelEndpoint = self.gpt if choice.kind == "gpt" else self.local
+        fallback: LlmProvider = _PROFILE_PROVIDERS[choice.kind]
+        if endpoint.configured():
+            provider: LlmProvider = fallback if endpoint.provider is None else endpoint.provider
+            return self._with_endpoint(
+                provider,
+                choice.model,
+                endpoint.api_key,
+                endpoint.base_url,
+            )
+        if self.provider == fallback:
+            return self._with_endpoint(fallback, choice.model, self.api_key, self.base_url)
+        return self._with_endpoint(fallback, choice.model, SecretStr(""), "")
+
+    def _kind_profile(self, kind: ModelKind) -> LlmSettings:
+        endpoint: ModelEndpoint = self.gpt if kind == "gpt" else self.local
+        fallback: LlmProvider = _PROFILE_PROVIDERS[kind]
+        if endpoint.configured():
+            provider: LlmProvider = fallback if endpoint.provider is None else endpoint.provider
+            return self._with_endpoint(
+                provider,
+                endpoint.model,
+                endpoint.api_key,
+                endpoint.base_url,
+            )
+        if self.provider == fallback:
+            return self._with_endpoint(self.provider, self.model, self.api_key, self.base_url)
+        return self._with_endpoint(fallback, "", SecretStr(""), "")
+
+    def _with_endpoint(
+        self,
+        provider: LlmProvider,
+        model: str,
+        api_key: SecretStr,
+        base_url: str,
+    ) -> LlmSettings:
+        return LlmSettings(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=self.timeout_seconds,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            max_tool_steps=self.max_tool_steps,
+            effort=self.effort,
+        )
+
+
+def coerce_model_id(value: object) -> object:
+    """Map a legacy provider key onto a catalog id. Other values pass through."""
+    if value == "gpt":
+        return "gpt-4.1"
+    if value == "local":
+        return _DEFAULT_MODEL_ID
+    return value
+
+
+def parse_model_id(value: str) -> ModelId:
+    """Return a stored model id. Unknown values use Llama 3.2."""
+    coerced: object = coerce_model_id(value)
+    if isinstance(coerced, str) and coerced in _CHOICE_BY_ID:
+        choice: ModelChoice = _CHOICE_BY_ID[coerced]
+        return choice.id
+    return _DEFAULT_MODEL_ID
+
+
+StoredModelId = Annotated[ModelId, BeforeValidator(coerce_model_id)]
+
+
+def coerce_effort(value: object) -> object:
+    """Keep a known effort. Anything else is off."""
+    if isinstance(value, str) and value in _EFFORTS:
+        return value
+    return "off"
+
+
+def parse_effort(value: str) -> ReasoningEffort:
+    """Return a stored effort. Unknown values turn thinking off."""
+    coerced: object = coerce_effort(value)
+    if coerced == "minimal":
+        return "minimal"
+    if coerced == "low":
+        return "low"
+    if coerced == "medium":
+        return "medium"
+    if coerced == "high":
+        return "high"
+    if coerced == "xhigh":
+        return "xhigh"
+    return "off"
+
+
+StoredEffort = Annotated[ReasoningEffort, BeforeValidator(coerce_effort)]
 
 
 class PolarisSettings(BaseModel):
@@ -196,6 +380,25 @@ class AirflowSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+
+class ContextSettings(BaseModel):
+    """How much catalog text and how many objects a context build may send."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text_chars: int = Field(default=200, ge=1)
+    airflow_source_chars: int = Field(default=3000, ge=1)
+    airflow_max_dags: int = Field(default=20, ge=1)
+    airflow_max_tasks: int = Field(default=60, ge=1)
+    airflow_max_candidate_tables: int = Field(default=300, ge=1)
+    max_pipelines: int = Field(default=30, ge=1)
+    scope_max_tables: int = Field(default=40, ge=1)
+    scope_max_columns: int = Field(default=400, ge=1)
+    space_max_scopes: int = Field(default=20, ge=1)
+    space_max_tables: int = Field(default=60, ge=1)
+    space_max_columns: int = Field(default=600, ge=1)
+    trace_detail_chars: int = Field(default=2000, ge=1)
 
 
 class CelerySettings(BaseModel):
@@ -274,6 +477,7 @@ class AppSettings(BaseSettings):
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
     airflow: AirflowSettings = Field(default_factory=AirflowSettings)
+    context: ContextSettings = Field(default_factory=ContextSettings)
     celery: CelerySettings = Field(default_factory=CelerySettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 

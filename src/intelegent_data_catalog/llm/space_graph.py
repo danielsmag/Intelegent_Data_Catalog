@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models import Model
+from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.space_graph import accept_space_links
@@ -48,9 +49,13 @@ _INSTRUCTIONS: str = (
     "summary is two to four sentences on what this space describes and how the scopes join. "
     "Mention a scope without context only when that gap matters. "
     "pipelines lists Airflow DAGs attached to this space and the tables each DAG reads or writes. "
+    "description is the DAG text. "
+    "reads, writes, and unknown are table ids. "
+    "unknown means the DAG mentions the table and the direction is not known. "
     "instance_context is the business meaning already written for that Airflow instance. "
     "Tables written by one pipeline from the same inputs usually share keys. "
-    "Use pipelines and instance_context to find joins and to describe the business process. "
+    "Use the description and those lists to find joins and to say what each pipeline does. "
+    "Do not add a link only because a DAG mentions one table. "
     "When pipelines is not empty, the summary must name every dag_id "
     "and say what that pipeline does. "
     "Do that even when links is empty because the space has one scope. "
@@ -177,10 +182,12 @@ class _PromptPipeline(BaseModel):
     dag_id: str
     instance_name: str
     instance_context: str | None
+    description: str | None
     summary: str | None
     schedule: str | None
     reads: list[UUID]
     writes: list[UUID]
+    unknown: list[UUID]
 
 
 class _SpaceGraphPrompt(BaseModel):
@@ -210,6 +217,7 @@ class SpaceSubgraphAgent(ProposalAgent[SpaceCatalogContext, SpaceProposal]):
         temperature: float,
         max_tokens: int,
         timeout_seconds: float,
+        thinking: ThinkingLevel = False,
     ) -> None:
         self._call: ModelCall[SpaceCatalogContext, SpaceProposal] = ModelCall(
             _space_agent(model),
@@ -218,7 +226,7 @@ class SpaceSubgraphAgent(ProposalAgent[SpaceCatalogContext, SpaceProposal]):
             temperature=temperature,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
-            thinking=False,
+            thinking=thinking,
         )
 
     def propose(self, context: SpaceCatalogContext) -> SpaceProposal:
@@ -250,9 +258,7 @@ def _accept_output(ctx: RunContext[SpaceCatalogContext], proposed: SpaceProposal
     missing: list[str] = omitted_pipeline_names(proposed.summary, ctx.deps.pipelines)
     if len(missing) > 0:
         names: str = ", ".join(missing)
-        raise ModelRetry(
-            f"summary must name every attached pipeline and say what it does: {names}"
-        )
+        raise ModelRetry(f"summary must name every attached pipeline and say what it does: {names}")
     return proposed
 
 
@@ -370,10 +376,12 @@ def _pipeline(item: PipelineInput) -> _PromptPipeline:
         dag_id=item.dag_id,
         instance_name=item.instance_name,
         instance_context=item.instance_context,
+        description=item.description,
         summary=item.summary,
         schedule=item.schedule,
         reads=list(item.reads),
         writes=list(item.writes),
+        unknown=list(item.unknown),
     )
 
 

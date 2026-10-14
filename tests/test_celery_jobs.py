@@ -94,6 +94,8 @@ def test_schedule_upsert_and_delete(tmp_path: Path) -> None:
         assert body["source_engine_binding_id"] == binding_id
         assert body["enabled"] is True
         assert body["interval_seconds"] == 900
+        assert body["model"] == "gpt-4.1"
+        assert body["effort"] == "low"
         replaced: httpx.Response = _send(
             app,
             "PUT",
@@ -133,6 +135,23 @@ def test_schedule_upsert_and_delete(tmp_path: Path) -> None:
         )
         assert airflow.status_code == 200
         assert _object(airflow)["airflow_instance_id"] == instance_id
+        assert _object(airflow)["model"] == "gpt-4.1"
+        assert _object(airflow)["effort"] == "low"
+        chosen: httpx.Response = _send(
+            app,
+            "PUT",
+            f"/api/v1/airflow/instances/{instance_id}/schedule",
+            {"interval_seconds": 600, "enabled": True, "model": "gpt-4.1-mini"},
+        )
+        assert chosen.status_code == 200
+        assert _object(chosen)["model"] == "gpt-4.1-mini"
+        unknown: httpx.Response = _send(
+            app,
+            "PUT",
+            f"/api/v1/airflow/instances/{instance_id}/schedule",
+            {"interval_seconds": 600, "enabled": True, "model": "claude"},
+        )
+        assert unknown.status_code == 422
         removed: httpx.Response = _send(
             app,
             "DELETE",
@@ -212,6 +231,8 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
         defaults: dict[str, object] = _object(loaded)
         assert defaults["interval_seconds"] == 600
         assert defaults["enabled"] is True
+        assert defaults["model"] == "gpt-4.1"
+        assert defaults["effort"] == "low"
         assert isinstance(defaults["next_run_at"], str)
         saved: httpx.Response = _send(
             app,
@@ -220,6 +241,8 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
             {
                 "interval_seconds": 12,
                 "enabled": True,
+                "model": "qwen3:4b",
+                "effort": "high",
                 "options": {
                     "include_scope_knowledge": True,
                     "include_previous": False,
@@ -230,6 +253,8 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
         assert saved.status_code == 200
         stored: dict[str, object] = _object(saved)
         assert stored["interval_seconds"] == 12
+        assert stored["model"] == "qwen3:4b"
+        assert stored["effort"] == "high"
         options: object = stored["options"]
         assert isinstance(options, dict)
         assert options["include_previous"] is False
@@ -237,6 +262,19 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
             _send(app, "GET", f"/api/v1/spaces/{space_id}/configuration"),
         )
         assert again["interval_seconds"] == 12
+        assert again["model"] == "qwen3:4b"
+        rejected_model: httpx.Response = _send(
+            app,
+            "PUT",
+            f"/api/v1/spaces/{space_id}/configuration",
+            {
+                "interval_seconds": 12,
+                "enabled": True,
+                "model": "claude",
+                "options": {"include_previous": False},
+            },
+        )
+        assert rejected_model.status_code == 422
         rejected: httpx.Response = _send(
             app,
             "PUT",
@@ -272,6 +310,8 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
             {
                 "interval_seconds": 600,
                 "enabled": True,
+                "model": "gpt-4.1",
+                "effort": "xhigh",
                 "options": {
                     "include_graph": True,
                     "include_lineage": False,
@@ -280,6 +320,7 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
             },
         )
         assert saved.status_code == 200
+        assert _object(saved)["model"] == "gpt-4.1"
         publisher: _RecordingBuilds = _RecordingBuilds()
         jobs: CatalogJobs = CatalogJobs(database, publisher)
         fresh: int = _claim_context(database, jobs)
@@ -306,6 +347,8 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
         assert stored.subject_id == UUID(table_id)
         assert stored.options["include_lineage"] is False
         assert stored.options["include_data_profile"] is False
+        assert stored.options["model"] == "gpt-4.1"
+        assert stored.options["effort"] == "xhigh"
         disabled: httpx.Response = _send(
             app,
             "PUT",

@@ -4,8 +4,15 @@ from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.core.settings import (
+    ModelId,
+    ReasoningEffort,
+    parse_effort,
+    parse_model_id,
+)
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
 from intelegent_data_catalog.jobs.publisher import SyncJobPublisher
 from intelegent_data_catalog.jobs.schemas import SyncScheduleRead, SyncScheduleWrite
@@ -24,11 +31,21 @@ from intelegent_data_catalog.persistence.models import (
 )
 
 
+_DEFAULT_INTERVAL_SECONDS: int = 600
+
+
 class SyncScheduleService:
     """Stores and claims sync schedules. The caller owns the session."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        default_model: ModelId = "llama3.2",
+        default_effort: ReasoningEffort = "low",
+    ) -> None:
         self._session: Session = session
+        self._default_model: ModelId = default_model
+        self._default_effort: ReasoningEffort = default_effort
 
     def get_binding(self, source_binding_id: UUID) -> SyncScheduleRead:
         """Return the schedule for one Trino source binding."""
@@ -50,9 +67,12 @@ class SyncScheduleService:
         self._session.commit()
 
     def get_airflow(self, instance_id: UUID) -> SyncScheduleRead:
-        """Return the schedule for one Airflow instance."""
+        """Return the schedule for one Airflow instance. The first read stores the default."""
         self._require_instance(instance_id)
-        return _read(self._require_instance_schedule(instance_id))
+        row: SyncScheduleRow | None = self._find_instance_schedule(instance_id)
+        if row is None:
+            row = self._store_instance_default(instance_id)
+        return _read(row)
 
     def put_airflow(self, instance_id: UUID, body: SyncScheduleWrite) -> SyncScheduleRead:
         """Create or replace the schedule for one Airflow instance."""
@@ -67,6 +87,20 @@ class SyncScheduleService:
         self._require_instance(instance_id)
         self._session.delete(self._require_instance_schedule(instance_id))
         self._session.commit()
+
+    def saved_model(self, instance_id: UUID) -> ModelId:
+        """Return the Airflow instance model. A missing schedule uses the default."""
+        row: SyncScheduleRow | None = self._find_instance_schedule(instance_id)
+        if row is None:
+            return self._default_model
+        return parse_model_id(row.model)
+
+    def saved_effort(self, instance_id: UUID) -> ReasoningEffort:
+        """Return the Airflow instance effort. A missing schedule uses the process default."""
+        row: SyncScheduleRow | None = self._find_instance_schedule(instance_id)
+        if row is None:
+            return self._default_effort
+        return parse_effort(row.effort)
 
     def claim_due(self, now: datetime, publisher: SyncJobPublisher) -> int:
         """Enqueue due schedules and move their next run forward.
@@ -157,6 +191,8 @@ class SyncScheduleService:
                 airflow_instance_id=None,
                 interval_seconds=body.interval_seconds,
                 enabled=body.enabled,
+                model=body.model,
+                effort=body.effort,
                 next_run_at=now,
                 created_at=now,
                 updated_at=now,
@@ -165,6 +201,8 @@ class SyncScheduleService:
             return created
         row.interval_seconds = body.interval_seconds
         row.enabled = body.enabled
+        row.model = body.model
+        row.effort = body.effort
         row.updated_at = now
         if body.enabled:
             row.next_run_at = now + timedelta(seconds=body.interval_seconds)
@@ -184,6 +222,8 @@ class SyncScheduleService:
                 airflow_instance_id=instance_id,
                 interval_seconds=body.interval_seconds,
                 enabled=body.enabled,
+                model=body.model,
+                effort=body.effort,
                 next_run_at=now,
                 created_at=now,
                 updated_at=now,
@@ -192,6 +232,8 @@ class SyncScheduleService:
             return created
         row.interval_seconds = body.interval_seconds
         row.enabled = body.enabled
+        row.model = body.model
+        row.effort = body.effort
         row.updated_at = now
         if body.enabled:
             row.next_run_at = now + timedelta(seconds=body.interval_seconds)
@@ -223,6 +265,31 @@ class SyncScheduleService:
         )
         return self._session.scalar(statement)
 
+    def _store_instance_default(self, instance_id: UUID) -> SyncScheduleRow:
+        now: datetime = utc_now()
+        created: SyncScheduleRow = SyncScheduleRow(
+            id=uuid4(),
+            source_engine_binding_id=None,
+            airflow_instance_id=instance_id,
+            interval_seconds=_DEFAULT_INTERVAL_SECONDS,
+            enabled=True,
+            model=self._default_model,
+            effort=self._default_effort,
+            next_run_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        self._session.add(created)
+        try:
+            self._session.commit()
+        except IntegrityError:
+            self._session.rollback()
+            raced: SyncScheduleRow | None = self._find_instance_schedule(instance_id)
+            if raced is None:
+                raise
+            return raced
+        return created
+
     def _find_instance_schedule(self, instance_id: UUID) -> SyncScheduleRow | None:
         statement = select(SyncScheduleRow).where(
             SyncScheduleRow.airflow_instance_id == instance_id,
@@ -249,5 +316,7 @@ def _read(row: SyncScheduleRow) -> SyncScheduleRead:
         airflow_instance_id=row.airflow_instance_id,
         interval_seconds=row.interval_seconds,
         enabled=row.enabled,
+        model=parse_model_id(row.model),
+        effort=parse_effort(row.effort),
         next_run_at=row.next_run_at,
     )

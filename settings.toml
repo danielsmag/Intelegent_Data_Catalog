@@ -43,24 +43,52 @@ timeout_seconds = 30
 # Empty base_url uses that provider's host. No /v1 suffix.
 # Point model at a name from `ollama list` for a local model.
 # Claude and OpenAI read the key from CATALOG_LLM__API_KEY.
+# Each space, scope, table, and Airflow instance picks a model:
+# llama3.2, qwen3:4b, gpt-4.1-mini, gpt-4.1, or gpt-6-astra.
+# effort is the thinking level copied onto a new configuration row.
+# Values: off, minimal, low, medium, high, or xhigh. Off disables reasoning.
+# The first two use Ollama. The GPT ids use OpenAI.
+# A GPT entity needs CATALOG_LLM__GPT__API_KEY, or CATALOG_LLM__API_KEY when
+# provider is openai. [llm.local] and [llm.gpt] override that endpoint.
 [llm]
-provider = "ollama"
-model = ""
+provider = "openai"
+model = "gpt-4.1"
 api_key = ""
 base_url = ""
 timeout_seconds = 60
-max_tokens = 2048
+# Completion budget. GPT-4.1 and GPT-4.1 mini are capped at 32768 before the call.
+# GPT-6 Astra keeps this value.
+max_tokens = 100000
 temperature = 0.0
 max_tool_steps = 6
+effort = "low"
 
 # Airflow 3 REST calls. Instance URL and password are stored per instance.
 [airflow]
 timeout_seconds = 30
 
+# How much text and how many objects a context build sends to the model.
+# text_chars clips each description and stored context field.
+# trace_detail_chars clips only the stream-tracing panel.
+[context]
+text_chars = 200
+airflow_source_chars = 3000
+airflow_max_dags = 20
+airflow_max_tasks = 60
+airflow_max_candidate_tables = 300
+max_pipelines = 30
+scope_max_tables = 40
+scope_max_columns = 400
+space_max_scopes = 20
+space_max_tables = 60
+space_max_columns = 600
+trace_detail_chars = 2000
+
 # How often Beat looks for due rows. The saved configuration interval is the
 # schedule. Beat enqueues a target only when that row is due.
-# Beat requeues a running build whose worker lease has expired, and fails it
-# after abandon_after_seconds so a dead worker cannot block the next build.
+# Beat requeues a running build whose worker lease has expired. After
+# abandon_after_seconds the build fails even if the worker still holds the
+# lease, so a stuck model call cannot leave the trace clock running.
 [celery]
 broker_url = "redis://127.0.0.1:6379/0"
 dispatch_interval_seconds = 60

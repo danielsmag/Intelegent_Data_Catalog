@@ -122,14 +122,16 @@ class RegistryRepository:
         )
         return self._count(statement)
 
-    def count_default_scope_bindings(self, scope_id: uuid.UUID) -> int:
-        """Count source bindings that use a scope as their default."""
-        statement: Select[tuple[int]] = (
-            select(func.count())
-            .select_from(SourceEngineBindingRow)
-            .where(SourceEngineBindingRow.default_scope_id == scope_id)
+    def clear_default_scope(self, scope_id: uuid.UUID) -> None:
+        """Unset this scope as the default on every source binding."""
+        statement: Select[tuple[SourceEngineBindingRow]] = select(SourceEngineBindingRow).where(
+            SourceEngineBindingRow.default_scope_id == scope_id
         )
-        return self._count(statement)
+        now: datetime = utc_now()
+        for row in self._session.scalars(statement):
+            row.default_scope_id = None
+            row.updated_at = now
+        self._flush()
 
     def add_data_source(
         self,

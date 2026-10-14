@@ -19,11 +19,14 @@ from intelegent_data_catalog.knowledge.models import (
     PreviousSpaceFindings,
     ScopeGraphEdge,
     ScopeKnowledgeInput,
+    ScopeTableSummary,
     SpaceCatalogContext,
+    SpaceContextProposal,
     SpaceProposal,
     TableLink,
     TableLinkKind,
 )
+from intelegent_data_catalog.llm.space_context import SpaceContextAgent
 from intelegent_data_catalog.llm.space_graph import SpaceSubgraphAgent
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
@@ -187,6 +190,70 @@ def test_space_summary_must_name_attached_pipelines() -> None:
     assert "append_sales_order" in feedback[1]
 
 
+def test_space_prompts_include_airflow_table_directions() -> None:
+    """Space text uses table names. The graph prompt keeps table ids."""
+    base: SpaceCatalogContext = _context()
+    orders: ScopeTableSummary = base.scopes[0].tables[0]
+    invoices: ScopeTableSummary = base.scopes[0].tables[1]
+    customers: ScopeTableSummary = base.scopes[1].tables[0]
+    outside: UUID = uuid4()
+    pipeline: PipelineInput = PipelineInput(
+        dag_row_id=uuid4(),
+        dag_id="append_sales_order",
+        instance_name="Iceberg",
+        instance_context="Nightly sales loads.",
+        description="Append one order for an existing customer.",
+        reads=[customers.id],
+        writes=[orders.id],
+        unknown=[invoices.id, outside],
+    )
+    context: SpaceCatalogContext = base.model_copy(update={"pipelines": [pipeline]})
+    prompts: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        prompts.append(_user_text(messages))
+        return ModelResponse(
+            parts=[TextPart(content='{"context":"append_sales_order appends orders."}')]
+        )
+
+    text_agent: SpaceContextAgent = SpaceContextAgent(
+        FunctionModel(respond),
+        max_requests=2,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+    written: SpaceContextProposal = text_agent.propose(context)
+    assert written.context == "append_sales_order appends orders."
+    text_pipeline: dict[str, object] = _pipeline_payload(prompts[0])
+    assert text_pipeline["description"] == "Append one order for an existing customer."
+    assert text_pipeline["reads"] == ["customers"]
+    assert text_pipeline["writes"] == ["orders"]
+    assert text_pipeline["unknown"] == ["invoices"]
+
+    def graph_respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del info
+        prompts.append(_user_text(messages))
+        return ModelResponse(
+            parts=[TextPart(content='{"summary":"append_sales_order appends orders.","links":[]}')]
+        )
+
+    graph_agent: SpaceSubgraphAgent = SpaceSubgraphAgent(
+        FunctionModel(graph_respond),
+        max_requests=2,
+        temperature=0.0,
+        max_tokens=256,
+        timeout_seconds=5.0,
+    )
+    graph_agent.propose(context)
+    graph_pipeline: dict[str, object] = _pipeline_payload(prompts[1])
+    assert graph_pipeline["description"] == "Append one order for an existing customer."
+    assert graph_pipeline["reads"] == [str(customers.id)]
+    assert graph_pipeline["writes"] == [str(orders.id)]
+    assert graph_pipeline["unknown"] == [str(invoices.id), str(outside)]
+
+
 def test_replace_across_scopes_keeps_intra_scope_rows(tmp_path: Path) -> None:
     """A space rebuild drops cross-scope LLM rows and leaves scope-agent rows."""
     database: CatalogDatabase = _database(tmp_path)
@@ -278,6 +345,16 @@ def test_replace_across_scopes_keeps_intra_scope_rows(tmp_path: Path) -> None:
     finally:
         session.close()
         database.dispose()
+
+
+def _pipeline_payload(prompt: str) -> dict[str, object]:
+    body: object = json.loads(prompt)
+    assert isinstance(body, dict)
+    pipelines: object = body["pipelines"]
+    assert isinstance(pipelines, list)
+    pipeline: object = pipelines[0]
+    assert isinstance(pipeline, dict)
+    return pipeline
 
 
 def _user_text(messages: list[ModelMessage]) -> str:

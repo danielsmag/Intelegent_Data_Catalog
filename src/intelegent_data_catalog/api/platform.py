@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.airflow.repository import AirflowRepository
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
-from intelegent_data_catalog.core.settings import AppSettings
+from intelegent_data_catalog.core.settings import AppSettings, ModelId, ReasoningEffort
 from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
     GraphUnavailableError,
@@ -80,12 +80,15 @@ from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ColumnRelation,
     ContextGenerationOptions,
+    PipelineSummary,
     ScopeAnalysisContext,
     ScopeContextOptions,
     SpaceAnalysisContext,
     SpaceContextOptions,
     TableAnalysisContext,
     TableContextOptions,
+    apply_instance_summaries,
+    pipelines_missing_instance_summary,
 )
 from intelegent_data_catalog.knowledge.operations.airflow_operation import AirflowInstanceAgent
 from intelegent_data_catalog.knowledge.operations.scope_operation import ScopeAgent
@@ -100,15 +103,7 @@ from intelegent_data_catalog.knowledge.store import (
     SpaceKnowledgeContextStore,
 )
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
-from intelegent_data_catalog.llm.airflow_analysis import AirflowAnalysisAgent
-from intelegent_data_catalog.llm.airflow_context import AirflowContextAgent
-from intelegent_data_catalog.llm.catalog import TableOperationAgent
-from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
-from intelegent_data_catalog.llm.factory import build_model, build_table_operation_agent
-from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
-from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
-from intelegent_data_catalog.llm.space_context import SpaceContextAgent
-from intelegent_data_catalog.llm.space_graph import SpaceSubgraphAgent
+from intelegent_data_catalog.llm.factory import CatalogModels, thinking_level
 from intelegent_data_catalog.persistence.models import AirflowInstanceRow, ColumnRow
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
@@ -128,6 +123,7 @@ class RequestPlatform:
 
     def __init__(self, session: Session, settings: AppSettings, query: QueryService) -> None:
         self._session: Session = session
+        self._settings: AppSettings = settings
         self.registry: RegistryService = RegistryService(session)
         self.annotations: CatalogAnnotations = CatalogAnnotations(session)
         neo4j: Neo4jProjection | None = None
@@ -143,16 +139,7 @@ class RequestPlatform:
             lineage = MarquezClient(settings.marquez.url, settings.marquez.timeout_seconds)
         self._lineage: LineageReader | None = lineage
         self._neo4j: Neo4jProjection | None = neo4j
-        self._column_proposer: ColumnSubgraphAgent | None = None
-        if neo4j is not None:
-            column_timeout: float = max(settings.llm.timeout_seconds, 600.0)
-            self._column_proposer = ColumnSubgraphAgent(
-                build_model(settings.llm),
-                max_requests=settings.llm.max_tool_steps,
-                temperature=settings.llm.temperature,
-                max_tokens=settings.llm.max_tokens,
-                timeout_seconds=column_timeout,
-            )
+        self._bundles: dict[tuple[ModelId, ReasoningEffort], CatalogModels] = {}
         self.graph: GraphService = GraphService(session, lineage, neo4j)
         source: TrinoCatalogSource | _UnconfiguredTrino
         if settings.trino.enabled:
@@ -174,50 +161,6 @@ class RequestPlatform:
         )
         self.query: QueryService = query
         self.sample_limit: int = settings.query.sample_limit
-        self._operation_agent: TableOperationAgent = build_table_operation_agent(settings.llm)
-        scope_timeout: float = max(settings.llm.timeout_seconds, 600.0)
-        self._scope_proposer: ScopeSubgraphAgent = ScopeSubgraphAgent(
-            build_model(settings.llm),
-            max_requests=settings.llm.max_tool_steps,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            timeout_seconds=scope_timeout,
-        )
-        self._scope_describer: ScopeContextAgent = ScopeContextAgent(
-            build_model(settings.llm),
-            max_requests=settings.llm.max_tool_steps,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            timeout_seconds=scope_timeout,
-        )
-        self._space_proposer: SpaceSubgraphAgent = SpaceSubgraphAgent(
-            build_model(settings.llm),
-            max_requests=settings.llm.max_tool_steps,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            timeout_seconds=scope_timeout,
-        )
-        self._space_describer: SpaceContextAgent = SpaceContextAgent(
-            build_model(settings.llm),
-            max_requests=settings.llm.max_tool_steps,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            timeout_seconds=scope_timeout,
-        )
-        self._airflow_proposer: AirflowAnalysisAgent = AirflowAnalysisAgent(
-            build_model(settings.llm),
-            max_requests=settings.llm.max_tool_steps,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            timeout_seconds=scope_timeout,
-        )
-        self._airflow_describer: AirflowContextAgent = AirflowContextAgent(
-            build_model(settings.llm),
-            max_requests=settings.llm.max_tool_steps,
-            temperature=settings.llm.temperature,
-            max_tokens=settings.llm.max_tokens,
-            timeout_seconds=scope_timeout,
-        )
 
     def build_knowledge_context(
         self,
@@ -236,14 +179,15 @@ class RequestPlatform:
             options.include_graph,
             options.include_lineage,
         )
+        models: CatalogModels = self._models(options.model, options.effort)
         column_graph: ColumnSubgraphBuilder | None = None
-        if self._neo4j is not None and self._column_proposer is not None:
+        if self._neo4j is not None and models.column is not None:
             column_graph = ColumnSubgraphBuilder(
                 candidates=ScopeColumnCatalog(RegistryRepository(self._session)),
-                proposer=self._column_proposer,
+                proposer=models.column,
                 writer=Neo4jColumnSubgraph(self._neo4j),
             )
-        agent: TableAgent = self._table_factory(column_graph).create(table_id)
+        agent: TableAgent = self._table_factory(column_graph, models).create(table_id)
         built: TableAnalysisContext = agent.build_context(options)
         KnowledgeContextStore(self._session).save(built)
         logger.info(
@@ -272,18 +216,19 @@ class RequestPlatform:
         table's knowledge subgraph. Accepted links replace prior LLM relationships.
         """
         logger.info("build scope context start scope_id=%s", scope_id)
+        models: CatalogModels = self._models(options.model, options.effort)
         writer: KnowledgeSubgraphWriter
         if self._neo4j is not None:
             writer = Neo4jScopeSubgraph(self._neo4j)
         else:
             writer = EmptyKnowledgeSubgraphWriter()
         builder: ScopeGraphBuilder = ScopeGraphBuilder(
-            proposer=self._scope_proposer,
+            proposer=models.scope_proposer,
             writer=writer,
             relationships=LlmRelationshipStore(self._session),
             publisher=self.graph,
         )
-        agent: ScopeAgent = self._scope_factory(builder).create(scope_id)
+        agent: ScopeAgent = self._scope_factory(builder, models).create(scope_id)
         built: ScopeAnalysisContext = agent.build_context(options)
         ScopeKnowledgeContextStore(self._session).save(built)
         logger.info(
@@ -299,7 +244,10 @@ class RequestPlatform:
         saved: ScopeAnalysisContext | None = ScopeKnowledgeContextStore(self._session).get(scope_id)
         if saved is None:
             raise EntityNotFoundError("knowledge context", str(scope_id))
-        return saved
+        filled: list[PipelineSummary] = self._fill_instance_summaries(saved.pipelines)
+        if filled is saved.pipelines:
+            return saved
+        return saved.model_copy(update={"pipelines": filled})
 
     def build_space_context(
         self,
@@ -313,18 +261,19 @@ class RequestPlatform:
         LLM relationships.
         """
         logger.info("build space context start space_id=%s", space_id)
+        models: CatalogModels = self._models(options.model, options.effort)
         writer: KnowledgeSubgraphWriter
         if self._neo4j is not None:
             writer = Neo4jSpaceSubgraph(self._neo4j)
         else:
             writer = EmptyKnowledgeSubgraphWriter()
         builder: SpaceGraphBuilder = SpaceGraphBuilder(
-            proposer=self._space_proposer,
+            proposer=models.space_proposer,
             writer=writer,
             relationships=LlmRelationshipStore(self._session),
             publisher=self.graph,
         )
-        agent: SpaceAgent = self._space_factory(builder).create(space_id)
+        agent: SpaceAgent = self._space_factory(builder, models).create(space_id)
         built: SpaceAnalysisContext = agent.build_context(options)
         SpaceKnowledgeContextStore(self._session).save(built)
         logger.info(
@@ -340,30 +289,75 @@ class RequestPlatform:
         saved: SpaceAnalysisContext | None = SpaceKnowledgeContextStore(self._session).get(space_id)
         if saved is None:
             raise EntityNotFoundError("knowledge context", str(space_id))
-        return saved
+        filled: list[PipelineSummary] = self._fill_instance_summaries(saved.pipelines)
+        if filled is saved.pipelines:
+            return saved
+        return saved.model_copy(update={"pipelines": filled})
+
+    def _fill_instance_summaries(self, pipelines: list[PipelineSummary]) -> list[PipelineSummary]:
+        missing: set[str] = pipelines_missing_instance_summary(pipelines)
+        if len(missing) == 0:
+            return pipelines
+        return apply_instance_summaries(pipelines, self._airflow_summaries(missing))
+
+    def _airflow_summaries(self, names: set[str]) -> dict[str, str]:
+        found: dict[str, str] = {}
+        store: AirflowKnowledgeContextStore = AirflowKnowledgeContextStore(self._session)
+        row: AirflowInstanceRow
+        for row in AirflowRepository(self._session).list_instances():
+            if row.name not in names or row.name in found:
+                continue
+            saved: AirflowAnalysisContext | None = store.get(row.id)
+            if saved is None or saved.summary is None:
+                continue
+            text: str = saved.summary.strip()
+            if text == "":
+                continue
+            found[row.name] = text
+        return found
 
     def generate_context(self, subject_id: UUID, options: ContextGenerationOptions) -> None:
         """Ask the space, table, or scope agent for business context. Origin is ``LLM``."""
         logger.info("generate context start kind=%s subject_id=%s", options.kind, subject_id)
+        models: CatalogModels = self._models(options.model, options.effort)
         match options.kind:
             case "space":
-                self._space_factory(None).create(subject_id).describe()
+                self._space_factory(None, models).create(subject_id).describe()
             case "scope":
-                self._scope_factory(None).create(subject_id).describe()
+                self._scope_factory(None, models).create(subject_id).describe()
             case "airflow":
-                self._airflow_factory(None).create(subject_id).describe()
+                self._airflow_factory(None, models).create(subject_id).describe()
             case "table":
-                self._table_factory(None).create(subject_id).describe_table()
+                self._table_factory(None, models).create(subject_id).describe_table()
             case "table_columns":
-                self._table_factory(None).create(subject_id).describe_columns()
+                self._table_factory(None, models).create(subject_id).describe_columns()
             case "column":
                 row: ColumnRow | None = RegistryRepository(self._session).get_column(subject_id)
                 if row is None:
                     raise EntityNotFoundError("column", str(subject_id))
-                self._table_factory(None).create(row.table_id).describe_column(subject_id)
+                self._table_factory(None, models).create(row.table_id).describe_column(subject_id)
         logger.info("generate context done kind=%s subject_id=%s", options.kind, subject_id)
 
-    def _table_factory(self, column_graph: ColumnSubgraphBuilder | None) -> TableAgentFactory:
+    def _models(self, key: ModelId, effort: ReasoningEffort) -> CatalogModels:
+        """Build the agents for one saved model and effort. Later calls reuse them."""
+        cache_key: tuple[ModelId, ReasoningEffort] = (key, effort)
+        cached: CatalogModels | None = self._bundles.get(cache_key)
+        if cached is not None:
+            return cached
+        built: CatalogModels = CatalogModels(
+            self._settings.llm.profile(key),
+            text_chars=self._settings.context.text_chars,
+            column_graph=self._neo4j is not None,
+            thinking=thinking_level(effort),
+        )
+        self._bundles[cache_key] = built
+        return built
+
+    def _table_factory(
+        self,
+        column_graph: ColumnSubgraphBuilder | None,
+        models: CatalogModels,
+    ) -> TableAgentFactory:
         reader: LineageReader = self._lineage if self._lineage is not None else EmptyLineageReader()
         return build_table_agent_factory(
             self._session,
@@ -371,12 +365,16 @@ class RequestPlatform:
             reader,
             UnconfiguredDataProfiler(),
             publisher=self.graph,
-            operation_agent=self._operation_agent,
+            operation_agent=models.operation,
             column_graph=column_graph,
             subgraph=None if self._neo4j is None else _TableSubgraph(self._neo4j),
         )
 
-    def _scope_factory(self, graph_builder: ScopeGraphAppender | None) -> ScopeAgentFactory:
+    def _scope_factory(
+        self,
+        graph_builder: ScopeGraphAppender | None,
+        models: CatalogModels,
+    ) -> ScopeAgentFactory:
         readers: list[TableKnowledgeReader] = [
             PostgresTableKnowledgeReader(KnowledgeContextStore(self._session)),
         ]
@@ -387,14 +385,20 @@ class RequestPlatform:
                 RegistryRepository(self._session),
                 MergedTableKnowledgeReader(readers),
                 ScopeKnowledgeContextStore(self._session),
-                pipelines=self._pipelines(graph_builder is not None),
+                pipelines=self._pipelines(graph_builder is not None, models),
+                max_tables=self._settings.context.scope_max_tables,
+                max_columns=self._settings.context.scope_max_columns,
             ),
             graph_builder,
-            describer=self._scope_describer,
+            describer=models.scope_describer,
             context_writer=SemanticContextStore(self._session),
         )
 
-    def _space_factory(self, graph_builder: SpaceGraphAppender | None) -> SpaceAgentFactory:
+    def _space_factory(
+        self,
+        graph_builder: SpaceGraphAppender | None,
+        models: CatalogModels,
+    ) -> SpaceAgentFactory:
         readers: list[ScopeKnowledgeReader] = [
             PostgresScopeKnowledgeReader(ScopeKnowledgeContextStore(self._session)),
         ]
@@ -405,10 +409,13 @@ class RequestPlatform:
                 RegistryRepository(self._session),
                 MergedScopeKnowledgeReader(readers),
                 SpaceKnowledgeContextStore(self._session),
-                pipelines=self._pipelines(graph_builder is not None),
+                pipelines=self._pipelines(graph_builder is not None, models),
+                max_scopes=self._settings.context.space_max_scopes,
+                max_tables=self._settings.context.space_max_tables,
+                max_columns=self._settings.context.space_max_columns,
             ),
             graph_builder,
-            describer=self._space_describer,
+            describer=models.space_describer,
             context_writer=SemanticContextStore(self._session),
         )
 
@@ -423,9 +430,10 @@ class RequestPlatform:
         replace prior LLM DAG mappings for those DAGs.
         """
         logger.info("build airflow context start instance_id=%s", instance_id)
+        models: CatalogModels = self._models(options.model, options.effort)
         repository: AirflowRepository = AirflowRepository(self._session)
-        builder: AirflowGraphBuilder = AirflowGraphBuilder(self._airflow_proposer, repository)
-        agent: AirflowInstanceAgent = self._airflow_factory(builder).create(instance_id)
+        builder: AirflowGraphBuilder = AirflowGraphBuilder(models.airflow_proposer, repository)
+        agent: AirflowInstanceAgent = self._airflow_factory(builder, models).create(instance_id)
         built: AirflowAnalysisContext = agent.build_context(options)
         AirflowKnowledgeContextStore(self._session).save(built)
         logger.info(
@@ -451,29 +459,41 @@ class RequestPlatform:
             raise EntityNotFoundError("airflow instance", str(instance_id))
         return row.name
 
-    def _airflow_factory(self, graph_builder: AirflowGraphBuilder | None) -> AirflowAgentFactory:
+    def _airflow_factory(
+        self,
+        graph_builder: AirflowGraphBuilder | None,
+        models: CatalogModels,
+    ) -> AirflowAgentFactory:
         return build_airflow_agent_factory(
             PostgresAirflowCatalogContextProvider(
                 AirflowRepository(self._session),
                 RegistryRepository(self._session),
                 AirflowKnowledgeContextStore(self._session),
+                limits=self._settings.context,
             ),
             graph_builder,
-            describer=self._airflow_describer,
+            describer=models.airflow_describer,
             context_writer=SemanticContextStore(self._session),
         )
 
-    def _pipelines(self, analyze: bool) -> AttachedPipelineSource:
+    def _pipelines(self, analyze: bool, models: CatalogModels) -> AttachedPipelineSource:
         repository: AirflowRepository = AirflowRepository(self._session)
         snapshots: AirflowKnowledgeContextStore = AirflowKnowledgeContextStore(self._session)
         if not analyze:
-            reader: AttachedPipelineReader = AttachedPipelineReader(repository, snapshots)
+            reader: AttachedPipelineReader = AttachedPipelineReader(
+                repository,
+                snapshots,
+                max_pipelines=self._settings.context.max_pipelines,
+                max_tasks=self._settings.context.airflow_max_tasks,
+            )
             return reader
-        builder: AirflowGraphBuilder = AirflowGraphBuilder(self._airflow_proposer, repository)
+        builder: AirflowGraphBuilder = AirflowGraphBuilder(models.airflow_proposer, repository)
         runner: AttachedPipelineRunner = AttachedPipelineRunner(
             repository,
-            self._airflow_factory(builder),
+            self._airflow_factory(builder, models),
             snapshots,
+            max_pipelines=self._settings.context.max_pipelines,
+            max_tasks=self._settings.context.airflow_max_tasks,
         )
         return runner
 

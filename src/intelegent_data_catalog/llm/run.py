@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Awaitable, Callable
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import (
@@ -26,8 +26,9 @@ from pydantic_ai.messages import (
     RetryPromptPart,
     ToolReturnPart,
 )
+from pydantic_ai.models import Model
 from pydantic_ai.run import AgentRunResult
-from pydantic_ai.settings import ModelSettings
+from pydantic_ai.settings import ModelSettings, ThinkingLevel
 from pydantic_ai.usage import UsageLimits
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
@@ -37,6 +38,7 @@ from intelegent_data_catalog.llm.trace import AgentTrace
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.llm")
 
 _ERROR_LIMIT: int = 300
+_GPT_4_1_COMPLETION_LIMIT: int = 32768
 
 
 class ModelCall[DepsT, OutputT]:
@@ -54,18 +56,20 @@ class ModelCall[DepsT, OutputT]:
         temperature: float,
         max_tokens: int,
         timeout_seconds: float,
-        thinking: bool | None = None,
+        thinking: ThinkingLevel | None = None,
     ) -> None:
         self._agent: Agent[DepsT, OutputT] = agent
         self._name: str = name
         self._max_requests: int = max_requests
+        bounded_tokens: int = _bounded_max_tokens(agent.model, max_tokens)
         settings: ModelSettings = {
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": bounded_tokens,
             "timeout": timeout_seconds,
         }
         if thinking is not None:
             settings["thinking"] = thinking
+        self._timeout_seconds: float = timeout_seconds
         self._settings: ModelSettings = settings
 
     def run(
@@ -96,26 +100,22 @@ class ModelCall[DepsT, OutputT]:
 
         result: AgentRunResult[OutputT]
         try:
-            if instructions is None:
-                result = await self._agent.run(
-                    prompt,
-                    deps=deps,
-                    model_settings=self._settings,
-                    usage_limits=UsageLimits(request_limit=self._max_requests),
-                    event_stream_handler=handle_events,
-                )
-            else:
-                result = await self._agent.run(
-                    prompt,
-                    deps=deps,
-                    instructions=instructions,
-                    model_settings=self._settings,
-                    usage_limits=UsageLimits(request_limit=self._max_requests),
-                    event_stream_handler=handle_events,
-                )
+            result = await asyncio.wait_for(
+                self._invoke(prompt, deps, instructions, handle_events),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError as err:
+            seconds: int = int(self._timeout_seconds)
+            raise LlmError(f"language model timed out after {seconds} seconds") from err
         except UsageLimitExceeded as err:
             raise LlmError("language model exceeded the tool step limit") from err
         except ModelHTTPError as err:
+            logger.warning(
+                "agent=%s language model returned %s: %s",
+                self._name,
+                err.status_code,
+                _provider_message(err.body),
+            )
             raise LlmError(f"language model returned {err.status_code}") from err
         except ModelAPIError as err:
             detail: str = str(err).strip()
@@ -131,6 +131,76 @@ class ModelCall[DepsT, OutputT]:
         trace.finish(result)
         output: OutputT = result.output
         return output
+
+    async def _invoke(
+        self,
+        prompt: str,
+        deps: DepsT,
+        instructions: str | None,
+        handle_events: Callable[
+            [RunContext[DepsT], AsyncIterable[AgentStreamEvent]],
+            Awaitable[None],
+        ],
+    ) -> AgentRunResult[OutputT]:
+        """Run one agent call. The caller applies the total timeout."""
+        if instructions is None:
+            return await self._agent.run(
+                prompt,
+                deps=deps,
+                model_settings=self._settings,
+                usage_limits=UsageLimits(request_limit=self._max_requests),
+                event_stream_handler=handle_events,
+            )
+        return await self._agent.run(
+            prompt,
+            deps=deps,
+            instructions=instructions,
+            model_settings=self._settings,
+            usage_limits=UsageLimits(request_limit=self._max_requests),
+            event_stream_handler=handle_events,
+        )
+
+
+def _bounded_max_tokens(model: object, requested: int) -> int:
+    """Keep the completion budget inside the limit the provider accepts.
+
+    ``settings.toml`` asks for 100000 so a reasoning model can finish. GPT-4.1
+    rejects anything above 32768, and Claude rejects a budget above the output
+    cap on its profile.
+    """
+    limit: int | None = _completion_limit(model)
+    if limit is None or requested <= limit:
+        return requested
+    return limit
+
+
+def _completion_limit(model: object) -> int | None:
+    if not isinstance(model, Model):
+        return None
+    name: str = model.model_name
+    if name == "gpt-4.1" or name.startswith("gpt-4.1-"):
+        return _GPT_4_1_COMPLETION_LIMIT
+    cap: object = model.profile.get("anthropic_max_output_tokens")
+    if isinstance(cap, int) and cap >= 1:
+        return cap
+    return None
+
+
+def _provider_message(body: object) -> str:
+    """Return the provider error text. The stored job error stays the status code."""
+    message: object = ""
+    if isinstance(body, dict):
+        message = body.get("message", "")
+        if not isinstance(message, str) or message.strip() == "":
+            error: object = body.get("error")
+            if isinstance(error, dict):
+                message = error.get("message", "")
+    elif body is not None:
+        message = str(body)
+    if not isinstance(message, str):
+        return ""
+    text: str = " ".join(message.split())
+    return text[:_ERROR_LIMIT]
 
 
 def _observe_event(trace: AgentTrace, event: AgentStreamEvent) -> None:

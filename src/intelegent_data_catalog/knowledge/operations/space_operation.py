@@ -76,7 +76,7 @@ class SpaceAgent:
                 summary=None,
                 scopes_without_context=list(loaded.scopes_without_context),
                 previous_links_kept=0,
-                pipelines=pipeline_summaries(loaded.pipelines),
+                pipelines=pipeline_summaries(loaded.pipelines, _names(loaded)),
             )
         written: SpaceAnalysisContext = self._graph_builder.apply(
             loaded,
@@ -106,3 +106,11 @@ class SpaceAgent:
         if loaded.space.id != self._space_id:
             raise ValidationAppError("catalog context is for a different space", field="space_id")
         return loaded
+
+
+def _names(context: SpaceCatalogContext) -> dict[UUID, str]:
+    found: dict[UUID, str] = {}
+    for scope in context.scopes:
+        for table in scope.tables:
+            found[table.id] = table.name
+    return found

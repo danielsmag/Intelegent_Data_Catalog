@@ -11,7 +11,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.exceptions import ConflictError, ValidationAppError
+from intelegent_data_catalog.exceptions import (
+    ConflictError,
+    EntityNotFoundError,
+    ValidationAppError,
+)
 from intelegent_data_catalog.persistence import migrate as migrate_module
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
@@ -46,6 +50,7 @@ from intelegent_data_catalog.registry.schemas import (
     ScopeCreate,
     ScopeUpdate,
     SourceBindingCreate,
+    SourceBindingRead,
     SourceRef,
     SourceSnapshot,
     SpaceCreate,
@@ -245,6 +250,53 @@ def test_space_delete_is_restricted_while_a_scope_exists(tmp_path: Path) -> None
         with pytest.raises(IntegrityError):
             session.execute(delete(SpaceRow).where(SpaceRow.id == space_id))
             session.commit()
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_scope_delete_clears_default_on_source_bindings(tmp_path: Path) -> None:
+    """Dropping a scope unsets it as the default. Other defaults stay."""
+    database: CatalogDatabase = _database(tmp_path)
+    session: Session = database.session()
+    service: RegistryService = RegistryService(session)
+    try:
+        space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
+        dropped_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
+        kept_id: UUID = service.create_scope(space_id, ScopeCreate(name="Billing")).id
+        source_id: UUID = service.create_data_source(
+            DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
+        ).id
+        engine_id: UUID = service.create_engine_connection(
+            EngineConnectionCreate(
+                name="Trino",
+                engine_type=EngineType.TRINO,
+                endpoint="http://trino:8080",
+            )
+        ).id
+        dropped_binding: SourceBindingRead = service.create_source_binding(
+            SourceBindingCreate(
+                data_source_id=source_id,
+                engine_connection_id=engine_id,
+                binding_key="lake",
+                default_scope_id=dropped_id,
+            )
+        )
+        kept_binding: SourceBindingRead = service.create_source_binding(
+            SourceBindingCreate(
+                data_source_id=source_id,
+                engine_connection_id=engine_id,
+                binding_key="billing",
+                default_scope_id=kept_id,
+            )
+        )
+        service.delete_scope(dropped_id)
+        cleared: SourceBindingRead = service.get_source_binding(dropped_binding.id)
+        assert cleared.default_scope_id is None
+        untouched: SourceBindingRead = service.get_source_binding(kept_binding.id)
+        assert untouched.default_scope_id == kept_id
+        with pytest.raises(EntityNotFoundError, match="scope"):
+            service.get_scope(dropped_id)
     finally:
         session.close()
         database.dispose()

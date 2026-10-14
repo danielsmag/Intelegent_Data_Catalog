@@ -1,7 +1,7 @@
 """Attached Airflow DAGs for a scope or space. One model call per Airflow instance."""
 
 import logging
-from typing import Protocol
+from typing import NamedTuple, Protocol
 from uuid import UUID
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository, AttachedDag
@@ -14,6 +14,7 @@ from intelegent_data_catalog.knowledge.models import (
     DagFinding,
     DagTableLink,
     PipelineInput,
+    PipelineTask,
 )
 from intelegent_data_catalog.knowledge.store import AirflowKnowledgeContextStore
 from intelegent_data_catalog.persistence.enums import AirflowMappingDirection, AirflowMappingOrigin
@@ -21,7 +22,10 @@ from intelegent_data_catalog.persistence.models import AirflowDagTableRow
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 
-_MAX_PIPELINES: int = 30
+
+class _InstanceAnalysis(NamedTuple):
+    findings: dict[UUID, DagFinding]
+    summary: str | None
 
 
 class AttachedPipelineSource(Protocol):
@@ -49,10 +53,14 @@ class AttachedPipelineRunner:
         repository: AirflowRepository,
         agents: AirflowAgentFactory,
         snapshots: AirflowKnowledgeContextStore,
+        max_pipelines: int = 30,
+        max_tasks: int = 60,
     ) -> None:
         self._repository: AirflowRepository = repository
         self._agents: AirflowAgentFactory = agents
         self._snapshots: AirflowKnowledgeContextStore = snapshots
+        self._max_pipelines: int = max_pipelines
+        self._max_tasks: int = max_tasks
 
     def for_scope(self, scope_id: UUID, table_ids: set[UUID]) -> list[PipelineInput]:
         """Analyze each attached instance once for this scope."""
@@ -79,22 +87,31 @@ class AttachedPipelineRunner:
         for item in attached:
             grouped.setdefault(item.instance.id, []).append(item)
         findings: dict[UUID, DagFinding] = {}
+        summaries: dict[UUID, str | None] = {}
         instance_id: UUID
         group: list[AttachedDag]
         for instance_id, group in grouped.items():
-            analyzed: dict[UUID, DagFinding] | None = self._analyze(instance_id, group, table_ids)
+            analyzed: _InstanceAnalysis | None = self._analyze(instance_id, group, table_ids)
             if analyzed is None:
-                findings.update(_stored_findings(self._snapshots, instance_id))
-                continue
-            findings.update(analyzed)
-        return _pipeline_inputs(attached, findings, self._repository, table_ids)
+                analyzed = _stored_analysis(self._snapshots, instance_id)
+            findings.update(analyzed.findings)
+            summaries[instance_id] = analyzed.summary
+        return _pipeline_inputs(
+            attached,
+            findings,
+            summaries,
+            self._repository,
+            table_ids,
+            self._max_pipelines,
+            self._max_tasks,
+        )
 
     def _analyze(
         self,
         instance_id: UUID,
         group: list[AttachedDag],
         table_ids: set[UUID],
-    ) -> dict[UUID, DagFinding] | None:
+    ) -> _InstanceAnalysis | None:
         dag_row_ids: set[UUID] = {item.dag.id for item in group}
         try:
             built: AirflowAnalysisContext = self._agents.create(instance_id).build_context(
@@ -102,7 +119,7 @@ class AttachedPipelineRunner:
                 dag_row_ids=dag_row_ids,
                 candidate_table_ids=table_ids,
             )
-            self._snapshots.merge_findings(built)
+            merged: AirflowAnalysisContext = self._snapshots.merge_findings(built)
         except CatalogError as err:
             logger.warning("airflow analysis failed instance_id=%s error=%s", instance_id, err)
             self._repository.rollback()
@@ -112,7 +129,7 @@ class AttachedPipelineRunner:
             self._repository.rollback()
             return None
         found: dict[UUID, DagFinding] = {finding.dag_row_id: finding for finding in built.findings}
-        return found
+        return _InstanceAnalysis(found, _blank(merged.summary))
 
 
 class AttachedPipelineReader:
@@ -122,9 +139,13 @@ class AttachedPipelineReader:
         self,
         repository: AirflowRepository,
         snapshots: AirflowKnowledgeContextStore,
+        max_pipelines: int = 30,
+        max_tasks: int = 60,
     ) -> None:
         self._repository: AirflowRepository = repository
         self._snapshots: AirflowKnowledgeContextStore = snapshots
+        self._max_pipelines: int = max_pipelines
+        self._max_tasks: int = max_tasks
 
     def for_scope(self, scope_id: UUID, table_ids: set[UUID]) -> list[PipelineInput]:
         """Return stored pipelines for one scope."""
@@ -147,31 +168,48 @@ class AttachedPipelineReader:
     ) -> list[PipelineInput]:
         attached: list[AttachedDag] = self._repository.list_attached_dags(scope_ids, space_ids)
         findings: dict[UUID, DagFinding] = {}
+        summaries: dict[UUID, str | None] = {}
         seen: set[UUID] = set()
         item: AttachedDag
         for item in attached:
             if item.instance.id in seen:
                 continue
             seen.add(item.instance.id)
-            findings.update(_stored_findings(self._snapshots, item.instance.id))
-        return _pipeline_inputs(attached, findings, self._repository, table_ids)
+            analyzed: _InstanceAnalysis = _stored_analysis(self._snapshots, item.instance.id)
+            findings.update(analyzed.findings)
+            summaries[item.instance.id] = analyzed.summary
+        return _pipeline_inputs(
+            attached,
+            findings,
+            summaries,
+            self._repository,
+            table_ids,
+            self._max_pipelines,
+            self._max_tasks,
+        )
 
 
-def _stored_findings(
+def _stored_analysis(
     snapshots: AirflowKnowledgeContextStore,
     instance_id: UUID,
-) -> dict[UUID, DagFinding]:
+) -> _InstanceAnalysis:
     saved: AirflowAnalysisContext | None = snapshots.get(instance_id)
     if saved is None:
-        return {}
-    return {finding.dag_row_id: finding for finding in saved.findings}
+        return _InstanceAnalysis({}, None)
+    return _InstanceAnalysis(
+        {finding.dag_row_id: finding for finding in saved.findings},
+        _blank(saved.summary),
+    )
 
 
 def _pipeline_inputs(
     attached: list[AttachedDag],
     findings: dict[UUID, DagFinding],
+    summaries: dict[UUID, str | None],
     repository: AirflowRepository,
     table_ids: set[UUID],
+    max_pipelines: int,
+    max_tasks: int,
 ) -> list[PipelineInput]:
     mappings: dict[UUID, list[AirflowDagTableRow]] = {}
     link: AirflowDagTableRow
@@ -191,16 +229,39 @@ def _pipeline_inputs(
                 dag_id=item.dag.dag_id,
                 instance_name=item.instance.name,
                 instance_context=_blank(item.instance.context),
+                instance_summary=_blank(summaries.get(item.instance.id)),
                 description=_blank(item.dag.description),
                 schedule=_blank(item.dag.timetable_summary),
                 summary=summary,
+                tasks=_pipeline_tasks(item.dag.tasks, max_tasks),
                 reads=reads,
                 writes=writes,
                 unknown=unknown,
             )
         )
     built.sort(key=lambda pipeline: (pipeline.instance_name, pipeline.dag_id))
-    return built[:_MAX_PIPELINES]
+    return built[:max_pipelines]
+
+
+def _pipeline_tasks(value: object, max_tasks: int) -> list[PipelineTask]:
+    if not isinstance(value, list):
+        return []
+    found: list[PipelineTask] = []
+    item: object
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        task_id: object = item.get("task_id")
+        if not isinstance(task_id, str) or task_id.strip() == "":
+            continue
+        operator: object = item.get("operator_name")
+        operator_name: str | None = None
+        if isinstance(operator, str) and operator.strip() != "":
+            operator_name = operator
+        found.append(PipelineTask(task_id=task_id, operator_name=operator_name))
+        if len(found) >= max_tasks:
+            break
+    return found
 
 
 def _directions(

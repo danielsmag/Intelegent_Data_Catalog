@@ -117,6 +117,90 @@ def test_space_scope_and_table_crud(tmp_path: Path) -> None:
         database.dispose()
 
 
+def test_rename_refreshes_space_and_scope_slugs(tmp_path: Path) -> None:
+    """A name patch refreshes the slug. Explicit slug, description, and clashes stay distinct."""
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        created: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
+        assert created.status_code == 201
+        space_id: str = _text(_object(created), "id")
+        renamed: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/spaces/{space_id}",
+            {"name": "  Retail Ops  "},
+        )
+        assert renamed.status_code == 200
+        renamed_body: dict[str, object] = _object(renamed)
+        assert renamed_body["name"] == "Retail Ops"
+        assert renamed_body["slug"] == "retail-ops"
+        described: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/spaces/{space_id}",
+            {"description": "Selling"},
+        )
+        assert described.status_code == 200
+        described_body: dict[str, object] = _object(described)
+        assert described_body["name"] == "Retail Ops"
+        assert described_body["slug"] == "retail-ops"
+        custom: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/spaces/{space_id}",
+            {"name": "Storefront", "slug": "shop"},
+        )
+        assert custom.status_code == 200
+        assert _object(custom)["slug"] == "shop"
+        blank: httpx.Response = _send(app, "PATCH", f"/api/v1/spaces/{space_id}", {"name": "   "})
+        assert blank.status_code == 422
+        other: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Billing"})
+        assert other.status_code == 201
+        clash: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/spaces/{_text(_object(other), 'id')}",
+            {"name": "Shop"},
+        )
+        assert clash.status_code == 409
+        scope: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/spaces/{space_id}/scopes",
+            {"name": "Ordering"},
+        )
+        assert scope.status_code == 201
+        scope_id: str = _text(_object(scope), "id")
+        scope_renamed: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/scopes/{scope_id}",
+            {"name": "Checkout"},
+        )
+        assert scope_renamed.status_code == 200
+        scope_body: dict[str, object] = _object(scope_renamed)
+        assert scope_body["name"] == "Checkout"
+        assert scope_body["slug"] == "checkout"
+        sibling: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/spaces/{space_id}/scopes",
+            {"name": "Inventory"},
+        )
+        assert sibling.status_code == 201
+        scope_clash: httpx.Response = _send(
+            app,
+            "PATCH",
+            f"/api/v1/scopes/{_text(_object(sibling), 'id')}",
+            {"name": "Checkout"},
+        )
+        assert scope_clash.status_code == 409
+    finally:
+        database.dispose()
+
+
 def test_bindings_keep_spark_and_trino_addresses_explicit(tmp_path: Path) -> None:
     """A query binding stores the Spark key it was given and cannot borrow Trino."""
     app: FastAPI

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactElement, type RefObject, type UIEvent } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type RefObject, type UIEvent } from "react"
 import { errorMessage, isAbortError } from "./api"
 import { getPaneWidth, setPaneWidth } from "./paneLayout"
 import {
   fetchBuildTraces,
   type BuildTraceEvent,
+  type BuildTraceJob,
   type BuildTraceKind,
   type BuildTracePage,
 } from "./registryApi"
@@ -11,6 +12,7 @@ import {
 const RAIL_DEFAULT: number = 280
 const RAIL_TRACE: number = 440
 const POLL_MS: number = 1000
+const EXPAND_KEY: string = "idc-trace-expand"
 
 type TraceFilter = "all" | BuildTraceKind
 
@@ -18,6 +20,22 @@ type FilterChoice = {
   id: TraceFilter
   label: string
   empty: string
+}
+
+function readExpandAll(): boolean {
+  try {
+    return window.localStorage.getItem(EXPAND_KEY) === "true"
+  } catch {
+    return false
+  }
+}
+
+function writeExpandAll(open: boolean): void {
+  try {
+    window.localStorage.setItem(EXPAND_KEY, open ? "true" : "false")
+  } catch {
+    return
+  }
 }
 
 const FILTERS = [
@@ -29,6 +47,12 @@ const FILTERS = [
 ] as const satisfies readonly FilterChoice[]
 
 type CardStatus = "running" | "saved" | "failed"
+
+type JobClock = {
+  status: CardStatus
+  error: string | null
+  finishedAt: string | null
+}
 
 type StepKind = "thought" | "tool" | "prose" | "meta" | "saved" | "failed" | "retry"
 
@@ -54,14 +78,18 @@ type TraceCard = {
 
 export function BuildTracePanel(): ReactElement {
   const [events, setEvents] = useState<BuildTraceEvent[]>([])
+  const [clocks, setClocks] = useState<Record<string, JobClock>>({})
+  const openJobsRef: RefObject<string[]> = useRef<string[]>([])
   const [filter, setFilter] = useState<TraceFilter>("all")
   const [forced, setForced] = useState<Record<string, boolean>>({})
   const [openSteps, setOpenSteps] = useState<Record<string, boolean>>({})
-  const [expandIncoming, setExpandIncoming] = useState<boolean>(false)
+  const [expandIncoming, setExpandIncoming] = useState<boolean>(readExpandAll)
+  const [stickNewest, setStickNewest] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState<number>(() => Date.now())
   const feedRef: RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null)
   const stickRef: RefObject<boolean> = useRef<boolean>(true)
+  const scrollingRef: RefObject<boolean> = useRef<boolean>(false)
 
   useEffect(() => {
     if (getPaneWidth("rail") === RAIL_DEFAULT) {
@@ -82,7 +110,7 @@ export function BuildTracePanel(): ReactElement {
     let stopped: boolean = false
     let cursor: string | null = null
     const tick = (): void => {
-      void fetchBuildTraces(cursor, AbortSignal.timeout(4000))
+      void fetchBuildTraces(cursor, openJobsRef.current, AbortSignal.timeout(4000))
         .then((page: BuildTracePage) => {
           if (stopped) {
             return
@@ -90,6 +118,9 @@ export function BuildTracePanel(): ReactElement {
           setError(null)
           if (page.events.length > 0) {
             setEvents((current: BuildTraceEvent[]) => mergeEvents(current, page.events))
+          }
+          if (page.jobs.length > 0) {
+            setClocks((current: Record<string, JobClock>) => mergeClocks(current, page.jobs))
           }
           if (page.cursor !== null) {
             cursor = page.cursor
@@ -110,25 +141,58 @@ export function BuildTracePanel(): ReactElement {
     }
   }, [])
 
-  const cards: TraceCard[] = groupCards(events)
+  const cards: TraceCard[] = groupCards(events, clocks)
+  openJobsRef.current = openJobIds(cards)
   const shown: TraceCard[] = cards.filter((card: TraceCard) => filter === "all" || card.kind === filter)
   const choice: FilterChoice = FILTERS.find((item: FilterChoice) => item.id === filter) ?? FILTERS[0]
+  const newestCard: TraceCard | undefined = shown[0]
+  const tailStep: TraceStepView | undefined =
+    newestCard === undefined ? undefined : newestCard.steps[newestCard.steps.length - 1]
+  const newestKey: string =
+    newestCard === undefined || tailStep === undefined
+      ? ""
+      : `${newestCard.jobId}:${newestCard.status}:${newestCard.steps.length}:${tailStep.id}:${tailStep.detail.length}`
 
-  useEffect(() => {
-    const node: HTMLDivElement | null = feedRef.current
-    if (node !== null && stickRef.current) {
-      node.scrollTop = node.scrollHeight
+  useLayoutEffect(() => {
+    if (!stickRef.current) {
+      return
     }
-  }, [shown])
+    scrollingRef.current = true
+    scrollNewest(feedRef.current)
+    const timer: number = window.setTimeout(() => {
+      scrollingRef.current = false
+    }, 80)
+    return () => {
+      window.clearTimeout(timer)
+      scrollingRef.current = false
+    }
+  }, [newestKey, expandIncoming, forced, openSteps, stickNewest])
 
   function onFeedScroll(event: UIEvent<HTMLDivElement>): void {
-    const node: HTMLDivElement = event.currentTarget
-    const distance: number = node.scrollHeight - node.scrollTop - node.clientHeight
-    stickRef.current = distance < 48
+    if (scrollingRef.current || !stickRef.current) {
+      return
+    }
+    const feed: HTMLDivElement = event.currentTarget
+    const card: HTMLElement | null = feed.querySelector<HTMLElement>(".trace-turn")
+    if (card === null) {
+      return
+    }
+    const drift: number = Math.abs(newestTopDelta(feed, card))
+    if (drift <= 48) {
+      return
+    }
+    stickRef.current = false
+    setStickNewest(false)
+  }
+
+  function toggleStick(): void {
+    const next: boolean = !stickRef.current
+    stickRef.current = next
+    setStickNewest(next)
   }
 
   function setShownOpen(open: boolean): void {
-    stickRef.current = false
+    writeExpandAll(open)
     setExpandIncoming(open)
     const jobIds: string[] = shown.map((card: TraceCard) => card.jobId)
     const stepIds: string[] = shown.flatMap((card: TraceCard) => disclosureKeys(card))
@@ -189,6 +253,15 @@ export function BuildTracePanel(): ReactElement {
             Collapse all
           </button>
         </div>
+        <button
+          type="button"
+          className="trace-bulk-button trace-stick"
+          aria-pressed={stickNewest}
+          title="Stick to newest message"
+          onClick={toggleStick}
+        >
+          Newest
+        </button>
       </div>
       <div className="trace-feed" ref={feedRef} onScroll={onFeedScroll}>
         {shown.length === 0 ? (
@@ -249,9 +322,15 @@ function TraceTurn(props: {
   const label: string = workLabel(props.card, props.now)
   const failed: boolean = props.card.status === "failed" && props.card.outcome !== null
   return (
-    <article className="trace-turn">
+    <article className={`trace-turn trace-kind-${props.card.kind}`}>
       <div className="trace-bubble">{requestCopy(props.card)}</div>
-      <button type="button" className="trace-run" aria-expanded={props.open} onClick={props.onToggleRun}>
+      <button
+        type="button"
+        className="trace-run"
+        data-status={props.card.status}
+        aria-expanded={props.open}
+        onClick={props.onToggleRun}
+      >
         <span className="trace-run-label">{label}</span>
         <TraceChevron open={props.open} />
       </button>
@@ -261,6 +340,7 @@ function TraceTurn(props: {
             props.card.steps,
             props.card.status === "running",
             props.now,
+            props.card.status === "running" ? undefined : props.card.endedAt,
             props.openSteps,
             props.expandIncoming,
             props.onToggleStep,
@@ -282,6 +362,7 @@ function renderSteps(
   steps: readonly TraceStepView[],
   running: boolean,
   now: number,
+  endedAt: string | undefined,
   openSteps: Record<string, boolean>,
   expandIncoming: boolean,
   onToggleStep: (id: string, open: boolean) => void,
@@ -328,6 +409,7 @@ function renderSteps(
         step={step}
         nextAt={following === undefined ? undefined : following.at}
         running={running}
+        endedAt={endedAt}
         now={now}
         open={open}
         onToggle={() => {
@@ -344,13 +426,14 @@ function TraceStep(props: {
   step: TraceStepView
   nextAt: string | undefined
   running: boolean
+  endedAt: string | undefined
   now: number
   open: boolean
   onToggle: () => void
 }): ReactElement {
   if (props.step.kind === "prose") {
     if (isStructured(props.step.detail)) {
-      return <CodeBlock title="answer" body={formatDetail(props.step.detail)} />
+      return <CodeBlock title="answer" body={props.step.detail} />
     }
     return <p className="trace-prose">{props.step.detail}</p>
   }
@@ -364,7 +447,9 @@ function TraceStep(props: {
     return <p className="trace-meta">{props.step.detail}</p>
   }
   const label: string =
-    props.step.kind === "thought" ? thoughtLabel(props.step, props.nextAt, props.now, props.running) : props.step.title
+    props.step.kind === "thought"
+      ? thoughtLabel(props.step, props.nextAt, props.now, props.running, props.endedAt)
+      : props.step.title
   if (props.step.detail === "") {
     return (
       <div className="trace-row">
@@ -378,7 +463,7 @@ function TraceStep(props: {
         <span className="trace-row-title">{label}</span>
         <TraceChevron open={props.open} />
       </button>
-      {props.open ? <pre className="trace-thought">{formatDetail(props.step.detail)}</pre> : null}
+      {props.open ? <TraceBody detail={props.step.detail} framed /> : null}
     </div>
   )
 }
@@ -390,7 +475,7 @@ function CodeBlock(props: { title: string; body: string }): ReactElement {
         <span className="trace-mark" aria-hidden="true" />
         <span>{props.title}</span>
       </div>
-      {props.body !== "" ? <pre className="trace-block-body">{props.body}</pre> : null}
+      {props.body !== "" ? <TraceBody detail={props.body} /> : null}
     </div>
   )
 }
@@ -411,15 +496,39 @@ function ToolGroup(props: { tools: TraceStepView[]; open: boolean; onToggle: () 
         {!props.open && line !== "" ? <span className="trace-row-line">{line}</span> : null}
       </button>
       {props.open && single && first.detail !== "" ? (
-        <CodeBlock title={first.title} body={formatDetail(first.detail)} />
+        <CodeBlock title={first.title} body={first.detail} />
       ) : null}
       {props.open && !single
         ? props.tools.map((tool: TraceStepView) => (
-            <CodeBlock key={tool.id} title={tool.title} body={formatDetail(tool.detail)} />
+            <CodeBlock key={tool.id} title={tool.title} body={tool.detail} />
           ))
         : null}
     </div>
   )
+}
+
+function scrollNewest(feed: HTMLDivElement | null): void {
+  if (feed === null) {
+    return
+  }
+  const card: HTMLElement | null = feed.querySelector<HTMLElement>(".trace-turn")
+  if (card === null) {
+    return
+  }
+  const delta: number = newestTopDelta(feed, card)
+  if (Math.abs(delta) <= 1) {
+    return
+  }
+  feed.scrollTop += delta
+}
+
+function newestTopDelta(feed: HTMLDivElement, card: HTMLElement): number {
+  const feedStyle: CSSStyleDeclaration = window.getComputedStyle(feed)
+  const padTop: number = Number.parseFloat(feedStyle.paddingTop)
+  const topInset: number = Number.isFinite(padTop) ? padTop : 0
+  const feedRect: DOMRect = feed.getBoundingClientRect()
+  const cardRect: DOMRect = card.getBoundingClientRect()
+  return cardRect.top - (feedRect.top + topInset)
 }
 
 function disclosureOpen(openSteps: Record<string, boolean>, id: string, expandIncoming: boolean): boolean {
@@ -479,8 +588,14 @@ function workLabel(card: TraceCard, now: number): string {
   return card.status === "running" ? `Working for ${span}` : `Worked for ${span}`
 }
 
-function thoughtLabel(step: TraceStepView, nextAt: string | undefined, now: number, running: boolean): string {
-  const end: string | undefined = nextAt ?? (running ? new Date(now).toISOString() : undefined)
+function thoughtLabel(
+  step: TraceStepView,
+  nextAt: string | undefined,
+  now: number,
+  running: boolean,
+  endedAt: string | undefined,
+): string {
+  const end: string | undefined = nextAt ?? (running ? new Date(now).toISOString() : endedAt)
   if (end === undefined) {
     return "Thought"
   }
@@ -536,17 +651,266 @@ function isStructured(detail: string): boolean {
   return trimmed.startsWith("{") || trimmed.startsWith("[")
 }
 
-function formatDetail(detail: string): string {
+const PROSE_KEYS: readonly string[] = [
+  "summary",
+  "description",
+  "context",
+  "instance_context",
+  "space_context",
+  "scope_context",
+  "reason",
+]
+
+type TraceNote = {
+  label: string
+  text: string
+}
+
+type TraceBodyView = {
+  notes: TraceNote[]
+  code: string
+}
+
+type TokenKind = "key" | "string" | "number" | "punct" | "literal" | "text"
+
+type TraceToken = {
+  kind: TokenKind
+  text: string
+}
+
+function TraceBody(props: { detail: string; framed?: boolean }): ReactElement | null {
+  const view: TraceBodyView = presentDetail(props.detail)
+  if (view.notes.length === 0 && view.code === "") {
+    return null
+  }
+  const className: string = props.framed === true ? "trace-detail trace-detail-framed" : "trace-detail"
+  return (
+    <div className={className}>
+      {view.notes.map((note: TraceNote) => (
+        <p key={note.label} className="trace-readable">
+          {note.label !== "" ? <span className="trace-readable-label">{note.label}</span> : null}
+          {note.text}
+        </p>
+      ))}
+      {view.code !== "" ? <pre className="trace-code">{colorTokens(view.code)}</pre> : null}
+    </div>
+  )
+}
+
+function presentDetail(detail: string): TraceBodyView {
   const trimmed: string = detail.trim()
-  if (!isStructured(trimmed)) {
-    return detail
+  if (trimmed === "") {
+    return { notes: [], code: "" }
   }
+  let parsed: unknown
+  let valid: boolean = false
   try {
-    const parsed: unknown = JSON.parse(trimmed)
-    return JSON.stringify(parsed, null, 2)
+    parsed = JSON.parse(trimmed)
+    valid = true
   } catch {
+    parsed = undefined
+  }
+  if (valid && isRecord(parsed)) {
+    return presentRecord(parsed)
+  }
+  if (valid && typeof parsed === "string") {
+    return { notes: [{ label: "", text: parsed }], code: "" }
+  }
+  if (valid) {
+    return { notes: [], code: JSON.stringify(parsed, null, 2) }
+  }
+  return { notes: [], code: loosen(trimmed) }
+}
+
+function presentRecord(parsed: Record<string, unknown>): TraceBodyView {
+  const notes: TraceNote[] = []
+  const rest: Record<string, unknown> = {}
+  for (const key of Object.keys(parsed)) {
+    const value: unknown = parsed[key]
+    if (isProse(key, value)) {
+      notes.push({ label: key.replaceAll("_", " "), text: value.trim() })
+      continue
+    }
+    rest[key] = value
+  }
+  const code: string = Object.keys(rest).length === 0 ? "" : JSON.stringify(rest, null, 2)
+  return { notes, code }
+}
+
+function isProse(key: string, value: unknown): value is string {
+  return PROSE_KEYS.includes(key) && typeof value === "string" && value.trim() !== ""
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function colorTokens(source: string): ReactElement[] {
+  const tokens: TraceToken[] = scanTokens(source)
+  return tokens.map((token: TraceToken, index: number) => (
+    <span key={`${token.kind}-${index}`} className={`trace-tok trace-tok-${token.kind}`}>
+      {token.text}
+    </span>
+  ))
+}
+
+function scanTokens(source: string): TraceToken[] {
+  const tokens: TraceToken[] = []
+  let index: number = 0
+  while (index < source.length) {
+    const char: string = source[index] ?? ""
+    if (char === '"') {
+      const end: number = endString(source, index)
+      const raw: string = source.slice(index, end)
+      const next: number = skipSpace(source, end)
+      const kind: TokenKind = source[next] === ":" ? "key" : "string"
+      tokens.push({ kind, text: raw })
+      index = end
+      continue
+    }
+    if (char === " " || char === "\n" || char === "\t") {
+      const start: number = index
+      index += 1
+      while (index < source.length) {
+        const space: string = source[index] ?? ""
+        if (space !== " " && space !== "\n" && space !== "\t") {
+          break
+        }
+        index += 1
+      }
+      tokens.push({ kind: "text", text: source.slice(start, index) })
+      continue
+    }
+    if ("{}[]:,".includes(char)) {
+      tokens.push({ kind: "punct", text: char })
+      index += 1
+      continue
+    }
+    if (char === "-" || (char >= "0" && char <= "9")) {
+      const start: number = index
+      index += 1
+      while (index < source.length && "0123456789.eE+-".includes(source[index] ?? "")) {
+        index += 1
+      }
+      tokens.push({ kind: "number", text: source.slice(start, index) })
+      continue
+    }
+    const word: string = readWord(source, index)
+    if (word === "true" || word === "false" || word === "null") {
+      tokens.push({ kind: "literal", text: word })
+      index += word.length
+      continue
+    }
+    if (word !== "") {
+      tokens.push({ kind: "text", text: word })
+      index += word.length
+      continue
+    }
+    tokens.push({ kind: "text", text: char })
+    index += 1
+  }
+  return tokens
+}
+
+function endString(source: string, start: number): number {
+  let index: number = start + 1
+  let escaped: boolean = false
+  while (index < source.length) {
+    const char: string = source[index] ?? ""
+    index += 1
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === "\\") {
+      escaped = true
+      continue
+    }
+    if (char === '"') {
+      return index
+    }
+  }
+  return source.length
+}
+
+function skipSpace(source: string, start: number): number {
+  let index: number = start
+  while (index < source.length) {
+    const char: string = source[index] ?? ""
+    if (char !== " " && char !== "\n" && char !== "\t") {
+      return index
+    }
+    index += 1
+  }
+  return index
+}
+
+function readWord(source: string, start: number): string {
+  let index: number = start
+  while (index < source.length) {
+    const char: string = source[index] ?? ""
+    if (!/[A-Za-z_]/.test(char)) {
+      break
+    }
+    index += 1
+  }
+  return source.slice(start, index)
+}
+
+function loosen(detail: string): string {
+  const trimmed: string = detail.trim()
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
     return detail
   }
+  let result: string = ""
+  let depth: number = 0
+  let inString: boolean = false
+  let escaped: boolean = false
+  for (const char of trimmed) {
+    if (inString) {
+      result += char
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === "\\") {
+        escaped = true
+        continue
+      }
+      if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      result += char
+      continue
+    }
+    if (char === "{" || char === "[") {
+      depth += 1
+      result += `${char}\n${"  ".repeat(depth)}`
+      continue
+    }
+    if (char === "}" || char === "]") {
+      depth = Math.max(0, depth - 1)
+      result += `\n${"  ".repeat(depth)}${char}`
+      continue
+    }
+    if (char === ",") {
+      result += `,\n${"  ".repeat(depth)}`
+      continue
+    }
+    if (char === ":") {
+      result += ": "
+      continue
+    }
+    if (char === " " || char === "\n" || char === "\t") {
+      continue
+    }
+    result += char
+  }
+  return result
 }
 
 function previewLine(detail: string): string {
@@ -573,7 +937,38 @@ function mergeEvents(current: BuildTraceEvent[], incoming: BuildTraceEvent[]): B
   return merged.slice(merged.length - 400)
 }
 
-function groupCards(events: BuildTraceEvent[]): TraceCard[] {
+function mergeClocks(
+  current: Record<string, JobClock>,
+  incoming: readonly BuildTraceJob[],
+): Record<string, JobClock> {
+  const next: Record<string, JobClock> = { ...current }
+  for (const job of incoming) {
+    const status: CardStatus =
+      job.status === "failed" ? "failed" : job.status === "succeeded" ? "saved" : "running"
+    next[job.job_id] = {
+      status,
+      error: job.error,
+      finishedAt: job.finished_at,
+    }
+  }
+  return next
+}
+
+function openJobIds(cards: readonly TraceCard[]): string[] {
+  const ids: string[] = []
+  for (const card of cards) {
+    if (card.status !== "running") {
+      continue
+    }
+    ids.push(card.jobId)
+    if (ids.length >= 80) {
+      break
+    }
+  }
+  return ids
+}
+
+function groupCards(events: BuildTraceEvent[], clocks: Record<string, JobClock>): TraceCard[] {
   const groups: Map<string, BuildTraceEvent[]> = new Map()
   for (const event of events) {
     const bucket: BuildTraceEvent[] = groups.get(event.job_id) ?? []
@@ -590,14 +985,17 @@ function groupCards(events: BuildTraceEvent[]): TraceCard[] {
     if (first === undefined || last === undefined) {
       continue
     }
+    const clock: JobClock | undefined = clocks[jobId]
+    const status: CardStatus = cardStatus(ordered, clock)
+    const finishedAt: string | null = clock === undefined ? null : clock.finishedAt
     cards.push({
       jobId,
       kind: first.kind,
       subjectName: first.subject_name,
-      status: cardStatus(ordered),
+      status,
       startedAt: first.at,
-      endedAt: last.at,
-      outcome: cardOutcome(ordered),
+      endedAt: finishedAt ?? last.at,
+      outcome: cardOutcome(ordered, clock),
       steps: stepViews(ordered),
     })
   }
@@ -605,17 +1003,17 @@ function groupCards(events: BuildTraceEvent[]): TraceCard[] {
   return cards
 }
 
-function cardStatus(events: readonly BuildTraceEvent[]): CardStatus {
-  if (events.some((event: BuildTraceEvent) => event.step === "failed")) {
+function cardStatus(events: readonly BuildTraceEvent[], clock: JobClock | undefined): CardStatus {
+  if (events.some((event: BuildTraceEvent) => event.step === "failed") || clock?.status === "failed") {
     return "failed"
   }
-  if (events.some((event: BuildTraceEvent) => event.step === "succeeded")) {
+  if (events.some((event: BuildTraceEvent) => event.step === "succeeded") || clock?.status === "saved") {
     return "saved"
   }
   return "running"
 }
 
-function cardOutcome(events: readonly BuildTraceEvent[]): string | null {
+function cardOutcome(events: readonly BuildTraceEvent[], clock: JobClock | undefined): string | null {
   const ordered: BuildTraceEvent[] = [...events].reverse()
   const failed: BuildTraceEvent | undefined = ordered.find((event: BuildTraceEvent) => event.step === "failed")
   if (failed !== undefined) {
@@ -624,6 +1022,12 @@ function cardOutcome(events: readonly BuildTraceEvent[]): string | null {
   const saved: BuildTraceEvent | undefined = ordered.find((event: BuildTraceEvent) => event.step === "succeeded")
   if (saved !== undefined) {
     return saved.detail !== "" ? saved.detail : "Context saved"
+  }
+  if (clock?.status === "failed") {
+    return clock.error !== null && clock.error !== "" ? clock.error : "Build failed."
+  }
+  if (clock?.status === "saved") {
+    return "Context saved"
   }
   return null
 }
@@ -658,7 +1062,44 @@ function stepViews(events: readonly BuildTraceEvent[]): TraceStepView[] {
       kind,
     })
   }
-  return views
+  return withoutSupersededAnswers(views)
+}
+
+function withoutSupersededAnswers(views: TraceStepView[]): TraceStepView[] {
+  const kept: TraceStepView[] = []
+  let index: number = 0
+  while (index < views.length) {
+    const step: TraceStepView | undefined = views[index]
+    if (step === undefined) {
+      break
+    }
+    if (step.kind === "prose" && supersededByLaterAnswer(views, index)) {
+      index += 1
+      continue
+    }
+    kept.push(step)
+    index += 1
+  }
+  return kept
+}
+
+function supersededByLaterAnswer(views: readonly TraceStepView[], index: number): boolean {
+  let cursor: number = index + 1
+  while (cursor < views.length) {
+    const step: TraceStepView | undefined = views[cursor]
+    if (step === undefined) {
+      return false
+    }
+    if (step.kind === "prose") {
+      return true
+    }
+    if (step.kind === "retry" || step.kind === "meta") {
+      cursor += 1
+      continue
+    }
+    return false
+  }
+  return false
 }
 
 function viewKind(step: string): StepKind | null {
