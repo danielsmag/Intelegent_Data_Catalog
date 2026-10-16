@@ -1,13 +1,25 @@
 import { useSyncExternalStore } from "react"
-import { moveTab, splitOffTab, type SplitDirection } from "./editorLayout"
+import {
+  fillTab,
+  moveTab,
+  openAt,
+  openPathInGroupPreferBlank,
+  splitOffTab,
+  splitWithPath,
+  type SplitDirection,
+} from "./editorLayout"
 
 export type DropTarget =
-  | { kind: "insert"; groupId: string; index: number }
+  | { kind: "insert"; groupId: string; index: number; blankTabId: string | null }
   | { kind: "edge"; groupId: string; direction: SplitDirection }
+  | { kind: "group"; groupId: string }
+
+export type DragSource =
+  | { kind: "tab"; fromGroupId: string; tabId: string }
+  | { kind: "path"; path: string }
 
 export type EditorDrag = {
-  fromGroupId: string
-  tabId: string
+  source: DragSource
   title: string
   x: number
   y: number
@@ -61,7 +73,9 @@ function targetAt(x: number, y: number): DropTarget | null {
     }
     const rect: DOMRect = tab.getBoundingClientRect()
     const place: number = x < rect.left + rect.width / 2 ? index : index + 1
-    return { kind: "insert", groupId, index: place }
+    const tabId: string | undefined = tab.dataset.tabId
+    const blankTabId: string | null = tab.dataset.tabBlank === "true" && tabId !== undefined ? tabId : null
+    return { kind: "insert", groupId, index: place, blankTabId }
   }
   const tabs: Element | null = hit.closest("[data-editor-tabs]")
   if (tabs instanceof HTMLElement) {
@@ -70,7 +84,14 @@ function targetAt(x: number, y: number): DropTarget | null {
     if (groupId === undefined || !Number.isFinite(count)) {
       return null
     }
-    return { kind: "insert", groupId, index: count }
+    return { kind: "insert", groupId, index: count, blankTabId: null }
+  }
+  const group: Element | null = hit.closest("[data-editor-group]")
+  if (group instanceof HTMLElement) {
+    const groupId: string | undefined = group.dataset.groupId
+    if (groupId !== undefined) {
+      return { kind: "group", groupId }
+    }
   }
   return null
 }
@@ -87,7 +108,33 @@ function swallowClick(): void {
   }, 50)
 }
 
-export function watchTabDrag(event: { button: number; pointerId: number; clientX: number; clientY: number }, source: { groupId: string; tabId: string; title: string }): void {
+function applyDrop(source: DragSource, target: DropTarget): void {
+  if (source.kind === "tab") {
+    if (target.kind === "insert") {
+      moveTab(source.fromGroupId, source.tabId, target.groupId, target.index)
+      return
+    }
+    if (target.kind === "edge") {
+      splitOffTab(source.fromGroupId, source.tabId, target.direction, target.groupId)
+    }
+    return
+  }
+  if (target.kind === "insert" && target.blankTabId !== null) {
+    fillTab(target.groupId, target.blankTabId, source.path)
+    return
+  }
+  if (target.kind === "insert") {
+    openAt(target.groupId, source.path, target.index)
+    return
+  }
+  if (target.kind === "edge") {
+    splitWithPath(target.groupId, target.direction, source.path)
+    return
+  }
+  openPathInGroupPreferBlank(target.groupId, source.path)
+}
+
+function watchDrag(event: { button: number; pointerId: number; clientX: number; clientY: number }, source: DragSource, title: string): void {
   if (event.button !== 0 || watching) {
     return
   }
@@ -110,9 +157,8 @@ export function watchTabDrag(event: { button: number; pointerId: number; clientX
       document.documentElement.classList.add("editor-dragging")
     }
     drag = {
-      fromGroupId: source.groupId,
-      tabId: source.tabId,
-      title: source.title,
+      source,
+      title,
       x: ev.clientX,
       y: ev.clientY,
       target: targetAt(ev.clientX, ev.clientY),
@@ -131,15 +177,14 @@ export function watchTabDrag(event: { button: number; pointerId: number; clientX
     drag = null
     emit()
     document.documentElement.classList.remove("editor-dragging")
-    if (target === null) {
+    if (!started) {
       return
     }
     swallowClick()
-    if (target.kind === "insert") {
-      moveTab(source.groupId, source.tabId, target.groupId, target.index)
+    if (target === null) {
       return
     }
-    splitOffTab(source.groupId, source.tabId, target.direction, target.groupId)
+    applyDrop(source, target)
   }
   function up(ev: PointerEvent): void {
     finish(ev, true)
@@ -150,4 +195,15 @@ export function watchTabDrag(event: { button: number; pointerId: number; clientX
   window.addEventListener("pointermove", move)
   window.addEventListener("pointerup", up)
   window.addEventListener("pointercancel", cancel)
+}
+
+export function watchTabDrag(event: { button: number; pointerId: number; clientX: number; clientY: number }, source: { groupId: string; tabId: string; title: string }): void {
+  watchDrag(event, { kind: "tab", fromGroupId: source.groupId, tabId: source.tabId }, source.title)
+}
+
+export function watchPathDrag(event: { button: number; pointerId: number; clientX: number; clientY: number }, source: { path: string; title: string }): void {
+  if (source.path === "") {
+    return
+  }
+  watchDrag(event, { kind: "path", path: source.path }, source.title)
 }

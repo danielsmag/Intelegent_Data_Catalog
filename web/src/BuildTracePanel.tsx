@@ -230,38 +230,40 @@ export function BuildTracePanel(): ReactElement {
             </button>
           ))}
         </div>
-        <div className="trace-bulk">
+        <div className="trace-actions">
+          <div className="trace-bulk">
+            <button
+              type="button"
+              className="trace-bulk-button"
+              disabled={shown.length === 0}
+              aria-pressed={expandIncoming}
+              onClick={() => {
+                setShownOpen(true)
+              }}
+            >
+              Expand all
+            </button>
+            <button
+              type="button"
+              className="trace-bulk-button"
+              disabled={shown.length === 0}
+              onClick={() => {
+                setShownOpen(false)
+              }}
+            >
+              Collapse all
+            </button>
+          </div>
           <button
             type="button"
-            className="trace-bulk-button"
-            disabled={shown.length === 0}
-            aria-pressed={expandIncoming}
-            onClick={() => {
-              setShownOpen(true)
-            }}
+            className="trace-bulk-button trace-stick"
+            aria-pressed={stickNewest}
+            title="Stick to newest message"
+            onClick={toggleStick}
           >
-            Expand all
-          </button>
-          <button
-            type="button"
-            className="trace-bulk-button"
-            disabled={shown.length === 0}
-            onClick={() => {
-              setShownOpen(false)
-            }}
-          >
-            Collapse all
+            Newest
           </button>
         </div>
-        <button
-          type="button"
-          className="trace-bulk-button trace-stick"
-          aria-pressed={stickNewest}
-          title="Stick to newest message"
-          onClick={toggleStick}
-        >
-          Newest
-        </button>
       </div>
       <div className="trace-feed" ref={feedRef} onScroll={onFeedScroll}>
         {shown.length === 0 ? (

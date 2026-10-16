@@ -28,9 +28,12 @@ export function catalogTablePath(source: string, catalog: string, namespace: str
   return `/catalog/${encodeURIComponent(source)}/${encodeURIComponent(catalog)}/${encodeURIComponent(namespace)}/${encodeURIComponent(table)}`
 }
 
+export function sparkSampleSql(catalog: string, namespace: string, table: string): string {
+  return `SELECT * FROM ${catalog}.${namespace}.${table} LIMIT 100`
+}
+
 export function queryPagePath(catalog: string, namespace: string, table: string): string {
-  const sql: string = `SELECT * FROM ${catalog}.${namespace}.${table} LIMIT 100`
-  const params: URLSearchParams = new URLSearchParams({ sql })
+  const params: URLSearchParams = new URLSearchParams({ sql: sparkSampleSql(catalog, namespace, table) })
   return `/query?${params.toString()}`
 }
 

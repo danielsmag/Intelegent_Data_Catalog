@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react"
-import { useSearchParams } from "react-router-dom"
 import { errorMessage, isAbortError, runQuery } from "./api"
-import { useEditorStatus, useEditorTitle } from "./editorSlots"
 import { ResultGrid } from "./ResultGrid"
+import { peekQueryDraft, rememberQueryDraft, takePendingQuerySql, usePendingQuerySql } from "./sidebarView"
 import type { QueryResult } from "./types"
 
 const DEFAULT_SQL: string = "SELECT * FROM catalog.sales.customers LIMIT 100"
 
 export function QueryPage(): ReactElement {
-  const [searchParams] = useSearchParams()
-  const fromUrl: string | null = searchParams.get("sql")
-  const [sql, setSql] = useState<string>(fromUrl !== null && fromUrl !== "" ? fromUrl : DEFAULT_SQL)
+  const pending = usePendingQuerySql()
+  const [sql, setSql] = useState<string>(() => peekQueryDraft() ?? pending?.sql ?? DEFAULT_SQL)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
@@ -19,12 +17,15 @@ export function QueryPage(): ReactElement {
   sqlRef.current = sql
 
   useEffect(() => {
-    if (fromUrl !== null && fromUrl !== "") {
-      setSql(fromUrl)
-      setResult(null)
-      setError(null)
+    const next: { sql: string; token: number } | null = takePendingQuerySql()
+    if (next === null || next.sql === "") {
+      return
     }
-  }, [fromUrl])
+    setSql(next.sql)
+    rememberQueryDraft(next.sql)
+    setResult(null)
+    setError(null)
+  }, [pending])
 
   useEffect(() => {
     if (runId === 0) {
@@ -62,8 +63,6 @@ export function QueryPage(): ReactElement {
     }
   }
 
-  useEditorTitle("Query")
-  useEditorStatus("Spark SQL", loading ? "Running" : "Ready")
   return (
     <div className="query-layout">
       <h1>Query</h1>
@@ -73,7 +72,9 @@ export function QueryPage(): ReactElement {
         spellCheck={false}
         value={sql}
         onChange={(event) => {
-          setSql(event.target.value)
+          const next: string = event.target.value
+          setSql(next)
+          rememberQueryDraft(next)
         }}
         onKeyDown={onKeyDown}
       />

@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useSyncExternalStore, type Context, type MouseEvent, type ReactElement, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useSyncExternalStore, type Context, type MouseEvent, type PointerEvent, type ReactElement, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { openInFocusedGroup, setTabTitle } from "./editorLayout"
+import { watchPathDrag } from "./editorDrag"
+import { openInFocusedGroup, setTabTitle, titleFromPath } from "./editorLayout"
 
 export type EditorScope = {
   groupId: string
@@ -96,6 +97,13 @@ export function WorkbenchLink(props: WorkbenchLinkProps): ReactElement {
     props.onClick?.()
     openInFocusedGroup(props.to)
   }
+  function onPointerDown(event: PointerEvent<HTMLAnchorElement>): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return
+    }
+    const label: string = props.title ?? event.currentTarget.innerText.replace(/\s+/g, " ").trim()
+    watchPathDrag(event, { path: props.to, title: label === "" ? titleFromPath(props.to) : label })
+  }
   return (
     <a
       href={props.to}
@@ -104,7 +112,12 @@ export function WorkbenchLink(props: WorkbenchLinkProps): ReactElement {
       title={props.title}
       aria-label={props["aria-label"]}
       aria-current={props["aria-current"]}
+      draggable={false}
       onClick={onClick}
+      onPointerDown={onPointerDown}
+      onDragStart={(event) => {
+        event.preventDefault()
+      }}
     >
       {props.children}
     </a>

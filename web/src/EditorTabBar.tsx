@@ -5,11 +5,13 @@ import {
   closeOtherTabs,
   closeTab,
   focusTab,
+  openBlankTab,
   splitGroup,
   useEditorLayout,
   type EditorGroup,
   type EditorTab,
 } from "./editorLayout"
+import { PlusIcon } from "./icons"
 
 type MenuState = {
   x: number
@@ -31,8 +33,14 @@ export function EditorTabBar(props: { groupId: string }): ReactElement | null {
   if (group === undefined) {
     return null
   }
+  const fillingBlank: boolean =
+    drag?.source.kind === "path" && drag.target?.kind === "insert" && drag.target.blankTabId !== null
   const insertIndex: number | null =
-    drag?.target?.kind === "insert" && drag.target.groupId === props.groupId ? drag.target.index : null
+    drag?.target?.kind === "insert" && drag.target.groupId === props.groupId && !fillingBlank ? drag.target.index : null
+  const fillTabId: string | null =
+    drag?.source.kind === "path" && drag.target?.kind === "insert" && drag.target.groupId === props.groupId
+      ? drag.target.blankTabId
+      : null
   return (
     <div className="editor-tabbar" role="tablist" aria-label="Open pages">
       <div className="editor-tabs" data-editor-tabs="" data-group-id={props.groupId} data-tab-count={group.tabs.length}>
@@ -44,6 +52,7 @@ export function EditorTabBar(props: { groupId: string }): ReactElement | null {
             index={index}
             active={tab.id === group.activeId}
             showInsert={insertIndex === index}
+            filling={fillTabId === tab.id}
             onMenu={(next: MenuState) => {
               setSplitMenu(null)
               setMenu(next)
@@ -53,6 +62,17 @@ export function EditorTabBar(props: { groupId: string }): ReactElement | null {
         {insertIndex === group.tabs.length ? <i className="editor-insert editor-insert-end" /> : null}
       </div>
       <div className="editor-tab-actions">
+        <button
+          type="button"
+          className="editor-action"
+          title="New tab"
+          aria-label="New tab"
+          onClick={() => {
+            openBlankTab(props.groupId)
+          }}
+        >
+          <PlusIcon />
+        </button>
         <button
           type="button"
           className="editor-action"
@@ -114,6 +134,7 @@ function EditorTabButton(props: {
   index: number
   active: boolean
   showInsert: boolean
+  filling: boolean
   onMenu: (menu: MenuState) => void
 }): ReactElement {
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -133,10 +154,12 @@ function EditorTabButton(props: {
         role="tab"
         aria-selected={props.active}
         title={props.tab.title}
-        className={props.active ? "editor-tab active" : "editor-tab"}
+        className={["editor-tab", props.active ? "active" : "", props.filling ? "editor-tab-fill" : ""].filter((name: string) => name !== "").join(" ")}
         data-editor-tab=""
         data-group-id={props.groupId}
+        data-tab-id={props.tab.id}
         data-tab-index={props.index}
+        data-tab-blank={props.tab.path === "" ? "true" : undefined}
         onClick={() => {
           focusTab(props.groupId, props.tab.id)
         }}

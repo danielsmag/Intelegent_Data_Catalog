@@ -7,9 +7,18 @@ const listeners: Set<() => void> = new Set()
 
 function readStoredOpen(): boolean {
   try {
-    return sessionStorage.getItem(storageKey) !== "false"
+    const stored: string | null = window.localStorage.getItem(storageKey)
+    if (stored === "true" || stored === "false") {
+      return stored === "true"
+    }
+    const legacy: string | null = window.sessionStorage.getItem(storageKey)
+    if (legacy === "true" || legacy === "false") {
+      window.localStorage.setItem(storageKey, legacy)
+      return legacy === "true"
+    }
+    return false
   } catch {
-    return true
+    return false
   }
 }
 
@@ -26,7 +35,7 @@ export function getSpacesSidebarOpen(): boolean {
 export function setSpacesSidebarOpen(next: boolean): void {
   open = next
   try {
-    sessionStorage.setItem(storageKey, next ? "true" : "false")
+    window.localStorage.setItem(storageKey, next ? "true" : "false")
   } catch {
     // Private mode can block storage. In-memory state still updates.
   }
@@ -41,5 +50,5 @@ export function subscribeSpacesSidebar(listener: () => void): () => void {
 }
 
 export function useSpacesSidebarOpen(): boolean {
-  return useSyncExternalStore(subscribeSpacesSidebar, getSpacesSidebarOpen, () => true)
+  return useSyncExternalStore(subscribeSpacesSidebar, getSpacesSidebarOpen, () => false)
 }

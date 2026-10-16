@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { redirectSidebarPath, sidebarViewForPath } from "./sidebarView"
 
 export type SplitDirection = "row" | "column"
 
@@ -195,12 +196,40 @@ function createInitial(path: string): EditorLayout {
 
 function boot(): EditorLayout {
   const url: string = currentUrl()
+  const sidebarOnly: boolean = sidebarViewForPath(url) !== null
   const saved: EditorLayout | null = readStorage()
-  const base: EditorLayout = saved ?? createInitial(url)
-  const opened: EditorLayout =
-    (pathOfGroup(base, base.focusedGroupId) ?? "/") === url ? base : openPath(base, base.focusedGroupId, url, "none").state
-  stampCurrentEntry(opened)
-  return opened
+  const base: EditorLayout = saved ?? createInitial(sidebarOnly ? "/" : url)
+  const opened: EditorLayout = sidebarOnly
+    ? base
+    : (pathOfGroup(base, base.focusedGroupId) ?? "/") === url
+      ? base
+      : openPath(base, base.focusedGroupId, url, "none").state
+  const cleaned: EditorLayout = dropSidebarTabs(opened)
+  stampCurrentEntry(cleaned)
+  return cleaned
+}
+
+function dropSidebarTabs(state: EditorLayout): EditorLayout {
+  let changed: boolean = false
+  const groups: Record<string, EditorGroup> = {}
+  for (const [id, group] of Object.entries(state.groups)) {
+    const tabs: EditorTab[] = group.tabs.filter((tab: EditorTab) => sidebarViewForPath(tab.path) === null)
+    if (tabs.length !== group.tabs.length) {
+      changed = true
+    }
+    let activeId: string | null = group.activeId
+    if (activeId !== null && !tabs.some((tab: EditorTab) => tab.id === activeId)) {
+      const last: EditorTab | undefined = tabs[tabs.length - 1]
+      activeId = last?.id ?? null
+      changed = true
+    }
+    groups[id] =
+      tabs.length === group.tabs.length && activeId === group.activeId ? group : { ...group, tabs, activeId }
+  }
+  if (!changed) {
+    return state
+  }
+  return { ...state, groups }
 }
 
 function pathOfGroup(state: EditorLayout, groupId: string): string | null {
@@ -221,7 +250,7 @@ function stampCurrentEntry(state: EditorLayout): void {
     return
   }
   const tab: EditorTab | undefined = group.tabs.find((item: EditorTab) => item.id === group.activeId)
-  if (tab === undefined) {
+  if (tab === undefined || tab.path === "") {
     return
   }
   const marker: EditorHistoryMarker = { editorGroupId: group.id, editorTabId: tab.id }
@@ -299,7 +328,7 @@ function historyForFocus(state: EditorLayout): HistoryRequest | null {
     return null
   }
   const tab: EditorTab | undefined = group.tabs.find((item: EditorTab) => item.id === group.activeId)
-  if (tab === undefined) {
+  if (tab === undefined || tab.path === "") {
     return null
   }
   return { mode: "replace", groupId: group.id, tabId: tab.id, path: tab.path }
@@ -416,6 +445,9 @@ function openPath(
   if (group === undefined) {
     return { state, history: null }
   }
+  if (redirectSidebarPath(rawPath)) {
+    return { state, history: null }
+  }
   const path: string = normalizePath(rawPath)
   const pathname: string = pathnameOf(path)
   const active: EditorTab | null =
@@ -423,7 +455,12 @@ function openPath(
   let nextTabs: EditorTab[] = group.tabs
   let activeId: string | null = group.activeId
   let historyMode: HistoryMode = mode
-  if (active !== null && pathnameOf(active.path) === pathname) {
+  if (active !== null && active.path === "") {
+    nextTabs = group.tabs.map((item: EditorTab) =>
+      item.id === active.id ? { ...item, path, title: titleFromPath(path) } : item,
+    )
+    activeId = active.id
+  } else if (active !== null && pathnameOf(active.path) === pathname) {
     if (active.path === path && state.focusedGroupId === groupId) {
       return { state, history: null }
     }
@@ -498,6 +535,91 @@ export function openInGroup(groupId: string, rawPath: string, mode: "push" | "re
 
 export function openInFocusedGroup(rawPath: string, mode: HistoryMode = "push"): void {
   apply(openPath(layout, layout.focusedGroupId, rawPath, mode))
+}
+
+export function openBlankTab(groupId: string): void {
+  const group: EditorGroup | undefined = layout.groups[groupId]
+  if (group === undefined) {
+    return
+  }
+  const tab: EditorTab = { id: newId(), path: "", title: "New tab" }
+  const next: EditorLayout = {
+    ...layout,
+    focusedGroupId: groupId,
+    groups: { ...layout.groups, [groupId]: { ...group, tabs: [...group.tabs, tab], activeId: tab.id } },
+  }
+  commit(next, null)
+}
+
+export function openAt(groupId: string, rawPath: string, index: number): void {
+  const group: EditorGroup | undefined = layout.groups[groupId]
+  if (group === undefined || redirectSidebarPath(rawPath)) {
+    return
+  }
+  const path: string = normalizePath(rawPath)
+  const tab: EditorTab = { id: newId(), path, title: titleFromPath(path) }
+  const tabs: EditorTab[] = group.tabs.slice()
+  const clamped: number = Math.max(0, Math.min(index, tabs.length))
+  tabs.splice(clamped, 0, tab)
+  const next: EditorLayout = {
+    ...layout,
+    focusedGroupId: groupId,
+    groups: { ...layout.groups, [groupId]: { ...group, tabs, activeId: tab.id } },
+  }
+  commit(next, { mode: "push", groupId, tabId: tab.id, path })
+}
+
+export function fillTab(groupId: string, tabId: string, rawPath: string): void {
+  const group: EditorGroup | undefined = layout.groups[groupId]
+  if (group === undefined || redirectSidebarPath(rawPath)) {
+    return
+  }
+  const path: string = normalizePath(rawPath)
+  const existing: EditorTab | undefined = group.tabs.find((item: EditorTab) => item.id === tabId)
+  if (existing === undefined) {
+    return
+  }
+  const tabs: EditorTab[] = group.tabs.map((item: EditorTab) =>
+    item.id === tabId ? { ...item, path, title: titleFromPath(path) } : item,
+  )
+  const next: EditorLayout = {
+    ...layout,
+    focusedGroupId: groupId,
+    groups: { ...layout.groups, [groupId]: { ...group, tabs, activeId: tabId } },
+  }
+  commit(next, { mode: "push", groupId, tabId, path })
+}
+
+export function openPathInGroupPreferBlank(groupId: string, rawPath: string): void {
+  const group: EditorGroup | undefined = layout.groups[groupId]
+  if (group === undefined) {
+    return
+  }
+  const active: EditorTab | null =
+    group.activeId === null ? null : group.tabs.find((item: EditorTab) => item.id === group.activeId) ?? null
+  if (active !== null && active.path === "") {
+    fillTab(groupId, active.id, rawPath)
+    return
+  }
+  openInGroup(groupId, rawPath, "push")
+}
+
+export function splitWithPath(targetGroupId: string, direction: SplitDirection, rawPath: string): void {
+  if (layout.groups[targetGroupId] === undefined || redirectSidebarPath(rawPath)) {
+    return
+  }
+  const path: string = normalizePath(rawPath)
+  const newGroupId: string = newId()
+  const tab: EditorTab = { id: newId(), path, title: titleFromPath(path) }
+  const newGroup: EditorGroup = { id: newGroupId, tabs: [tab], activeId: tab.id }
+  const root: LayoutNode | null = insertBesideNode(layout.root, targetGroupId, direction, newGroupId)
+  if (root === null) {
+    return
+  }
+  commit(
+    { root, groups: { ...layout.groups, [newGroupId]: newGroup }, focusedGroupId: newGroupId },
+    { mode: "push", groupId: newGroupId, tabId: tab.id, path },
+  )
 }
 
 export function focusGroup(groupId: string): void {
@@ -910,7 +1032,8 @@ function parseGroup(id: string, value: unknown): EditorGroup | null {
     if (typeof tab.id !== "string" || typeof tab.path !== "string" || typeof tab.title !== "string") {
       return null
     }
-    tabs.push({ id: tab.id, path: normalizePath(tab.path), title: tab.title })
+    const path: string = tab.path === "" ? "" : normalizePath(tab.path)
+    tabs.push({ id: tab.id, path, title: tab.title })
   }
   const activeId: string | null = typeof record.activeId === "string" ? record.activeId : null
   if (activeId !== null && !tabs.some((item: EditorTab) => item.id === activeId)) {

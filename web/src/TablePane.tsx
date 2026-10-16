@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react"
-import { Link } from "react-router-dom"
-import { errorMessage, fetchExplorerSample, formatTimestamp, isAbortError, queryPagePath } from "./api"
+import { errorMessage, fetchExplorerSample, formatTimestamp, isAbortError, sparkSampleSql } from "./api"
 import { ResultGrid } from "./ResultGrid"
+import { setPendingQuerySql, setSidebarView } from "./sidebarView"
 import type { ColumnDetail, DetailTab, QueryResult, TableDetail } from "./types"
 import { useTabParam } from "./useTabParam"
 
@@ -75,7 +75,10 @@ export function TablePane(props: TablePaneProps): ReactElement {
     )
   }
 
-  const qualified: string = `${props.catalog}.${props.namespace}.${props.table}`
+  const catalog: string = props.catalog
+  const namespace: string = props.namespace
+  const tableName: string = props.table
+  const qualified: string = `${catalog}.${namespace}.${tableName}`
   return (
     <>
         <p className="crumb">
@@ -84,11 +87,18 @@ export function TablePane(props: TablePaneProps): ReactElement {
           {qualified}
         </p>
         <div className="title-row">
-          <h1>{props.table}</h1>
+          <h1>{tableName}</h1>
           <span className="badge">TABLE</span>
-          <Link className="button" to={queryPagePath(props.catalog, props.namespace, props.table)}>
+          <button
+            type="button"
+            className="button"
+            onClick={() => {
+              setSidebarView("query")
+              setPendingQuerySql(sparkSampleSql(catalog, namespace, tableName))
+            }}
+          >
             Query
-          </Link>
+          </button>
         </div>
         <div className="tabs" role="tablist" aria-label="Table sections">
           <TabButton id="overview" current={tab} onSelect={selectTab} label="Overview" />

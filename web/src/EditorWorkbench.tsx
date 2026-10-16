@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react"
+import { Fragment, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react"
 import {
   createPath,
   Navigate,
@@ -19,6 +19,7 @@ import { useAirflowSidebarOpen, setAirflowSidebarOpen } from "./airflowSidebarSt
 import { CatalogPage } from "./Explorer"
 import { CatalogSidebar } from "./CatalogTree"
 import { EditorDragGhost, EditorDropEdges, EditorTabBar } from "./EditorTabBar"
+import { useEditorDrag } from "./editorDrag"
 import {
   focusGroup,
   getNavigation,
@@ -29,33 +30,39 @@ import {
   resizeSplit,
   restoreHistory,
   searchOf,
-  sidebarKind,
   useEditorLayout,
-  useFocusedPath,
   type EditorGroup,
   type EditorLayout,
   type EditorTab,
   type LayoutNode,
-  type SidebarKind,
   type SplitDirection,
 } from "./editorLayout"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
 import { HierarchyTree } from "./HierarchyTree"
+import { ResizeHandle } from "./ResizeHandle"
 import { QueryPage } from "./QueryPage"
 import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
+import { setPendingQuerySql, setSidebarView, sidebarViewForPath, useSidebarView, type SidebarView } from "./sidebarView"
 import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 
 export function EditorWorkbench(): ReactElement {
   const layout: EditorLayout = useEditorLayout()
-  const focused: string = useFocusedPath()
-  const kind: SidebarKind = sidebarKind(pathnameOf(focused))
-  const spacesOpen: boolean = useSpacesSidebarOpen()
-  const airflowOpen: boolean = useAirflowSidebarOpen()
   const status: { area: string; detail: string } = useEditorStatusText()
   const [railHost, setRailHost] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
     function onPop(event: PopStateEvent): void {
       const path: string = `${window.location.pathname}${window.location.search}`
+      const view: SidebarView | null = sidebarViewForPath(path)
+      if (view !== null) {
+        setSidebarView(view)
+        if (view === "query") {
+          const sql: string | null = new URLSearchParams(window.location.search).get("sql")
+          if (sql !== null && sql !== "") {
+            setPendingQuerySql(sql)
+          }
+        }
+        return
+      }
       const marker: { groupId: string; tabId: string } | null = readHistoryMarker(event.state)
       if (marker !== null) {
         restoreHistory(marker.groupId, marker.tabId, path)
@@ -73,24 +80,7 @@ export function EditorWorkbench(): ReactElement {
       <div className="shell">
         <div className="workspace">
           <ActivityBar />
-          {kind === "spaces" ? (
-            <HierarchyTree
-              title="Spaces"
-              collapsed={!spacesOpen}
-              onToggleCollapsed={() => {
-                setSpacesSidebarOpen(!spacesOpen)
-              }}
-            />
-          ) : null}
-          {kind === "airflow" ? (
-            <AirflowSidebar
-              collapsed={!airflowOpen}
-              onToggleCollapsed={() => {
-                setAirflowSidebarOpen(!airflowOpen)
-              }}
-            />
-          ) : null}
-          {kind === "catalog" ? <CatalogSidebar /> : null}
+          <SecondSidebar />
           <main className="main editor-grid">
             <LayoutView node={layout.root} />
           </main>
@@ -103,6 +93,67 @@ export function EditorWorkbench(): ReactElement {
       </div>
       <EditorDragGhost />
     </RailTargetContext.Provider>
+  )
+}
+
+function SecondSidebar(): ReactElement {
+  const view: SidebarView = useSidebarView()
+  const spacesOpen: boolean = useSpacesSidebarOpen()
+  const airflowOpen: boolean = useAirflowSidebarOpen()
+  if (view === "spaces") {
+    return (
+      <HierarchyTree
+        title="Spaces"
+        collapsed={!spacesOpen}
+        onToggleCollapsed={() => {
+          setSpacesSidebarOpen(!spacesOpen)
+        }}
+      />
+    )
+  }
+  if (view === "airflow") {
+    return (
+      <AirflowSidebar
+        collapsed={!airflowOpen}
+        onToggleCollapsed={() => {
+          setAirflowSidebarOpen(!airflowOpen)
+        }}
+      />
+    )
+  }
+  if (view === "catalog") {
+    return <CatalogSidebar />
+  }
+  if (view === "search") {
+    return (
+      <ToolSidebar title="Search">
+        <SearchPage />
+      </ToolSidebar>
+    )
+  }
+  if (view === "sources") {
+    return (
+      <ToolSidebar title="Sources">
+        <DataSourcesPage />
+      </ToolSidebar>
+    )
+  }
+  return (
+    <ToolSidebar title="Query">
+      <QueryPage />
+    </ToolSidebar>
+  )
+}
+
+function ToolSidebar(props: { title: string; children: ReactNode }): ReactElement {
+  return (
+    <aside className="sidebar tool-sidebar" aria-label={props.title}>
+      <div className="sidebar-head">
+        <div className="sidebar-title">{props.title}</div>
+      </div>
+      <div className="tool-sidebar-body">{props.children}</div>
+      <ResizeHandle pane="sidebar" edge="end" label="Resize sidebar" />
+    </aside>
   )
 }
 
@@ -176,6 +227,7 @@ function EditorSash(props: { splitId: string; boundary: number; direction: Split
 
 function EditorGroupPane(props: { groupId: string }): ReactElement | null {
   const layout: EditorLayout = useEditorLayout()
+  const drag = useEditorDrag()
   const group: EditorGroup | undefined = layout.groups[props.groupId]
   const focused: boolean = layout.focusedGroupId === props.groupId
   const tab: EditorTab | null =
@@ -183,18 +235,26 @@ function EditorGroupPane(props: { groupId: string }): ReactElement | null {
       ? null
       : group.tabs.find((item: EditorTab) => item.id === group.activeId) ?? null
   const navigator: Navigator = useMemo(() => createGroupNavigator(props.groupId), [props.groupId])
-  const location: Location | null = useMemo(() => (tab === null ? null : locationFor(tab.path, tab.id)), [tab])
+  const location: Location | null = useMemo(
+    () => (tab === null || tab.path === "" ? null : locationFor(tab.path, tab.id)),
+    [tab],
+  )
   const scope: EditorScope | null = useMemo(
-    () => (tab === null ? null : { groupId: props.groupId, tabId: tab.id, focused }),
+    () => (tab === null || tab.path === "" ? null : { groupId: props.groupId, tabId: tab.id, focused }),
     [props.groupId, tab, focused],
   )
   if (group === undefined) {
     return null
   }
   const navigation = navigationType()
+  const groupHot: boolean =
+    drag?.source.kind === "path" && drag.target?.kind === "group" && drag.target.groupId === props.groupId
+  const className: string = ["editor-group", focused ? "focused" : "", groupHot ? "drop-hot" : ""].filter((name: string) => name !== "").join(" ")
   return (
     <section
-      className={focused ? "editor-group focused" : "editor-group"}
+      className={className}
+      data-editor-group=""
+      data-group-id={props.groupId}
       onMouseDown={(event: ReactMouseEvent<HTMLElement>) => {
         if (event.button !== 0) {
           return
@@ -286,13 +346,10 @@ function EditorRoutes(): ReactElement {
       <Route path="/airflow/:instanceId/dags/:dagId" element={<AirflowDagPage />} />
       <Route path="/catalog" element={<CatalogPage />} />
       <Route path="/catalog/:source/:catalog/:namespace/:table" element={<CatalogPage />} />
-      <Route path="/query" element={<QueryPage />} />
       <Route path="/spaces" element={<SpacesPage />} />
       <Route path="/spaces/:spaceId" element={<SpacePage />} />
       <Route path="/scopes/:scopeId" element={<ScopePage />} />
       <Route path="/registry/tables/:tableId" element={<RegistryTablePage />} />
-      <Route path="/search" element={<SearchPage />} />
-      <Route path="/sources" element={<DataSourcesPage />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />
       <Route path="*" element={<MissingPage />} />
     </Routes>

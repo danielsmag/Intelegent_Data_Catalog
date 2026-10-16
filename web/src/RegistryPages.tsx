@@ -31,7 +31,8 @@ import {
   requestScopeBuild,
   requestSpaceBuild,
 } from "./knowledgeBuild"
-import { EditorRail, useEditorStatus, useEditorTitle } from "./editorSlots"
+import { EditorRail, WorkbenchLink, useEditorStatus, useEditorTitle } from "./editorSlots"
+import { setPendingQuerySql, setSidebarView } from "./sidebarView"
 import { PanelChevron, PlusIcon } from "./icons"
 import { errorMessage, isAbortError } from "./api"
 import { useDeadlineLabel, useEntityConfig, type EntityConfigController, type OptionField } from "./refreshSettings"
@@ -1526,8 +1527,6 @@ export function SearchPage(): ReactElement {
         }
       })
   }
-  useEditorTitle("Search")
-  useEditorStatus("Search", "Search")
   return (
     <>
       <section>
@@ -1552,7 +1551,7 @@ export function SearchPage(): ReactElement {
             <li key={`${hit.kind}-${hit.id}`}>
               <span className="badge">{hit.kind}</span>
               {hit.kind === "table" ? (
-                <Link to={`/registry/tables/${hit.id}`}>{hit.qualified_name}</Link>
+                <WorkbenchLink to={`/registry/tables/${hit.id}`}>{hit.qualified_name}</WorkbenchLink>
               ) : (
                 <span>{hit.qualified_name}</span>
               )}
@@ -1569,8 +1568,6 @@ export function DataSourcesPage(): ReactElement {
   const [sources, setSources] = useState<DataSourceRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   useLoad(setSources, setError, fetchDataSources)
-  useEditorTitle("Sources")
-  useEditorStatus("Sources", "Data sources")
   return (
     <>
       <section>
@@ -1715,9 +1712,16 @@ function SourceTab(props: {
       <p>Spark {query?.engine_ref_key ?? "Not configured for Spark queries"}</p>
       <p className="comment">Freshness {props.table.last_synced_at ?? "never synced"}</p>
       {props.spark?.available && sql !== null ? (
-        <Link className="button" to={`/query?sql=${encodeURIComponent(sql)}`}>
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            setSidebarView("query")
+            setPendingQuerySql(sql)
+          }}
+        >
           Query in Spark
-        </Link>
+        </button>
       ) : (
         <p>{props.spark?.message ?? "Not configured for Spark queries"}</p>
       )}
