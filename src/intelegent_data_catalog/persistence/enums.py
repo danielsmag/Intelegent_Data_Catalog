@@ -163,6 +163,27 @@ class RefreshSubjectKind(StrEnum):
     TABLE = "table"
 
 
+class SpaceIsolationMode(StrEnum):
+    """Who can see a space. ``OPEN`` is every workspace. ``ISOLATED`` is bound workspaces."""
+
+    OPEN = "OPEN"
+    ISOLATED = "ISOLATED"
+
+
+class WorkspaceRole(StrEnum):
+    """Role of a user inside one workspace."""
+
+    ADMIN = "ADMIN"
+    MEMBER = "MEMBER"
+
+
+class WorkspaceNodeKind(StrEnum):
+    """Folder or file in a workspace tree."""
+
+    FOLDER = "FOLDER"
+    FILE = "FILE"
+
+
 class CapabilitySupport(StrEnum):
     """Whether a source binding claims a metadata feature.
 

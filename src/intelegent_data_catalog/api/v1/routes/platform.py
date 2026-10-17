@@ -5,18 +5,25 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.dependencies import (
+    AccessDep,
     CatalogJobsDep,
     EntityConfigurationDep,
     PlatformDep,
     SyncScheduleDep,
     get_container,
 )
+from intelegent_data_catalog.api.visibility import filter_trace_job_ids
 from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.core.settings import CelerySettings, ModelId, ReasoningEffort
-from intelegent_data_catalog.exceptions import ConflictError, EntityNotFoundError
+from intelegent_data_catalog.exceptions import (
+    AuthorizationError,
+    ConflictError,
+    EntityNotFoundError,
+)
 from intelegent_data_catalog.graph.document import GraphView
 from intelegent_data_catalog.jobs.cancel import CancelSignal, RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobStore
@@ -136,10 +143,11 @@ def sync_source_binding(source_binding_id: UUID, platform: PlatformDep) -> SyncR
 @router.get("/search", response_model=SearchResponse)
 def search_catalog(
     platform: PlatformDep,
+    access: AccessDep,
     q: Annotated[str, Query(min_length=1, max_length=200)],
 ) -> SearchResponse:
-    """Search PostgreSQL catalog text."""
-    return platform.annotations.search(q)
+    """Search PostgreSQL catalog text the active workspace can see."""
+    return platform.annotations.search(q, space_ids=access.visible_space_ids)
 
 
 @router.get("/tags", response_model=list[TagRead])
@@ -702,6 +710,7 @@ def read_latest_airflow_context_generation(
 @router.get("/build-traces", response_model=BuildTraceList)
 def read_build_traces(
     container: Annotated[AppContainer, Depends(get_container)],
+    access: AccessDep,
     after: Annotated[str | None, Query()] = None,
     jobs: Annotated[str | None, Query()] = None,
 ) -> BuildTraceList:
@@ -715,7 +724,15 @@ def read_build_traces(
     cursor: str | None = events[-1].id if len(events) > 0 else after
     wanted: set[UUID] = {event.job_id for event in events}
     wanted.update(_trace_job_ids(jobs))
-    rows: list[CatalogJobRow] = CatalogJobStore(container.database()).statuses(wanted)
+    loaded: list[CatalogJobRow] = CatalogJobStore(container.database()).statuses(wanted)
+    trace_session: Session = container.database().session()
+    try:
+        allowed_jobs: set[UUID] = filter_trace_job_ids(trace_session, loaded, access)
+    finally:
+        trace_session.close()
+    rows: list[CatalogJobRow] = [row for row in loaded if row.id in allowed_jobs]
+    hidden_jobs: set[UUID] = {row.id for row in loaded if row.id not in allowed_jobs}
+    events = [event for event in events if event.job_id not in hidden_jobs]
     states: list[BuildTraceJob] = []
     row: CatalogJobRow
     for row in rows:
@@ -809,7 +826,9 @@ def read_graph(
 
 
 @router.post("/graph/rebuild", response_model=GraphRebuildResponse)
-def rebuild_graph(platform: PlatformDep) -> GraphRebuildResponse:
+def rebuild_graph(platform: PlatformDep, access: AccessDep) -> GraphRebuildResponse:
     """Rebuild the Neo4j projection from PostgreSQL and Marquez."""
+    if not access.principal.is_admin:
+        raise AuthorizationError("platform admin required")
     counts: dict[str, int] = platform.graph.rebuild()
     return GraphRebuildResponse(nodes=counts["nodes"], edges=counts["edges"])

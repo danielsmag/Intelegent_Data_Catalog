@@ -19,6 +19,7 @@ from intelegent_data_catalog.persistence.enums import (
     BindingRole,
     ContextOrigin,
     EngineType,
+    SpaceIsolationMode,
     SyncRunStatus,
     TableStatus,
 )
@@ -103,27 +104,48 @@ class RegistryService:
     def __init__(self, session: Session) -> None:
         self._repo: RegistryRepository = RegistryRepository(session)
 
-    def create_space(self, body: SpaceCreate) -> SpaceRead:
-        """Create a space."""
+    def create_space(self, body: SpaceCreate, *, workspace_id: UUID | None = None) -> SpaceRead:
+        """Create a space. An isolated space is bound to the active workspace."""
         slug: str = _slug_for(body.name, body.slug)
         self._ensure_space_slug(slug, None)
+        if body.isolation_mode == SpaceIsolationMode.ISOLATED and workspace_id is None:
+            raise ValidationAppError(
+                "isolated space needs an active workspace",
+                field="isolation_mode",
+            )
         row: SpaceRow = self._repo.add_space(
             name=body.name,
             slug=slug,
             description=body.description,
+            isolation_mode=body.isolation_mode.value,
         )
+        if body.isolation_mode == SpaceIsolationMode.ISOLATED and workspace_id is not None:
+            self._repo.add_space_binding(workspace_id, row.id)
         self._repo.commit()
-        return space_read(row)
+        return self._space_read(row)
 
-    def list_spaces(self) -> list[SpaceRead]:
-        """List spaces."""
-        return [space_read(row) for row in self._repo.list_spaces()]
+    def list_spaces(self, visible_ids: frozenset[UUID] | None = None) -> list[SpaceRead]:
+        """List spaces the caller may see. ``None`` returns every space."""
+        allowed: set[UUID] | None = None if visible_ids is None else set(visible_ids)
+        return self._space_reads(self._repo.list_spaces(allowed))
 
     def get_space(self, space_id: UUID) -> SpaceRead:
         """Return one space."""
-        return space_read(self._space(space_id))
+        return self._space_read(self._space(space_id))
 
-    def update_space(self, space_id: UUID, patch: SpaceUpdate) -> SpaceRead:
+    def space_id_for_table(self, table_id: UUID) -> UUID:
+        """Return the space that owns a table."""
+        table: CatalogTableRow = self._table(table_id)
+        scope: ScopeRow = self._scope(table.scope_id)
+        return scope.space_id
+
+    def update_space(
+        self,
+        space_id: UUID,
+        patch: SpaceUpdate,
+        *,
+        workspace_id: UUID | None = None,
+    ) -> SpaceRead:
         """Patch a space. A new name refreshes the slug unless the patch includes one."""
         row: SpaceRow = self._space(space_id)
         changes: dict[str, object] = patch.model_dump(exclude_unset=True)
@@ -137,9 +159,21 @@ class RegistryService:
             row.description = patch.description
         if "context" in changes:
             _apply_user_context(row, patch.context)
+        if "isolation_mode" in changes and patch.isolation_mode is not None:
+            row.isolation_mode = patch.isolation_mode.value
+            if (
+                patch.isolation_mode == SpaceIsolationMode.ISOLATED
+                and self._repo.count_space_bindings(row.id) == 0
+            ):
+                if workspace_id is None:
+                    raise ValidationAppError(
+                        "isolated space needs an active workspace",
+                        field="isolation_mode",
+                    )
+                self._repo.add_space_binding(workspace_id, row.id)
         row.updated_at = utc_now()
         self._repo.commit()
-        return space_read(row)
+        return self._space_read(row)
 
     def delete_space(self, space_id: UUID) -> None:
         """Delete a space that has no scopes."""
@@ -988,6 +1022,14 @@ class RegistryService:
         existing: AssetEngineBindingRow | None = self._repo.find_selected_query(table_id)
         if existing is not None and existing.id != current_id:
             raise ConflictError("a selected QUERY binding already exists for this table")
+
+    def _space_read(self, row: SpaceRow) -> SpaceRead:
+        bound: dict[UUID, list[UUID]] = self._repo.bindings_for_spaces([row.id])
+        return space_read(row, bound.get(row.id, []))
+
+    def _space_reads(self, rows: list[SpaceRow]) -> list[SpaceRead]:
+        bound: dict[UUID, list[UUID]] = self._repo.bindings_for_spaces([row.id for row in rows])
+        return [space_read(row, bound.get(row.id, [])) for row in rows]
 
     def _space(self, space_id: UUID) -> SpaceRow:
         row: SpaceRow | None = self._repo.get_space(space_id)

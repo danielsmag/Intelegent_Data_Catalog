@@ -1,3 +1,4 @@
+import { apiFetch } from "./http"
 import type { ExplorerTree, QueryResult, TableDetail } from "./types"
 
 export async function fetchExplorerTree(signal: AbortSignal): Promise<ExplorerTree> {
@@ -45,7 +46,7 @@ export function formatTimestamp(lastUpdatedMs: number | null): string {
 }
 
 async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response: Response = await fetch(path, { signal })
+  const response: Response = await apiFetch(path, { signal })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -60,7 +61,7 @@ function explorerTablePath(source: string, catalog: string, namespace: string, t
 }
 
 export async function runQuery(sql: string, signal: AbortSignal): Promise<QueryResult> {
-  const response: Response = await fetch("/api/v1/query", {
+  const response: Response = await apiFetch("/api/v1/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sql }),

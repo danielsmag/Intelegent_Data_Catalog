@@ -36,6 +36,15 @@ x-catalog-environment: &catalog-environment
   CATALOG_OBSERVABILITY__USERNAME: ${OPENOBSERVE_USER:-root@example.com}
   CATALOG_OBSERVABILITY__PASSWORD: ${OPENOBSERVE_PASSWORD:-Local-observe-1}
   CATALOG_CELERY__BROKER_URL: redis://redis:6379/0
+  CATALOG_AUTH__ENABLED: "true"
+  CATALOG_AUTH__ISSUER: http://localhost:${KEYCLOAK_PORT:-8180}/realms/catalog
+  CATALOG_AUTH__AUDIENCE: catalog-ui
+  CATALOG_AUTH__JWKS_URL: http://keycloak:8080/realms/catalog/protocol/openid-connect/certs
+  CATALOG_OBJECT_STORE__ENDPOINT: http://minio:9000
+  CATALOG_OBJECT_STORE__ACCESS_KEY: ${MINIO_ROOT_USER:-polaris_root}
+  CATALOG_OBJECT_STORE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-polaris_pass}
+  CATALOG_OBJECT_STORE__BUCKET: ${WORKSPACE_BUCKET:-workspace}
+  CATALOG_OBJECT_STORE__REGION: ${AWS_REGION:-us-west-2}
 
 services:
   neo4j:
@@ -99,6 +108,7 @@ services:
       AWS_DEFAULT_REGION: ${AWS_REGION:-us-west-2}
       AWS_ENDPOINT_URL: http://minio:9000
       WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+      WORKSPACE_BUCKET: ${WORKSPACE_BUCKET:-workspace}
     volumes:
       - ./docker/minio/create-bucket.sh:/create-bucket.sh:ro
     entrypoint: ["/bin/sh", "/create-bucket.sh"]
@@ -302,6 +312,23 @@ services:
       - vector_data:/var/lib/vector
     command: ["--config", "/etc/vector/vector.yaml"]
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.0
+    container_name: intelegent-data-catalog-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT: "8080"
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./docker/keycloak/realm-catalog.json:/opt/keycloak/data/import/realm-catalog.json:ro
+
   redis:
     image: redis:7-alpine
     container_name: intelegent-data-catalog-redis
@@ -336,6 +363,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      keycloak:
+        condition: service_started
     ports:
       - "${CATALOG_API_PORT:-8090}:8090"
     environment: *catalog-environment
@@ -404,6 +433,10 @@ services:
     build:
       context: .
       dockerfile: docker/catalog-ui/Dockerfile
+      args:
+        VITE_AUTH_ENABLED: "true"
+        VITE_OIDC_AUTHORITY: http://localhost:${KEYCLOAK_PORT:-8180}/realms/catalog
+        VITE_OIDC_CLIENT_ID: catalog-ui
     image: intelegent-data-catalog-ui:local
     container_name: intelegent-data-catalog-ui
     restart: unless-stopped

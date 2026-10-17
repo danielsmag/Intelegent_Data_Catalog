@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.15"
 dependencies = [
     "alembic>=1.20.0",
+    "boto3>=1.43.114",
     "celery[redis]>=5.6.3",
     "dependency-injector>=4.49.1",
     "fastapi>=0.141.1",
@@ -20,6 +21,8 @@ dependencies = [
     "pydantic-ai-slim[anthropic,openai]>=2.54.0",
     "pydantic-settings>=2.15.0",
     "pyiceberg[pyarrow,sql-sqlite]>=0.12.0",
+    "pyjwt[crypto]>=2.15.1",
+    "python-multipart>=0.0.32",
     "sqlalchemy>=2.0.54",
     "sqlglot>=30.20.0",
     "trino>=0.340.0",
@@ -71,7 +74,7 @@ explicit_package_bases = true
 packages = ["intelegent_data_catalog"]
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*"]
+module = ["celery", "celery.*", "boto3", "boto3.*"]
 ignore_missing_imports = true
 
 [tool.pyright]

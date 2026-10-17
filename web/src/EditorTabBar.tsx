@@ -6,6 +6,7 @@ import {
   closeTab,
   focusTab,
   openBlankTab,
+  requestTreeReveal,
   splitGroup,
   useEditorLayout,
   type EditorGroup,
@@ -162,6 +163,7 @@ function EditorTabButton(props: {
         data-tab-blank={props.tab.path === "" ? "true" : undefined}
         onClick={() => {
           focusTab(props.groupId, props.tab.id)
+          requestTreeReveal()
         }}
         onPointerDown={onPointerDown}
         onMouseDown={(event: ReactMouseEvent<HTMLDivElement>) => {

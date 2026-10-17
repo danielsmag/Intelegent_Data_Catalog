@@ -1,3 +1,4 @@
+import { apiFetch } from "./http"
 import {
   fetchAirflowAttachments,
   fetchAirflowDags,
@@ -12,6 +13,8 @@ export type SpaceRecord = {
   name: string
   slug: string
   description: string | null
+  isolation_mode: "OPEN" | "ISOLATED"
+  bound_workspace_ids: string[]
   context: string | null
   context_origin: "USER" | "LLM" | null
 }
@@ -141,6 +144,7 @@ export type TagRecord = {
 export type NamedCreate = {
   name: string
   description: string | null
+  isolation_mode?: "OPEN" | "ISOLATED"
 }
 
 export type AttachmentOutcome = "created" | "already_in_scope" | "already_elsewhere"
@@ -165,7 +169,24 @@ export async function fetchSpaces(signal: AbortSignal): Promise<SpaceRecord[]> {
 }
 
 export async function createSpace(body: NamedCreate): Promise<SpaceRecord> {
-  return writeJson<SpaceRecord>("/api/v1/spaces", body)
+  const payload: { name: string; description?: string; isolation_mode?: "OPEN" | "ISOLATED" } = {
+    name: body.name,
+  }
+  if (body.description !== null) {
+    payload.description = body.description
+  }
+  if (body.isolation_mode !== undefined) {
+    payload.isolation_mode = body.isolation_mode
+  }
+  const response: Response = await apiFetch("/api/v1/spaces", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as SpaceRecord
 }
 
 export async function createScope(spaceId: string, body: NamedCreate): Promise<ScopeRecord> {
@@ -204,7 +225,7 @@ export async function attachScopeCatalog(
   scopeId: string,
   body: ScopeAttachment,
 ): Promise<AttachmentItem[]> {
-  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/attachments`, {
+  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/attachments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -348,7 +369,7 @@ export async function fetchKnowledgeContext(
   tableId: string,
   signal: AbortSignal,
 ): Promise<KnowledgeContext | null> {
-  const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context`, { signal })
+  const response: Response = await apiFetch(`/api/v1/tables/${tableId}/knowledge-context`, { signal })
   if (response.status === 404) {
     return null
   }
@@ -376,7 +397,7 @@ export async function startKnowledgeBuild(
   tableId: string,
   options: TableBuildOptions,
 ): Promise<KnowledgeBuildJob> {
-  const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context`, {
+  const response: Response = await apiFetch(`/api/v1/tables/${tableId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(options),
@@ -388,7 +409,7 @@ export async function startKnowledgeBuild(
 }
 
 export async function fetchKnowledgeBuild(jobId: string): Promise<KnowledgeBuildJob> {
-  const response: Response = await fetch(`/api/v1/knowledge-builds/${jobId}`)
+  const response: Response = await apiFetch(`/api/v1/knowledge-builds/${jobId}`)
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -399,7 +420,7 @@ export async function fetchLatestKnowledgeBuild(
   tableId: string,
   signal: AbortSignal,
 ): Promise<KnowledgeBuildJob | null> {
-  const response: Response = await fetch(`/api/v1/tables/${tableId}/knowledge-context/build`, {
+  const response: Response = await apiFetch(`/api/v1/tables/${tableId}/knowledge-context/build`, {
     signal,
   })
   if (response.status === 404) {
@@ -480,7 +501,7 @@ export async function fetchScopeKnowledgeContext(
   scopeId: string,
   signal: AbortSignal,
 ): Promise<ScopeKnowledgeContext | null> {
-  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context`, { signal })
+  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/knowledge-context`, { signal })
   if (response.status === 404) {
     return null
   }
@@ -506,7 +527,7 @@ export type ScopeBuildOptions = {
 }
 
 export async function startScopeBuild(scopeId: string, options: ScopeBuildOptions): Promise<ScopeBuildJob> {
-  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context`, {
+  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(options),
@@ -518,7 +539,7 @@ export async function startScopeBuild(scopeId: string, options: ScopeBuildOption
 }
 
 export async function fetchScopeBuild(jobId: string): Promise<ScopeBuildJob> {
-  const response: Response = await fetch(`/api/v1/scope-builds/${jobId}`)
+  const response: Response = await apiFetch(`/api/v1/scope-builds/${jobId}`)
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -529,7 +550,7 @@ export async function fetchLatestScopeBuild(
   scopeId: string,
   signal: AbortSignal,
 ): Promise<ScopeBuildJob | null> {
-  const response: Response = await fetch(`/api/v1/scopes/${scopeId}/knowledge-context/build`, {
+  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/knowledge-context/build`, {
     signal,
   })
   if (response.status === 404) {
@@ -578,7 +599,7 @@ export async function fetchSpaceKnowledgeContext(
   spaceId: string,
   signal: AbortSignal,
 ): Promise<SpaceKnowledgeContext | null> {
-  const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context`, { signal })
+  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/knowledge-context`, { signal })
   if (response.status === 404) {
     return null
   }
@@ -604,7 +625,7 @@ export type SpaceBuildOptions = {
 }
 
 export async function startSpaceBuild(spaceId: string, options: SpaceBuildOptions): Promise<SpaceBuildJob> {
-  const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context`, {
+  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/knowledge-context`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(options),
@@ -622,7 +643,7 @@ export type CatalogJobCancel = {
 }
 
 export async function cancelCatalogJob(jobId: string): Promise<CatalogJobCancel> {
-  const response: Response = await fetch(`/api/v1/catalog-jobs/${jobId}/cancel`, { method: "POST" })
+  const response: Response = await apiFetch(`/api/v1/catalog-jobs/${jobId}/cancel`, { method: "POST" })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -630,7 +651,7 @@ export async function cancelCatalogJob(jobId: string): Promise<CatalogJobCancel>
 }
 
 export async function fetchSpaceBuild(jobId: string): Promise<SpaceBuildJob> {
-  const response: Response = await fetch(`/api/v1/space-builds/${jobId}`)
+  const response: Response = await apiFetch(`/api/v1/space-builds/${jobId}`)
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -641,7 +662,7 @@ export async function fetchLatestSpaceBuild(
   spaceId: string,
   signal: AbortSignal,
 ): Promise<SpaceBuildJob | null> {
-  const response: Response = await fetch(`/api/v1/spaces/${spaceId}/knowledge-context/build`, {
+  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/knowledge-context/build`, {
     signal,
   })
   if (response.status === 404) {
@@ -670,7 +691,7 @@ export async function startContextGeneration(
   kind: ContextSubjectKind,
   id: string,
 ): Promise<ContextGenerationJob> {
-  const response: Response = await fetch(contextGeneratePath(kind, id), { method: "POST" })
+  const response: Response = await apiFetch(contextGeneratePath(kind, id), { method: "POST" })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -678,7 +699,7 @@ export async function startContextGeneration(
 }
 
 export async function fetchContextGeneration(jobId: string): Promise<ContextGenerationJob> {
-  const response: Response = await fetch(`/api/v1/context-generations/${jobId}`)
+  const response: Response = await apiFetch(`/api/v1/context-generations/${jobId}`)
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -690,7 +711,7 @@ export async function fetchLatestContextGeneration(
   id: string,
   signal: AbortSignal,
 ): Promise<ContextGenerationJob | null> {
-  const response: Response = await fetch(contextLatestPath(kind, id), { signal })
+  const response: Response = await apiFetch(contextLatestPath(kind, id), { signal })
   if (response.status === 404) {
     return null
   }
@@ -705,7 +726,7 @@ export async function updateEntityContext(
   id: string,
   context: string | null,
 ): Promise<void> {
-  const response: Response = await fetch(contextPatchPath(kind, id), {
+  const response: Response = await apiFetch(contextPatchPath(kind, id), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ context }),
@@ -795,6 +816,7 @@ export type HierarchyScope = {
 export type HierarchySpace = {
   id: string
   name: string
+  isolation_mode: "OPEN" | "ISOLATED"
   scopes: HierarchyScope[]
   airflow: HierarchyAirflow[]
 }
@@ -821,7 +843,13 @@ export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpac
         }),
       )
       const airflow: HierarchyAirflow[] = await hierarchyAirflow("space", space.id, signal)
-      return { id: space.id, name: space.name, scopes: nested, airflow }
+      return {
+        id: space.id,
+        name: space.name,
+        isolation_mode: space.isolation_mode,
+        scopes: nested,
+        airflow,
+      }
     }),
   )
   return trees
@@ -925,7 +953,7 @@ export async function fetchBuildTraces(
 export { isAbortError }
 
 async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response: Response = await fetch(path, { signal })
+  const response: Response = await apiFetch(path, { signal })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -937,7 +965,7 @@ async function writeJson<T>(path: string, body: NamedCreate): Promise<T> {
   if (body.description !== null) {
     payload.description = body.description
   }
-  const response: Response = await fetch(path, {
+  const response: Response = await apiFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -949,14 +977,14 @@ async function writeJson<T>(path: string, body: NamedCreate): Promise<T> {
 }
 
 async function removeRecord(path: string): Promise<void> {
-  const response: Response = await fetch(path, { method: "DELETE" })
+  const response: Response = await apiFetch(path, { method: "DELETE" })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
 }
 
 async function patchName<T>(path: string, name: string): Promise<T> {
-  const response: Response = await fetch(path, {
+  const response: Response = await apiFetch(path, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),

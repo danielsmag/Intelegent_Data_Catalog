@@ -7,6 +7,7 @@ type CreateRecordFormProps = {
   nameLabel: string
   submitLabel: string
   compact?: boolean
+  showVisibility?: boolean
   onCancel: () => void
   onCreate: (input: NamedCreate) => Promise<void>
 }
@@ -14,6 +15,7 @@ type CreateRecordFormProps = {
 export function CreateRecordForm(props: CreateRecordFormProps): ReactElement {
   const [name, setName] = useState<string>("")
   const [description, setDescription] = useState<string>("")
+  const [visibility, setVisibility] = useState<"OPEN" | "ISOLATED">("ISOLATED")
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<boolean>(false)
   const trimmedName: string = name.trim()
@@ -28,6 +30,9 @@ export function CreateRecordForm(props: CreateRecordFormProps): ReactElement {
     const input: NamedCreate = {
       name: trimmedName,
       description: descriptionText === "" ? null : descriptionText,
+    }
+    if (props.showVisibility === true) {
+      input.isolation_mode = visibility
     }
     setPending(true)
     setError(null)
@@ -67,6 +72,29 @@ export function CreateRecordForm(props: CreateRecordFormProps): ReactElement {
           }}
         />
       </label>
+      {props.showVisibility === true ? (
+        <fieldset className="visibility-choice">
+          <legend>Visibility</legend>
+          <label>
+            <input
+              type="radio"
+              name={`${props.idPrefix}-visibility`}
+              checked={visibility === "ISOLATED"}
+              onChange={() => setVisibility("ISOLATED")}
+            />
+            Private to this workspace
+          </label>
+          <label>
+            <input
+              type="radio"
+              name={`${props.idPrefix}-visibility`}
+              checked={visibility === "OPEN"}
+              onChange={() => setVisibility("OPEN")}
+            />
+            Shared with all workspaces
+          </label>
+        </fieldset>
+      ) : null}
       {error !== null ? <p className="error-text">{error}</p> : null}
       <div className="create-actions">
         <button className="button" type="submit" disabled={pending || trimmedName === ""}>

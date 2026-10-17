@@ -7,6 +7,7 @@ import {
   Route,
   Router,
   Routes,
+  useParams,
   type Location,
   type Navigator,
   type Path,
@@ -37,18 +38,23 @@ import {
   type LayoutNode,
   type SplitDirection,
 } from "./editorLayout"
+import { AppSideDock } from "./ConfigRail"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
 import { HierarchyTree } from "./HierarchyTree"
+import { WorkspaceFilePage } from "./WorkspaceFilePage"
+import { WorkspaceTree } from "./WorkspaceTree"
+import { WorkspacesPage } from "./WorkspacesPage"
 import { ResizeHandle } from "./ResizeHandle"
 import { QueryPage } from "./QueryPage"
 import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
 import { setPendingQuerySql, setSidebarView, sidebarViewForPath, useSidebarView, type SidebarView } from "./sidebarView"
 import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
+import { setWorkspaceSidebarOpen, useWorkspaceSidebarOpen } from "./workspaceSidebar"
 
 export function EditorWorkbench(): ReactElement {
   const layout: EditorLayout = useEditorLayout()
   const status: { area: string; detail: string } = useEditorStatusText()
-  const [railHost, setRailHost] = useState<HTMLDivElement | null>(null)
+  const [configSlot, setConfigSlot] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
     function onPop(event: PopStateEvent): void {
       const path: string = `${window.location.pathname}${window.location.search}`
@@ -76,7 +82,7 @@ export function EditorWorkbench(): ReactElement {
     }
   }, [])
   return (
-    <RailTargetContext.Provider value={railHost}>
+    <RailTargetContext.Provider value={configSlot}>
       <div className="shell">
         <div className="workspace">
           <ActivityBar />
@@ -84,7 +90,9 @@ export function EditorWorkbench(): ReactElement {
           <main className="main editor-grid">
             <LayoutView node={layout.root} />
           </main>
-          <div ref={setRailHost} className="editor-rail-host" />
+          <div className="editor-rail-host">
+            <AppSideDock onConfigSlot={setConfigSlot} />
+          </div>
         </div>
         <footer className="status">
           <span>{status.area}</span>
@@ -100,6 +108,7 @@ function SecondSidebar(): ReactElement {
   const view: SidebarView = useSidebarView()
   const spacesOpen: boolean = useSpacesSidebarOpen()
   const airflowOpen: boolean = useAirflowSidebarOpen()
+  const workspaceOpen: boolean = useWorkspaceSidebarOpen()
   if (view === "spaces") {
     return (
       <HierarchyTree
@@ -123,6 +132,16 @@ function SecondSidebar(): ReactElement {
   }
   if (view === "catalog") {
     return <CatalogSidebar />
+  }
+  if (view === "workspace") {
+    return (
+      <WorkspaceTree
+        collapsed={!workspaceOpen}
+        onToggleCollapsed={() => {
+          setWorkspaceSidebarOpen(!workspaceOpen)
+        }}
+      />
+    )
   }
   if (view === "search") {
     return (
@@ -337,6 +356,11 @@ function createGroupNavigator(groupId: string): Navigator {
   }
 }
 
+function WorkspaceFileRoute(): ReactElement {
+  const nodeId: string = useParams().nodeId ?? ""
+  return <WorkspaceFilePage nodeId={nodeId} />
+}
+
 function EditorRoutes(): ReactElement {
   return (
     <Routes>
@@ -348,6 +372,9 @@ function EditorRoutes(): ReactElement {
       <Route path="/catalog/:source/:catalog/:namespace/:table" element={<CatalogPage />} />
       <Route path="/spaces" element={<SpacesPage />} />
       <Route path="/spaces/:spaceId" element={<SpacePage />} />
+      <Route path="/workspaces" element={<WorkspacesPage />} />
+      <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
+      <Route path="/workspace/nodes/:nodeId" element={<WorkspaceFileRoute />} />
       <Route path="/scopes/:scopeId" element={<ScopePage />} />
       <Route path="/registry/tables/:tableId" element={<RegistryTablePage />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />

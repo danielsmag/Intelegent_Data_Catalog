@@ -84,6 +84,39 @@ textarea {
   padding: 12px 8px;
 }
 
+.activity-user {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.file-editor,
+.file-preview,
+.file-frame {
+  width: 100%;
+}
+
+.file-editor,
+.file-preview {
+  min-height: 320px;
+  font-family: ui-monospace, monospace;
+}
+
+.file-frame {
+  min-height: 480px;
+  border: 0;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
 .activity-brand {
   height: 36px;
   margin-bottom: 8px;
@@ -136,7 +169,7 @@ textarea {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.activity-button:nth-child(5) {
+.activity-button.activity-gap {
   margin-top: 10px;
 }
 
@@ -198,6 +231,18 @@ textarea {
   flex-direction: column;
   gap: 2px;
   padding: 12px 8px 8px 16px;
+}
+
+.sidebar-workspace {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .sidebar-rail-label {
@@ -302,6 +347,12 @@ textarea {
   color: #ff8d8d;
 }
 
+.tree-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .search {
   margin: 0 12px 8px;
   background: var(--input);
@@ -374,8 +425,11 @@ textarea {
   width: 100%;
 }
 
-a.tree-row {
+a.tree-row,
+button.tree-row {
   cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .tree-row:hover {
@@ -659,6 +713,187 @@ table.columns tr.focused td:first-child {
 
 .hierarchy.collapsed .sidebar-toggle {
   order: -1;
+}
+
+.workspace-files:not(.collapsed) .ws-head {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 10px 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.workspace-files .ws-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-files .ws-head-row .sidebar-title {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: 0;
+}
+
+.workspace-files .ws-switch {
+  position: relative;
+}
+
+.workspace-files .ws-switch .sidebar-workspace {
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  padding: 0 28px 0 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.workspace-files .ws-switch .sidebar-workspace:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.workspace-files .ws-switch .sidebar-workspace:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.workspace-files .ws-switch-chevron {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.workspace-files .ws-switch-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.workspace-files .tree {
+  padding: 6px 6px 16px;
+  font-size: 13px;
+}
+
+.workspace-files .tree-row {
+  position: relative;
+  gap: 0;
+  min-height: 28px;
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-right: 4px;
+  border-radius: 5px;
+}
+
+.workspace-files .ws-hit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-files .ws-row:hover .ws-hit,
+.workspace-files .ws-row:focus-within .ws-hit,
+.workspace-files .ws-row:has([aria-expanded="true"]) .ws-hit {
+  padding-right: 28px;
+}
+
+.workspace-files .ws-root > .ws-hit .tree-label {
+  font-weight: 600;
+}
+
+.workspace-files .ws-ico {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.workspace-files .ws-ico svg {
+  width: 15px;
+  height: 15px;
+}
+
+.workspace-files .ws-ico.folder {
+  color: #e0b15a;
+}
+
+.workspace-files .ws-ico.user {
+  color: #8eb7ff;
+}
+
+.workspace-files .ws-ico.sql {
+  color: #6eb6ff;
+}
+
+.workspace-files .ws-ico.py {
+  color: #7dcea0;
+}
+
+.workspace-files .ws-ico.md {
+  color: #d5dbe3;
+}
+
+.workspace-files .ws-ico.ipynb {
+  color: #f0a15a;
+}
+
+.workspace-files .ws-ico.json {
+  color: #e2c16a;
+}
+
+.workspace-files .ws-more {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workspace-files .ws-row:hover .ws-more,
+.workspace-files .ws-row:focus-within .ws-more,
+.workspace-files .ws-more:has([aria-expanded="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workspace-files .tree-row.current-branch {
+  background: rgba(59, 158, 255, 0.2);
+  color: var(--text-strong);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.workspace-files .tree-row.current-branch:hover {
+  background: rgba(59, 158, 255, 0.28);
 }
 
 .main {
@@ -2108,6 +2343,20 @@ html.pane-dragging * {
   min-height: 0;
   overflow: auto;
   padding: 4px 16px 16px;
+}
+
+.config-rail-slot {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.config-rail-slot:empty::before {
+  content: "No configuration for this page.";
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .config-save {

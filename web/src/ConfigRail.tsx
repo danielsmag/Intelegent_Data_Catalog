@@ -204,13 +204,7 @@ export function ConfigRail(props: {
   }
 
   return (
-    <SideTabs
-      tabs={[
-        {
-          id: CONFIG_TAB,
-          label: "Configuration",
-          content: (
-            <>
+    <>
               <label className="config-field">
                 <span>Refresh every</span>
                 <span className="config-minutes">
@@ -323,8 +317,18 @@ export function ConfigRail(props: {
               >
                 {props.busy ? "Saving…" : "Save"}
               </button>
-            </>
-          ),
+    </>
+  )
+}
+
+export function AppSideDock(props: { onConfigSlot: (node: HTMLDivElement | null) => void }): ReactElement {
+  return (
+    <SideTabs
+      tabs={[
+        {
+          id: CONFIG_TAB,
+          label: "Configuration",
+          content: <div className="config-rail-slot" ref={props.onConfigSlot} />,
         },
         {
           id: TRACE_TAB,

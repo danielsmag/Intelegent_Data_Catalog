@@ -8,10 +8,16 @@ if [ -z "${WAREHOUSE_BUCKET:-}" ]; then
   exit 1
 fi
 
-if aws s3api head-bucket --bucket "${WAREHOUSE_BUCKET}" >/dev/null 2>&1; then
-  echo "bucket ${WAREHOUSE_BUCKET} already exists"
-else
-  aws s3 mb "s3://${WAREHOUSE_BUCKET}"
-fi
+create_bucket() {
+  bucket="$1"
+  if aws s3api head-bucket --bucket "${bucket}" >/dev/null 2>&1; then
+    echo "bucket ${bucket} already exists"
+  else
+    aws s3 mb "s3://${bucket}"
+  fi
+}
+
+create_bucket "${WAREHOUSE_BUCKET}"
+create_bucket "${WORKSPACE_BUCKET:-workspace}"
 
 aws s3 ls

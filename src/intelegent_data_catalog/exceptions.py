@@ -124,6 +124,27 @@ class AirflowAuthError(AirflowUnavailableError):
         super().__init__(message)
 
 
+class AuthenticationError(CatalogError):
+    """Raised when a request has no valid bearer token."""
+
+    def __init__(self, message: str = "authentication required") -> None:
+        super().__init__(message)
+
+
+class AuthorizationError(CatalogError):
+    """Raised when an authenticated user lacks a role or membership."""
+
+    def __init__(self, message: str = "not allowed") -> None:
+        super().__init__(message)
+
+
+class PayloadTooLargeError(CatalogError):
+    """Raised when an upload exceeds the configured size."""
+
+    def __init__(self, message: str = "upload is too large") -> None:
+        super().__init__(message)
+
+
 class PersistenceUnavailableError(CatalogError):
     """Raised when the catalog database cannot be used. The message stays generic."""
 

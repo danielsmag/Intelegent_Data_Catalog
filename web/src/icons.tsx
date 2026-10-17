@@ -174,6 +174,63 @@ export function MoreIcon(): ReactElement {
   )
 }
 
+export function FolderIcon(props: { open: boolean }): ReactElement {
+  if (props.open) {
+    return (
+      <Icon>
+        <path
+          d="M1.7 6.2 3.1 4.2h3.2l1 1.1h6.1v1.1H2.6L1.5 13h11.4l1.3-6.8H1.7z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.1"
+          strokeLinejoin="round"
+        />
+      </Icon>
+    )
+  }
+  return (
+    <Icon>
+      <path
+        d="M1.8 3.7h4.1l1.15 1.25H14.2v7.7H1.8z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+    </Icon>
+  )
+}
+
+export function FileIcon(): ReactElement {
+  return (
+    <Icon>
+      <path
+        d="M4.1 1.7h4.8l3.9 3.9v8.7H4.1z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <path d="M8.8 1.8v4h3.9" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+    </Icon>
+  )
+}
+
+export function PersonIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="8" cy="5.3" r="2.15" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <path
+        d="M3.2 13.5c.7-2.5 2.5-3.7 4.8-3.7s4.1 1.2 4.8 3.7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+      />
+    </Icon>
+  )
+}
+
 export function PlusIcon(): ReactElement {
   return (
     <Icon>

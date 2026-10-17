@@ -11,17 +11,23 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
+from intelegent_data_catalog.api.visibility import SpaceResolver
+from intelegent_data_catalog.auth.access import AccessContext
+from intelegent_data_catalog.auth.principal import Principal
+from intelegent_data_catalog.auth.service import AccessService
 from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
 from intelegent_data_catalog.catalog.services.explorer_service import ExplorerService
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.entity_configuration import EntityConfigurationService
-from intelegent_data_catalog.exceptions import PersistenceUnavailableError
+from intelegent_data_catalog.exceptions import AuthenticationError, PersistenceUnavailableError
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
 from intelegent_data_catalog.jobs.schedules import SyncScheduleService
 from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.registry.files import WorkspaceFileService
 from intelegent_data_catalog.registry.service import RegistryService
+from intelegent_data_catalog.registry.workspaces import WorkspaceService
 
 
 def get_container(request: Request) -> AppContainer:
@@ -216,3 +222,112 @@ def get_entity_configuration(
 
 
 EntityConfigurationDep = Annotated[EntityConfigurationService, Depends(get_entity_configuration)]
+
+
+def get_access(
+    request: Request,
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> AccessContext:
+    """Resolve the caller and the active workspace. Auth off uses the dev principal."""
+    session: Session = container.database().session()
+    try:
+        if container.settings().auth.enabled:
+            principal: Principal = container.oidc_verifier().verify(_bearer(request))
+        else:
+            principal = Principal.dev(container.settings().auth)
+        return AccessService(session).resolve(principal, request.headers.get("x-workspace-id"))
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AccessDep = Annotated[AccessContext, Depends(get_access)]
+
+
+def enforce_request_visibility(
+    request: Request,
+    access: AccessDep,
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> None:
+    """404 path ids that sit in a space the active workspace cannot see."""
+    session: Session = container.database().session()
+    try:
+        SpaceResolver(session).enforce(request.path_params, access)
+    finally:
+        session.close()
+
+
+def get_workspace_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[WorkspaceService]:
+    """Open one catalog session for workspace administration."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: WorkspaceService = WorkspaceService(session, container.object_store())
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
+
+
+def get_workspace_files(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[WorkspaceFileService]:
+    """Open one catalog session for workspace files."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: WorkspaceFileService = WorkspaceFileService(
+        session,
+        container.object_store(),
+        container.settings().object_store.max_upload_bytes,
+    )
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+WorkspaceFilesDep = Annotated[WorkspaceFileService, Depends(get_workspace_files)]
+
+
+def require_auth(
+    request: Request,
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> None:
+    """Require a bearer token when auth is enabled. No catalog session is opened."""
+    if not container.settings().auth.enabled:
+        return
+    container.oidc_verifier().verify(_bearer(request))
+
+
+def _bearer(request: Request) -> str:
+    header: str | None = request.headers.get("authorization")
+    if header is None:
+        raise AuthenticationError("authentication required")
+    prefix: str = "bearer "
+    if not header.lower().startswith(prefix):
+        raise AuthenticationError("authentication required")
+    token: str = header[len(prefix) :].strip()
+    if token == "":
+        raise AuthenticationError("authentication required")
+    return token

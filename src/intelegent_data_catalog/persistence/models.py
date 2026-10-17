@@ -41,10 +41,13 @@ from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
+    SpaceIsolationMode,
     SyncRunStatus,
     TableKind,
     TableStatus,
     TagOrigin,
+    WorkspaceNodeKind,
+    WorkspaceRole,
 )
 
 
@@ -67,12 +70,23 @@ class SpaceRow(Base):
             tuple(item.value for item in ContextOrigin),
             "ck_spaces_context_origin",
         ),
+        _enum_check(
+            "isolation_mode",
+            tuple(item.value for item in SpaceIsolationMode),
+            "ck_spaces_isolation_mode",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    isolation_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=SpaceIsolationMode.OPEN.value,
+        server_default=text("'OPEN'"),
+    )
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -994,5 +1008,129 @@ class EntityConfigurationRow(Base):
         server_default=text("'low'"),
     )
     options: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceRow(Base):
+    """Named workspace. Members and space bindings live in their own tables."""
+
+    __tablename__: str = "workspaces"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UserRow(Base):
+    """Person synced from an OIDC subject. No password is stored."""
+
+    __tablename__: str = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    subject: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, unique=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_login_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceMemberRow(Base):
+    """User membership in one workspace."""
+
+    __tablename__: str = "workspace_members"
+    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_members_pair"),
+        _enum_check(
+            "role",
+            tuple(item.value for item in WorkspaceRole),
+            "ck_workspace_members_role",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceSpaceBindingRow(Base):
+    """Space visible to one workspace. OPEN spaces do not need a row."""
+
+    __tablename__: str = "workspace_space_bindings"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("workspace_id", "space_id", name="uq_workspace_space_bindings_pair"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("spaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceNodeRow(Base):
+    """Folder or file in a workspace. Bytes live in object storage under ``object_key``."""
+
+    __tablename__: str = "workspace_nodes"
+    __table_args__: tuple[UniqueConstraint | CheckConstraint | Index, ...] = (
+        UniqueConstraint("workspace_id", "path", name="uq_workspace_nodes_path"),
+        _enum_check(
+            "kind",
+            tuple(item.value for item in WorkspaceNodeKind),
+            "ck_workspace_nodes_kind",
+        ),
+        CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_workspace_nodes_size"),
+        Index("ix_workspace_nodes_parent", "workspace_id", "parent_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspace_nodes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

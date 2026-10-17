@@ -29,9 +29,9 @@ class CatalogDatabase:
 
     def __init__(self, url: str) -> None:
         self.url: str = url
-        connect_args: dict[str, bool] = {}
+        connect_args: dict[str, bool | float] = {}
         if url.startswith("sqlite"):
-            connect_args = {"check_same_thread": False}
+            connect_args = {"check_same_thread": False, "timeout": 30.0}
         self._engine: Engine = create_engine(url, connect_args=connect_args, pool_pre_ping=True)
         if url.startswith("sqlite"):
             _enable_sqlite_foreign_keys(self._engine)

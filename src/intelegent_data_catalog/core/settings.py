@@ -432,6 +432,47 @@ class CelerySettings(BaseModel):
         return self
 
 
+class AuthSettings(BaseModel):
+    """OIDC bearer checks. Disabled keeps a local dev principal and skips tokens."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    issuer: str = ""
+    audience: str = "catalog-ui"
+    jwks_url: str = ""
+    admin_role: str = Field(default="catalog-admin", min_length=1)
+    dev_subject: str = Field(default="dev", min_length=1)
+    dev_email: str = "dev@localhost"
+    dev_name: str = Field(default="Dev", min_length=1)
+    dev_is_admin: bool = True
+
+    @model_validator(mode="after")
+    def _require_issuer_when_enabled(self) -> AuthSettings:
+        if not self.enabled:
+            return self
+        issuer: str = self.issuer.strip().rstrip("/")
+        jwks: str = self.jwks_url.strip()
+        if issuer == "" or jwks == "":
+            raise ValueError("issuer and jwks_url are required when auth is enabled")
+        self.issuer = issuer
+        self.jwks_url = jwks
+        return self
+
+
+class ObjectStoreSettings(BaseModel):
+    """S3-compatible store for workspace files. An empty endpoint uses memory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint: str = ""
+    access_key: str = ""
+    secret_key: SecretStr = Field(default=SecretStr(""))
+    bucket: str = Field(default="workspace", min_length=1)
+    region: str = Field(default="us-west-2", min_length=1)
+    max_upload_bytes: int = Field(default=50 * 1024 * 1024, ge=1)
+
+
 class ObservabilitySettings(BaseModel):
     """OTLP export of catalog logs and agent spans. Disabled until configured."""
 
@@ -480,6 +521,8 @@ class AppSettings(BaseSettings):
     context: ContextSettings = Field(default_factory=ContextSettings)
     celery: CelerySettings = Field(default_factory=CelerySettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
+    object_store: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
 
     @classmethod
     def settings_customise_sources(

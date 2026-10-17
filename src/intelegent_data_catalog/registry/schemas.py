@@ -19,9 +19,12 @@ from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
+    SpaceIsolationMode,
     SyncRunStatus,
     TableKind,
     TableStatus,
+    WorkspaceNodeKind,
+    WorkspaceRole,
 )
 from intelegent_data_catalog.registry.identifiers import exact_identifier, require_slug
 from intelegent_data_catalog.registry.secrets import assert_no_secrets, reject_endpoint_credentials
@@ -139,6 +142,7 @@ class SpaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     slug: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
+    isolation_mode: SpaceIsolationMode = SpaceIsolationMode.OPEN
 
     @field_validator("slug")
     @classmethod
@@ -160,6 +164,7 @@ class SpaceUpdate(BaseModel):
     slug: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=16000)
     context: str | None = Field(default=None, max_length=4000)
+    isolation_mode: SpaceIsolationMode | None = None
 
     @field_validator("name")
     @classmethod
@@ -183,6 +188,8 @@ class SpaceRead(BaseModel):
     name: str
     slug: str
     description: str | None
+    isolation_mode: SpaceIsolationMode
+    bound_workspace_ids: list[UUID]
     context: str | None
     context_origin: ContextOrigin | None
     created_at: datetime
@@ -888,3 +895,145 @@ class SyncRunRead(BaseModel):
     counts: SyncCounts
     sanitized_error: str | None
     checkpoint: dict[str, JsonValue] | None
+
+
+class MembershipRead(BaseModel):
+    """One workspace the caller belongs to."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: UUID
+    name: str
+    slug: str
+    role: WorkspaceRole
+    is_system: bool
+
+
+class MeRead(BaseModel):
+    """Caller identity and workspace memberships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str
+    email: str | None
+    name: str
+    user_id: UUID
+    is_admin: bool
+    workspace_id: UUID | None
+    memberships: list[MembershipRead]
+
+
+class WorkspaceCreate(BaseModel):
+    """Create a workspace. Slug is derived from the name when omitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    slug: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=16000)
+
+    @field_validator("slug")
+    @classmethod
+    def _slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return require_slug(value)
+
+
+class WorkspaceUpdate(BaseModel):
+    """Patch a workspace name or description."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    slug: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=16000)
+
+    @field_validator("slug")
+    @classmethod
+    def _slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return require_slug(value)
+
+
+class WorkspaceRead(BaseModel):
+    """Workspace returned by the API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    name: str
+    slug: str
+    description: str | None
+    is_system: bool
+    role: WorkspaceRole | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkspaceMemberCreate(BaseModel):
+    """Add a user who has already signed in, by email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=320)
+    role: WorkspaceRole = WorkspaceRole.MEMBER
+
+
+class WorkspaceMemberRead(BaseModel):
+    """Member of a workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: UUID
+    email: str | None
+    display_name: str
+    role: WorkspaceRole
+    created_at: datetime
+
+
+class WorkspaceNodeRead(BaseModel):
+    """Folder or file in a workspace tree."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    workspace_id: UUID
+    parent_id: UUID | None
+    name: str
+    path: str
+    kind: WorkspaceNodeKind
+    content_type: str | None
+    size_bytes: int | None
+    owner_user_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FolderCreate(BaseModel):
+    """Create a folder under a parent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+
+
+class TextFileCreate(BaseModel):
+    """Create a text file under a folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    text: str = Field(max_length=5_000_000)
+
+
+class NodeUpdate(BaseModel):
+    """Rename a node or move it to another folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    parent_id: UUID | None = None

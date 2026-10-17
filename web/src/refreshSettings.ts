@@ -1,3 +1,4 @@
+import { apiFetch } from "./http"
 import { useEffect, useRef, useState, type MutableRefObject } from "react"
 import { errorMessage, isAbortError } from "./api"
 
@@ -263,7 +264,7 @@ async function fetchEntityConfiguration(
   id: string,
   signal: AbortSignal,
 ): Promise<EntityConfig> {
-  const response: Response = await fetch(configurationPath(kind, id), { signal })
+  const response: Response = await apiFetch(configurationPath(kind, id), { signal })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -275,7 +276,7 @@ async function saveEntityConfiguration(
   id: string,
   config: EntityConfig,
 ): Promise<EntityConfig> {
-  const response: Response = await fetch(configurationPath(kind, id), {
+  const response: Response = await apiFetch(configurationPath(kind, id), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

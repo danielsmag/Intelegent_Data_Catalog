@@ -1,3 +1,4 @@
+import { apiFetch } from "./http"
 import { type ModelId, type ReasoningEffort } from "./refreshSettings"
 
 export type AirflowInstanceStatus = "ACTIVE" | "DISABLED"
@@ -239,7 +240,7 @@ export async function fetchAirflowSchedule(
   instanceId: string,
   signal: AbortSignal,
 ): Promise<SyncSchedule | null> {
-  const response: Response = await fetch(`/api/v1/airflow/instances/${instanceId}/schedule`, { signal })
+  const response: Response = await apiFetch(`/api/v1/airflow/instances/${instanceId}/schedule`, { signal })
   if (response.status === 404) {
     return null
   }
@@ -408,7 +409,7 @@ export async function fetchAirflowKnowledgeContext(
   instanceId: string,
   signal: AbortSignal,
 ): Promise<AirflowKnowledgeContext | null> {
-  const response: Response = await fetch(`/api/v1/airflow/instances/${instanceId}/knowledge-context`, {
+  const response: Response = await apiFetch(`/api/v1/airflow/instances/${instanceId}/knowledge-context`, {
     signal,
   })
   if (response.status === 404) {
@@ -435,7 +436,7 @@ export async function fetchLatestAirflowBuild(
   instanceId: string,
   signal: AbortSignal,
 ): Promise<AirflowBuildJob | null> {
-  const response: Response = await fetch(
+  const response: Response = await apiFetch(
     `/api/v1/airflow/instances/${instanceId}/knowledge-context/build`,
     { signal },
   )
@@ -463,7 +464,7 @@ function dagPath(instanceId: string, dagId: string): string {
 }
 
 async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response: Response = await fetch(path, { signal })
+  const response: Response = await apiFetch(path, { signal })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
@@ -471,7 +472,7 @@ async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
 }
 
 async function sendJson<T>(path: string, method: string, body: unknown): Promise<T> {
-  const response: Response = await fetch(path, {
+  const response: Response = await apiFetch(path, {
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -483,7 +484,7 @@ async function sendJson<T>(path: string, method: string, body: unknown): Promise
 }
 
 async function sendEmpty(path: string, method: string): Promise<void> {
-  const response: Response = await fetch(path, { method })
+  const response: Response = await apiFetch(path, { method })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }

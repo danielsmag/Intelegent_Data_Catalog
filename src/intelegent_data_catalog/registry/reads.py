@@ -18,6 +18,7 @@ from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
+    SpaceIsolationMode,
     SyncRunStatus,
     TableKind,
     TableStatus,
@@ -81,13 +82,16 @@ def dump_json_dict(value: dict[str, JsonValue]) -> dict[str, object]:
     return stored
 
 
-def space_read(row: SpaceRow) -> SpaceRead:
+def space_read(row: SpaceRow, bound_workspace_ids: list[UUID] | None = None) -> SpaceRead:
     """Map a space row."""
+    bound: list[UUID] = [] if bound_workspace_ids is None else list(bound_workspace_ids)
     return SpaceRead(
         id=row.id,
         name=row.name,
         slug=row.slug,
         description=row.description,
+        isolation_mode=SpaceIsolationMode(row.isolation_mode),
+        bound_workspace_ids=bound,
         context=row.context,
         context_origin=_context_origin(row.context_origin),
         created_at=_aware(row.created_at),

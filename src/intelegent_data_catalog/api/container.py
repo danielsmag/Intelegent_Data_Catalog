@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 from dependency_injector import containers, providers
 
+from intelegent_data_catalog.auth.oidc import OidcVerifier
 from intelegent_data_catalog.catalog.repositories.catalog import CatalogRepository
 from intelegent_data_catalog.catalog.repositories.polaris import PolarisClient
 from intelegent_data_catalog.catalog.repositories.polaris_browser import PolarisCatalogBrowser
@@ -24,6 +25,7 @@ from intelegent_data_catalog.core.settings import (
 )
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.sources.trino.client import TrinoClient
+from intelegent_data_catalog.storage.object_store import ObjectStore, build_object_store
 
 
 def open_http_client(settings: AppSettings) -> Iterator[httpx.Client]:
@@ -167,4 +169,12 @@ class AppContainer(containers.DeclarativeContainer):
     database: providers.Singleton[CatalogDatabase] = providers.Singleton(
         build_database,
         settings,
+    )
+    oidc_verifier: providers.Singleton[OidcVerifier] = providers.Singleton(
+        OidcVerifier,
+        settings.provided.auth,
+    )
+    object_store: providers.Singleton[ObjectStore] = providers.Singleton(
+        build_object_store,
+        settings.provided.object_store,
     )

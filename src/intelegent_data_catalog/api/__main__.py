@@ -32,7 +32,9 @@ def main() -> None:
         _project_seed_lake(settings, database, logger)
         app: FastAPI = create_app(container)
     except PersistenceUnavailableError as err:
-        print(f"startup failed: {err}", file=sys.stderr)
+        cause: BaseException | None = err.__cause__
+        detail: str = str(err) if cause is None else f"{err}: {cause}"
+        print(f"startup failed: {detail}", file=sys.stderr)
         raise SystemExit(1) from None
     except CatalogError as err:
         print(f"startup failed: {err}", file=sys.stderr)

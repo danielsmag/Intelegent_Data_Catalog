@@ -13,6 +13,7 @@ import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { ContextEditor } from "./ContextEditor"
 import { ScopeContextPanel } from "./ScopeContextPanel"
 import { SpaceContextPanel } from "./SpaceContextPanel"
+import { SpaceAccessPanel } from "./SpaceAccessPanel"
 import { SpaceScopesDigest } from "./SpaceScopesDigest"
 import { SubgraphView } from "./SubgraphView"
 import {
@@ -234,6 +235,7 @@ export function SpacesPage(): ReactElement {
               idPrefix="page-space"
               nameLabel="Space name"
               submitLabel="Add space"
+              showVisibility
               onCancel={() => {
                 setCreating(false)
               }}
@@ -565,6 +567,7 @@ export function SpacePage(): ReactElement {
         ) : null}
         {error !== null ? <p className="error-text catalog-alert">{error}</p> : null}
         {knowledgeError !== null ? <p className="error-text catalog-alert">{knowledgeError}</p> : null}
+        {space !== null ? <SpaceAccessPanel space={space} /> : null}
         <div className="tabs" role="tablist">
           {SPACE_TABS.map((name: SpaceTab) => (
             <button

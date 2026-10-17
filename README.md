@@ -42,6 +42,7 @@ docker compose logs -f spark-lineage
 | Marquez lineage UI | http://localhost:3000 |
 | Catalog API | http://localhost:8090 |
 | Catalog UI | http://localhost:5173 |
+| Keycloak | http://localhost:8180 |
 | Celery Flower | http://localhost:5555 |
 | OpenObserve | http://localhost:5080 |
 
@@ -68,6 +69,16 @@ OpenObserve at http://localhost:5080 takes the catalog API logs and pydantic-ai 
 The UI container serves the built explorer and proxies `/api` to the catalog API. Catalog routes live under `/api/v1`. That API calls Polaris at `http://polaris:8181`. `CATALOG_UI_PORT` and `CATALOG_API_PORT` change the published ports. Inside the API container, `CATALOG_API__HOST` is `0.0.0.0` and `CATALOG_POLARIS__*` points at the Compose network.
 
 The Spark seed must have run so `sales.customers`, `sales.orders`, and `sales.customer_spend` exist. For a host-only dev server instead of the UI container, run `cd web && npm install && npm run dev`. That Vite server proxies `/api` to `http://127.0.0.1:8090`.
+
+## Workspaces and sign-in
+
+Compose starts Keycloak and turns catalog auth on. The realm is `catalog`. The UI client is `catalog-ui` (public, PKCE). Sign in at the catalog UI with `admin` / `admin` (realm role `catalog-admin`) or `analyst` / `analyst`. Keycloak itself is at http://localhost:8180. The master admin uses `KEYCLOAK_ADMIN` and `KEYCLOAK_ADMIN_PASSWORD` from `.env` (defaults `admin` / `admin`).
+
+A host `uv run` leaves `[auth] enabled` false, so the API uses the dev principal and does not check tokens. Set `CATALOG_AUTH__ENABLED=true` plus `CATALOG_AUTH__ISSUER` and `CATALOG_AUTH__JWKS_URL` to verify tokens outside Compose.
+
+Every user belongs to the built-in **Shared** workspace. Platform admins create more workspaces and add members by email after that person has signed in once. A space is `OPEN` (visible from every workspace) or `ISOLATED` (visible only from workspaces bound to it). The UI sends the active workspace as `X-Workspace-Id`.
+
+Workspace files live in the MinIO bucket `workspace`. Postgres stores the folder tree (`Shared/` and `Users/<you>/`). `Users/<you>/` is visible to that user and to platform admins. The physical Polaris browser and `POST /api/v1/query` are not filtered by workspace.
 
 ## Airflow
 

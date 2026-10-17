@@ -107,3 +107,24 @@ service_name = "intelegent-data-catalog"
 username = "root@example.com"
 password = ""
 include_content = true
+
+# OIDC. Compose sets CATALOG_AUTH__ENABLED=true. A host run stays off.
+[auth]
+enabled = false
+issuer = ""
+audience = "catalog-ui"
+jwks_url = ""
+admin_role = "catalog-admin"
+dev_subject = "dev"
+dev_email = "dev@localhost"
+dev_name = "Dev"
+dev_is_admin = true
+
+# Workspace file bytes. Empty endpoint keeps files in process memory.
+[object_store]
+endpoint = ""
+access_key = ""
+secret_key = ""
+bucket = "workspace"
+region = "us-west-2"
+max_upload_bytes = 52428800

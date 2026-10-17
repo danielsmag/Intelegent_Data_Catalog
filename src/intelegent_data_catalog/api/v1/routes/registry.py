@@ -5,7 +5,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response
 
-from intelegent_data_catalog.api.dependencies import RegistryServiceDep, ScopeAttachmentDep
+from intelegent_data_catalog.api.dependencies import (
+    AccessDep,
+    RegistryServiceDep,
+    ScopeAttachmentDep,
+)
+from intelegent_data_catalog.auth.access import AccessContext
+from intelegent_data_catalog.exceptions import EntityNotFoundError
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingCreate,
     AssetBindingRead,
@@ -46,15 +52,15 @@ router: APIRouter = APIRouter()
 
 
 @router.get("/spaces", response_model=list[SpaceRead])
-def list_spaces(service: RegistryServiceDep) -> list[SpaceRead]:
-    """List business spaces."""
-    return service.list_spaces()
+def list_spaces(service: RegistryServiceDep, access: AccessDep) -> list[SpaceRead]:
+    """List business spaces visible to the active workspace."""
+    return service.list_spaces(access.visible_space_ids)
 
 
 @router.post("/spaces", response_model=SpaceRead, status_code=201)
-def create_space(body: SpaceCreate, service: RegistryServiceDep) -> SpaceRead:
-    """Create a business space."""
-    return service.create_space(body)
+def create_space(body: SpaceCreate, service: RegistryServiceDep, access: AccessDep) -> SpaceRead:
+    """Create a business space. Isolated spaces bind to the active workspace."""
+    return service.create_space(body, workspace_id=access.workspace_id)
 
 
 @router.get("/spaces/{space_id}", response_model=SpaceRead)
@@ -68,9 +74,10 @@ def patch_space(
     space_id: UUID,
     body: SpaceUpdate,
     service: RegistryServiceDep,
+    access: AccessDep,
 ) -> SpaceRead:
     """Patch a space."""
-    return service.update_space(space_id, body)
+    return service.update_space(space_id, body, workspace_id=access.workspace_id)
 
 
 @router.delete("/spaces/{space_id}", status_code=204)
@@ -240,8 +247,15 @@ def remove_column(column_id: UUID, service: RegistryServiceDep) -> Response:
 def create_relationship(
     body: RelationshipCreate,
     service: RegistryServiceDep,
+    access: AccessDep,
 ) -> RelationshipRead:
     """Create a relationship and its column mappings."""
+    access_context: AccessContext = access
+    table_id: UUID
+    for table_id in (body.source_table_id, body.target_table_id):
+        space_id: UUID = service.space_id_for_table(table_id)
+        if not access_context.allows_space(space_id):
+            raise EntityNotFoundError("table", str(table_id))
     return service.create_relationship(body)
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode, type RefObject } from "react"
 import { errorMessage, isAbortError } from "./api"
-import { openInFocusedGroup, parseRouteIds, pathnameOf, searchOf, useFocusedPath, type RouteIds } from "./editorLayout"
+import { openInFocusedGroup, parseRouteIds, pathnameOf, searchOf, useFocusedPath, useTreeReveal, type RouteIds } from "./editorLayout"
 import { WorkbenchLink } from "./editorSlots"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
@@ -34,17 +34,108 @@ type RenameTarget = {
   name: string
 }
 
+const collapsedStorageKey: string = "spaces-tree-collapsed"
+
+function readCollapsedKeys(): ReadonlySet<string> {
+  try {
+    const raw: string | null = window.localStorage.getItem(collapsedStorageKey)
+    if (raw === null) {
+      return new Set()
+    }
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return new Set()
+    }
+    const keys: string[] = []
+    for (const item of parsed) {
+      if (typeof item === "string") {
+        keys.push(item)
+      }
+    }
+    return new Set(keys)
+  } catch {
+    return new Set()
+  }
+}
+
+function writeCollapsedKeys(keys: ReadonlySet<string>): void {
+  try {
+    const stored: string[] = [...keys]
+    window.localStorage.setItem(collapsedStorageKey, JSON.stringify(stored))
+  } catch {
+    // Private mode can block storage. In-memory state still updates.
+  }
+}
+
+function revealAncestors(spaces: readonly HierarchySpace[], pathname: string, search: string): readonly string[] {
+  const ids: RouteIds = parseRouteIds(pathname)
+  const params: URLSearchParams = new URLSearchParams(search)
+  const onAirflow: boolean = params.get("tab") === "airflow"
+  const instanceId: string | null = params.get("instance")
+  const dagId: string | null = params.get("dag")
+  if (ids.tableId !== null) {
+    for (const space of spaces) {
+      for (const scope of space.scopes) {
+        const hit: boolean = scope.tables.some((table: HierarchyTable) => table.id === ids.tableId)
+        if (!hit) {
+          continue
+        }
+        return ["spaces", `space:${space.id}`, `scopes:${space.id}`, `scope:${scope.id}`, `tables:${scope.id}`]
+      }
+    }
+    return []
+  }
+  if (ids.scopeId !== null) {
+    for (const space of spaces) {
+      const scope: HierarchyScope | undefined = space.scopes.find((item: HierarchyScope) => item.id === ids.scopeId)
+      if (scope === undefined) {
+        continue
+      }
+      const keys: string[] = ["spaces", `space:${space.id}`, `scopes:${space.id}`]
+      if (onAirflow && instanceId !== null) {
+        keys.push(`scope:${scope.id}`, `airflow-group:${scope.id}`)
+        if (dagId !== null) {
+          keys.push(`airflow:${scope.id}:${instanceId}`)
+        }
+      }
+      return keys
+    }
+    return []
+  }
+  if (ids.spaceId !== null) {
+    const space: HierarchySpace | undefined = spaces.find((item: HierarchySpace) => item.id === ids.spaceId)
+    if (space === undefined) {
+      return []
+    }
+    const keys: string[] = ["spaces"]
+    if (onAirflow && instanceId !== null) {
+      keys.push(`space:${space.id}`, `airflow-group:${space.id}`)
+      if (dagId !== null) {
+        keys.push(`airflow:${space.id}:${instanceId}`)
+      }
+    }
+    return keys
+  }
+  return []
+}
+
 export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [spaces, setSpaces] = useState<HierarchySpace[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [query, setQuery] = useState<string>("")
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsedKeys)
   const [addingSpace, setAddingSpace] = useState<boolean>(false)
   const [addingScopeId, setAddingScopeId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<RenameTarget | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
   const [pendingDrop, setPendingDrop] = useState<string | null>(null)
+  const [revealTick, setRevealTick] = useState<number>(0)
+  const treeRef: RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null)
+  const revealedPath: RefObject<string | null> = useRef<string | null>(null)
+  const settled: RefObject<boolean> = useRef<boolean>(false)
+  const lastReveal: RefObject<number> = useRef<number>(0)
+  const revealRequest: number = useTreeReveal()
   const revision: number = useCatalogRevision()
   const focused: string = useFocusedPath()
   const pathname: string = pathnameOf(focused)
@@ -58,6 +149,10 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
     () => filterSpaces(spaces ?? [], query),
     [spaces, query],
   )
+
+  useEffect(() => {
+    writeCollapsedKeys(collapsed)
+  }, [collapsed])
 
   useEffect(() => {
     const controller: AbortController = new AbortController()
@@ -81,6 +176,48 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
       controller.abort()
     }
   }, [revision])
+
+  useEffect(() => {
+    if (spaces === null) {
+      return
+    }
+    const requestChanged: boolean = lastReveal.current !== revealRequest
+    lastReveal.current = revealRequest
+    if (!settled.current) {
+      settled.current = true
+      if (!requestChanged) {
+        revealedPath.current = focused
+        return
+      }
+    }
+    if (!requestChanged && revealedPath.current === focused) {
+      return
+    }
+    revealedPath.current = focused
+    const keys: readonly string[] = revealAncestors(spaces, pathname, search)
+    if (keys.length === 0) {
+      return
+    }
+    setCollapsed((current: ReadonlySet<string>) => {
+      let changed: boolean = false
+      const next: Set<string> = new Set(current)
+      for (const key of keys) {
+        if (next.delete(key)) {
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    setRevealTick((current: number) => current + 1)
+  }, [focused, spaces, pathname, search, revealRequest])
+
+  useEffect(() => {
+    if (revealTick === 0) {
+      return
+    }
+    const row: Element | null = treeRef.current?.querySelector('[aria-current="page"]') ?? null
+    row?.scrollIntoView({ block: "nearest" })
+  }, [revealTick])
 
   function toggle(key: string): void {
     if (searching) {
@@ -227,6 +364,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
           idPrefix="tree-space"
           nameLabel="Space name"
           submitLabel="Add space"
+          showVisibility
           compact
           onCancel={() => {
             setAddingSpace(false)
@@ -239,7 +377,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
           }}
         />
       ) : null}
-      <div className="tree" role="tree">
+      <div className="tree" role="tree" ref={treeRef}>
         {loading ? <p className="tree-status">Loading spaces…</p> : null}
         {error !== null ? <p className="tree-status error-text">{error}</p> : null}
         {!loading && error === null && visible.length === 0 ? (
@@ -274,7 +412,10 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                 </button>
                 <WorkbenchLink to={`/spaces/${space.id}`} className="tree-link figure-space" aria-current={spaceSelected ? "page" : undefined}>
                   <SpaceIcon />
-                  <span className="tree-label">{space.name}</span>
+                  <span className="tree-label">
+                    {space.name}
+                    <span className="badge">{space.isolation_mode === "OPEN" ? "Shared" : "Private"}</span>
+                  </span>
                 </WorkbenchLink>
                 <TreeMenu
                   menuKey={`space:${space.id}`}
@@ -783,7 +924,13 @@ function filterSpaces(spaces: HierarchySpace[], query: string): HierarchySpace[]
     }
     const airflow: HierarchyAirflow[] = filterAirflow(space.airflow, needle)
     if (scopes.length > 0 || airflow.length > 0) {
-      matched.push({ id: space.id, name: space.name, scopes, airflow })
+      matched.push({
+        id: space.id,
+        name: space.name,
+        isolation_mode: space.isolation_mode,
+        scopes,
+        airflow,
+      })
     }
   }
   return matched

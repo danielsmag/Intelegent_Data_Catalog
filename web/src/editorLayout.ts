@@ -121,6 +121,12 @@ export function titleFromPath(path: string): string {
   if (head === "sources") {
     return "Sources"
   }
+  if (head === "workspace") {
+    return "File"
+  }
+  if (head === "workspaces") {
+    return "Workspaces"
+  }
   return "Page"
 }
 
@@ -527,6 +533,27 @@ export function useEditorLayout(): EditorLayout {
 export function useFocusedPath(): string {
   const state: EditorLayout = useEditorLayout()
   return pathOfGroup(state, state.focusedGroupId) ?? "/"
+}
+
+let treeReveal: number = 0
+const treeRevealListeners: Set<() => void> = new Set()
+
+function subscribeTreeReveal(listener: () => void): () => void {
+  treeRevealListeners.add(listener)
+  return () => {
+    treeRevealListeners.delete(listener)
+  }
+}
+
+export function requestTreeReveal(): void {
+  treeReveal += 1
+  for (const listener of treeRevealListeners) {
+    listener()
+  }
+}
+
+export function useTreeReveal(): number {
+  return useSyncExternalStore(subscribeTreeReveal, () => treeReveal, () => 0)
 }
 
 export function openInGroup(groupId: string, rawPath: string, mode: "push" | "replace"): void {
