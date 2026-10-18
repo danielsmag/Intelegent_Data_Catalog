@@ -25,3 +25,35 @@ class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sql: str = Field(min_length=1)
+
+
+class KernelRead(BaseModel):
+    """A running notebook kernel. Secrets stay on the kernel process."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kernel_id: str
+    ticket: str
+    session_token: str
+    ws_path: str
+    engines: list[str]
+    spark_catalogs: list[str]
+    warnings: list[str]
+
+
+class KernelStatus(BaseModel):
+    """Result of interrupt or restart."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kernel_id: str
+    status: str
+
+
+class KernelTicketRead(BaseModel):
+    """A fresh channel ticket for a kernel the caller already owns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket: str
+    ws_path: str

@@ -74,6 +74,28 @@ export async function saveNodeText(workspaceId: string, nodeId: string, text: st
   })
 }
 
+export type NodeLabel = {
+  id: string
+  name: string
+  path: string
+}
+
+const labelListeners: Set<(label: NodeLabel) => void> = new Set()
+
+export function subscribeNodeLabel(listener: (label: NodeLabel) => void): () => void {
+  labelListeners.add(listener)
+  return () => {
+    labelListeners.delete(listener)
+  }
+}
+
+export function publishNodeLabel(node: WorkspaceNode): void {
+  const label: NodeLabel = { id: node.id, name: node.name, path: node.path }
+  for (const listener of labelListeners) {
+    listener(label)
+  }
+}
+
 export async function moveNode(
   workspaceId: string,
   nodeId: string,

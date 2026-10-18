@@ -216,6 +216,43 @@ export function FileIcon(): ReactElement {
   )
 }
 
+export function GearIcon(): ReactElement {
+  return (
+    <Icon>
+      <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <path
+        d="M8 1.7v1.5M8 12.8v1.5M1.7 8h1.5M12.8 8h1.5M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M12.5 3.5l-1.1 1.1M4.6 11.4 3.5 12.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+      />
+    </Icon>
+  )
+}
+
+export function SignOutIcon(): ReactElement {
+  return (
+    <Icon>
+      <path
+        d="M6.4 2.8H3.4v10.4h3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.4 8h5.6M11 5.6 13.4 8 11 10.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Icon>
+  )
+}
+
 export function PersonIcon(): ReactElement {
   return (
     <Icon>

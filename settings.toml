@@ -128,3 +128,19 @@ secret_key = ""
 bucket = "workspace"
 region = "us-west-2"
 max_upload_bytes = 52428800
+
+[notebook]
+enabled = false
+gateway_url = "http://127.0.0.1:8888"
+ticket_ttl_seconds = 60
+max_output_bytes = 1000000
+execute_timeout_seconds = 300
+kernel_name = "pyspark"
+
+[notebook.seed_postgres]
+enabled = false
+name = "appdb"
+host = "postgres"
+port = 5432
+database = "sales"
+credential_ref = "source_db"

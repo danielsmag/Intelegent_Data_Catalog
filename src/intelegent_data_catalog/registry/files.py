@@ -121,6 +121,19 @@ class WorkspaceFileService:
         self._require_workspace(workspace_id, access)
         return self._read(self._visible_node(workspace_id, node_id, access))
 
+    def require_visible_file(
+        self,
+        workspace_id: UUID,
+        node_id: UUID,
+        access: AccessContext,
+    ) -> WorkspaceNodeRow:
+        """Return a file the caller can see. Folders are reported as missing notebooks."""
+        self._require_workspace(workspace_id, access)
+        node: WorkspaceNodeRow = self._visible_node(workspace_id, node_id, access)
+        if node.kind != WorkspaceNodeKind.FILE.value:
+            raise EntityNotFoundError("notebook", str(node_id))
+        return node
+
     def read_content(
         self,
         workspace_id: UUID,

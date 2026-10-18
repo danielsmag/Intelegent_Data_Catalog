@@ -37,7 +37,7 @@ from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import DataSourceType, MetadataOrigin
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.registry.schemas import ScopeAttachmentCreate, ScopeCreate, SpaceCreate
-from intelegent_data_catalog.registry.service import RegistryService
+from tests.registry_factory import OpenRegistry, open_registry
 
 
 def test_tree_keeps_trino_when_polaris_is_down() -> None:
@@ -88,11 +88,13 @@ def test_attach_schema_creates_tables_and_skips_duplicates(tmp_path: Path) -> No
     """Attaching a schema copies tables once, then reports tables already in the scope."""
     database: CatalogDatabase = _database(tmp_path)
     session = database.session()
-    registry: RegistryService = RegistryService(session)
+    registry: OpenRegistry = open_registry(session)
     try:
         scope_id: UUID = _scope(registry, "Sales")
         service: ScopeAttachmentService = ScopeAttachmentService(
-            registry,
+            registry.scopes,
+            registry.tables,
+            registry.sources,
             _service(_Browser([_customers(), _orders()], "iceberg"), None),
         )
         body: ScopeAttachmentCreate = ScopeAttachmentCreate(
@@ -103,14 +105,14 @@ def test_attach_schema_creates_tables_and_skips_duplicates(tmp_path: Path) -> No
         )
         first = service.attach(scope_id, body)
         assert [item.outcome.value for item in first.items] == ["created", "created"]
-        columns = registry.list_columns(first.items[0].table_id or scope_id)
+        columns = registry.tables.list_columns(first.items[0].table_id or scope_id)
         assert columns[0].name == "customer_id"
         assert columns[0].data_type == "long"
         assert columns[0].metadata_origin is MetadataOrigin.NATIVE
         second = service.attach(scope_id, body)
         outcomes: list[str] = [item.outcome.value for item in second.items]
         assert outcomes == ["already_in_scope", "already_in_scope"]
-        sources = registry.list_data_sources()
+        sources = registry.sources.list_data_sources()
         assert len(sources) == 1
         assert sources[0].type is DataSourceType.ICEBERG_REST
         assert sources[0].name == "Polaris catalog"
@@ -123,12 +125,14 @@ def test_attach_reports_a_table_that_already_belongs_to_another_scope(tmp_path: 
     """A table is not moved when another scope already registered it."""
     database: CatalogDatabase = _database(tmp_path)
     session = database.session()
-    registry: RegistryService = RegistryService(session)
+    registry: OpenRegistry = open_registry(session)
     try:
         first_scope: UUID = _scope(registry, "Sales")
         second_scope: UUID = _scope(registry, "Finance")
         service: ScopeAttachmentService = ScopeAttachmentService(
-            registry,
+            registry.scopes,
+            registry.tables,
+            registry.sources,
             _service(_Browser([_customers()], "iceberg"), None),
         )
         body: ScopeAttachmentCreate = ScopeAttachmentCreate(
@@ -141,7 +145,7 @@ def test_attach_reports_a_table_that_already_belongs_to_another_scope(tmp_path: 
         moved = service.attach(second_scope, body)
         assert moved.items[0].outcome.value == "already_elsewhere"
         assert moved.items[0].scope_id == first_scope
-        assert len(registry.list_tables(second_scope)) == 0
+        assert len(registry.tables.list_tables(second_scope)) == 0
     finally:
         session.close()
         database.dispose()
@@ -151,11 +155,13 @@ def test_trino_postgres_catalog_uses_a_postgres_data_source(tmp_path: Path) -> N
     """A PostgreSQL Trino catalog is stored as a Postgres data source."""
     database: CatalogDatabase = _database(tmp_path)
     session = database.session()
-    registry: RegistryService = RegistryService(session)
+    registry: OpenRegistry = open_registry(session)
     try:
         scope_id: UUID = _scope(registry, "App")
         service: ScopeAttachmentService = ScopeAttachmentService(
-            registry,
+            registry.scopes,
+            registry.tables,
+            registry.sources,
             _service(_Browser([], "iceberg"), _Browser([_customers()], "postgresql")),
         )
         result = service.attach(
@@ -168,10 +174,10 @@ def test_trino_postgres_catalog_uses_a_postgres_data_source(tmp_path: Path) -> N
             ),
         )
         assert result.items[0].outcome.value == "created"
-        stored = registry.get_table(result.items[0].table_id or scope_id)
+        stored = registry.tables.get_table(result.items[0].table_id or scope_id)
         assert stored.table_format is None
         assert stored.physical_catalog == "appdb"
-        source = registry.list_data_sources()[0]
+        source = registry.sources.list_data_sources()[0]
         assert source.type is DataSourceType.POSTGRES
         assert source.configuration["connector"] == "postgresql"
     finally:
@@ -183,11 +189,13 @@ def test_missing_table_is_not_attached(tmp_path: Path) -> None:
     """A table name the source does not contain is a 404-class error."""
     database: CatalogDatabase = _database(tmp_path)
     session = database.session()
-    registry: RegistryService = RegistryService(session)
+    registry: OpenRegistry = open_registry(session)
     try:
         scope_id: UUID = _scope(registry, "Sales")
         service: ScopeAttachmentService = ScopeAttachmentService(
-            registry,
+            registry.scopes,
+            registry.tables,
+            registry.sources,
             _service(_Browser([_customers()], "iceberg"), None),
         )
         with pytest.raises(TableNotFoundError):
@@ -364,9 +372,9 @@ def _database(tmp_path: Path) -> CatalogDatabase:
     return CatalogDatabase(url)
 
 
-def _scope(service: RegistryService, name: str) -> UUID:
-    space_id: UUID = service.create_space(SpaceCreate(name=name)).id
-    return service.create_scope(space_id, ScopeCreate(name=name)).id
+def _scope(service: OpenRegistry, name: str) -> UUID:
+    space_id: UUID = service.spaces.create_space(SpaceCreate(name=name)).id
+    return service.scopes.create_scope(space_id, ScopeCreate(name=name)).id
 
 
 async def _request(app: FastAPI, path: str) -> httpx.Response:

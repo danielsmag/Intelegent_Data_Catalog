@@ -4,9 +4,17 @@ import { errorMessage } from "./api"
 import { useEditorTitle } from "./editorSlots"
 import { openInFocusedGroup } from "./editorLayout"
 import { setPendingQuerySql, setSidebarView } from "./sidebarView"
+import { NotebookEditor } from "./NotebookEditor"
 import { ResultGrid } from "./ResultGrid"
 import type { QueryResult } from "./types"
-import { fetchNode, fetchNodeBlob, saveNodeText, type WorkspaceNode } from "./workspaceFilesApi"
+import {
+  fetchNode,
+  fetchNodeBlob,
+  saveNodeText,
+  subscribeNodeLabel,
+  type NodeLabel,
+  type WorkspaceNode,
+} from "./workspaceFilesApi"
 import { getActiveWorkspaceId } from "./workspaceStore"
 
 const TEXT_SUFFIXES: string[] = ["sql", "md", "py", "txt", "json", "yaml", "yml", "ipynb"]
@@ -70,6 +78,17 @@ export function WorkspaceFilePage(props: { nodeId: string }): ReactElement {
     }
   }, [blobUrl])
 
+  useEffect(() => {
+    return subscribeNodeLabel((label: NodeLabel) => {
+      if (label.id !== props.nodeId) {
+        return
+      }
+      setNode((current: WorkspaceNode | null) =>
+        current === null ? current : { ...current, name: label.name, path: label.path },
+      )
+    })
+  }, [props.nodeId])
+
   async function save(): Promise<void> {
     const updated: WorkspaceNode = await saveNodeText(workspaceId, props.nodeId, text)
     setNode(updated)
@@ -130,33 +149,18 @@ export function WorkspaceFilePage(props: { nodeId: string }): ReactElement {
       {suffix === "md" && preview ? <pre className="file-preview">{text}</pre> : null}
       {suffix === "csv" ? <ResultGrid result={csvGrid(text)} /> : null}
       {suffix === "pdf" && blobUrl !== null ? <iframe className="file-frame" title={node.name} src={blobUrl} /> : null}
-      {suffix === "ipynb" && !rawNotebook ? <NotebookView source={text} /> : null}
+      {suffix === "ipynb" ? (
+        <div className={rawNotebook ? "notebook-hidden" : undefined}>
+          <NotebookEditor
+            source={text}
+            workspaceId={workspaceId}
+            nodeId={props.nodeId}
+            onChange={setText}
+          />
+        </div>
+      ) : null}
       {!textFile && suffix !== "pdf" && suffix !== "csv" ? <p className="note">No preview for this file.</p> : null}
     </section>
-  )
-}
-
-function NotebookView(props: { source: string }): ReactElement {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(props.source)
-  } catch {
-    return <pre className="file-preview">{props.source}</pre>
-  }
-  const cells: unknown = typeof parsed === "object" && parsed !== null && "cells" in parsed ? parsed.cells : null
-  if (!Array.isArray(cells)) {
-    return <pre className="file-preview">{props.source}</pre>
-  }
-  return (
-    <div className="notebook">
-      {cells.map((cell: unknown, index: number) => (
-        <article key={index} className="notebook-cell">
-          <p className="note">{cellKind(cell)}</p>
-          <pre>{cellSource(cell)}</pre>
-          <pre className="note">{cellOutput(cell)}</pre>
-        </article>
-      ))}
-    </div>
   )
 }
 
@@ -177,43 +181,4 @@ function csvGrid(text: string): QueryResult {
     rows,
     truncated: lines.length > 500,
   }
-}
-
-function cellKind(cell: unknown): string {
-  if (typeof cell === "object" && cell !== null && "cell_type" in cell && typeof cell.cell_type === "string") {
-    return cell.cell_type
-  }
-  return "cell"
-}
-
-function cellSource(cell: unknown): string {
-  if (typeof cell !== "object" || cell === null || !("source" in cell)) {
-    return ""
-  }
-  const source: unknown = cell.source
-  if (typeof source === "string") {
-    return source
-  }
-  if (Array.isArray(source)) {
-    return source.filter((part: unknown): part is string => typeof part === "string").join("")
-  }
-  return ""
-}
-
-function cellOutput(cell: unknown): string {
-  if (typeof cell !== "object" || cell === null || !("outputs" in cell) || !Array.isArray(cell.outputs)) {
-    return ""
-  }
-  const parts: string[] = []
-  for (const output of cell.outputs) {
-    if (typeof output === "object" && output !== null && "text" in output) {
-      const text: unknown = output.text
-      if (typeof text === "string") {
-        parts.push(text)
-      } else if (Array.isArray(text)) {
-        parts.push(text.filter((part: unknown): part is string => typeof part === "string").join(""))
-      }
-    }
-  }
-  return parts.join("")
 }

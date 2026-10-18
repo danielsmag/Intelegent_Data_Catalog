@@ -55,7 +55,7 @@ type EditorHistoryMarker = {
 
 const STORAGE_KEY: string = "idc-editor-layout"
 const listeners: Set<() => void> = new Set()
-let persistTimer: ReturnType<typeof window.setTimeout> | undefined
+let persistTimer: number | undefined
 let navigation: "POP" | "PUSH" | "REPLACE" = "POP"
 let layout: EditorLayout = boot()
 
@@ -200,26 +200,42 @@ function createInitial(path: string): EditorLayout {
   }
 }
 
+function isAuthCallback(path: string): boolean {
+  return pathnameOf(normalizePath(path)) === "/callback"
+}
+
 function boot(): EditorLayout {
   const url: string = currentUrl()
+  const callback: boolean = isAuthCallback(url)
   const sidebarOnly: boolean = sidebarViewForPath(url) !== null
   const saved: EditorLayout | null = readStorage()
-  const base: EditorLayout = saved ?? createInitial(sidebarOnly ? "/" : url)
-  const opened: EditorLayout = sidebarOnly
-    ? base
-    : (pathOfGroup(base, base.focusedGroupId) ?? "/") === url
+  const base: EditorLayout = saved ?? createInitial(sidebarOnly || callback ? "/" : url)
+  const opened: EditorLayout =
+    sidebarOnly || callback
       ? base
-      : openPath(base, base.focusedGroupId, url, "none").state
-  const cleaned: EditorLayout = dropSidebarTabs(opened)
-  stampCurrentEntry(cleaned)
+      : (pathOfGroup(base, base.focusedGroupId) ?? "/") === url
+        ? base
+        : openPath(base, base.focusedGroupId, url, "none").state
+  const cleaned: EditorLayout = dropAuthTabs(dropSidebarTabs(opened))
+  if (!callback) {
+    stampCurrentEntry(cleaned)
+  }
   return cleaned
 }
 
+function dropAuthTabs(state: EditorLayout): EditorLayout {
+  return dropTabs(state, (tab: EditorTab) => isAuthCallback(tab.path))
+}
+
 function dropSidebarTabs(state: EditorLayout): EditorLayout {
+  return dropTabs(state, (tab: EditorTab) => sidebarViewForPath(tab.path) !== null)
+}
+
+function dropTabs(state: EditorLayout, reject: (tab: EditorTab) => boolean): EditorLayout {
   let changed: boolean = false
   const groups: Record<string, EditorGroup> = {}
   for (const [id, group] of Object.entries(state.groups)) {
-    const tabs: EditorTab[] = group.tabs.filter((tab: EditorTab) => sidebarViewForPath(tab.path) === null)
+    const tabs: EditorTab[] = group.tabs.filter((tab: EditorTab) => !reject(tab))
     if (tabs.length !== group.tabs.length) {
       changed = true
     }
@@ -313,6 +329,19 @@ function apply(next: { state: EditorLayout; history: HistoryRequest | null }): v
     return
   }
   commit(next.state, next.history)
+}
+
+export function syncFocusedTabUrl(): void {
+  if (typeof window === "undefined") {
+    return
+  }
+  const request: HistoryRequest | null = historyForFocus(layout)
+  if (request === null) {
+    window.history.replaceState(null, "", "/")
+    return
+  }
+  const marker: EditorHistoryMarker = { editorGroupId: request.groupId, editorTabId: request.tabId }
+  window.history.replaceState(marker, "", request.path)
 }
 
 function syncBrowser(request: HistoryRequest): void {
@@ -451,7 +480,7 @@ function openPath(
   if (group === undefined) {
     return { state, history: null }
   }
-  if (redirectSidebarPath(rawPath)) {
+  if (redirectSidebarPath(rawPath) || isAuthCallback(rawPath)) {
     return { state, history: null }
   }
   const path: string = normalizePath(rawPath)
@@ -580,7 +609,7 @@ export function openBlankTab(groupId: string): void {
 
 export function openAt(groupId: string, rawPath: string, index: number): void {
   const group: EditorGroup | undefined = layout.groups[groupId]
-  if (group === undefined || redirectSidebarPath(rawPath)) {
+  if (group === undefined || redirectSidebarPath(rawPath) || isAuthCallback(rawPath)) {
     return
   }
   const path: string = normalizePath(rawPath)
@@ -598,7 +627,7 @@ export function openAt(groupId: string, rawPath: string, index: number): void {
 
 export function fillTab(groupId: string, tabId: string, rawPath: string): void {
   const group: EditorGroup | undefined = layout.groups[groupId]
-  if (group === undefined || redirectSidebarPath(rawPath)) {
+  if (group === undefined || redirectSidebarPath(rawPath) || isAuthCallback(rawPath)) {
     return
   }
   const path: string = normalizePath(rawPath)
@@ -632,7 +661,7 @@ export function openPathInGroupPreferBlank(groupId: string, rawPath: string): vo
 }
 
 export function splitWithPath(targetGroupId: string, direction: SplitDirection, rawPath: string): void {
-  if (layout.groups[targetGroupId] === undefined || redirectSidebarPath(rawPath)) {
+  if (layout.groups[targetGroupId] === undefined || redirectSidebarPath(rawPath) || isAuthCallback(rawPath)) {
     return
   }
   const path: string = normalizePath(rawPath)
@@ -976,6 +1005,9 @@ export function readHistoryMarker(state: unknown): { groupId: string; tabId: str
 }
 
 export function restoreHistory(groupId: string, tabId: string, rawPath: string): void {
+  if (isAuthCallback(rawPath)) {
+    return
+  }
   const path: string = normalizePath(rawPath)
   const group: EditorGroup | undefined = layout.groups[groupId]
   const tab: EditorTab | undefined = group?.tabs.find((item: EditorTab) => item.id === tabId)

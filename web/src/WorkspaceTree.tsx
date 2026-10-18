@@ -1,4 +1,14 @@
-import { Fragment, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement, type RefObject } from "react"
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type MouseEvent,
+  type ReactElement,
+  type RefObject,
+} from "react"
 import { errorMessage } from "./api"
 import { openInFocusedGroup } from "./editorLayout"
 import { Chevron, FileIcon, FolderIcon, MoreIcon, PanelChevron, PersonIcon } from "./icons"
@@ -13,6 +23,7 @@ import {
   deleteNode,
   fetchNodes,
   moveNode,
+  publishNodeLabel,
   uploadFile,
   type WorkspaceNode,
 } from "./workspaceFilesApi"
@@ -62,6 +73,7 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
   const [children, setChildren] = useState<Map<string, WorkspaceNode[]>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
   const fileRef: RefObject<HTMLInputElement | null> = useRef<HTMLInputElement>(null)
   const uploadParentId: RefObject<string | null> = useRef<string | null>(null)
@@ -70,6 +82,7 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
     setOpen(new Set())
     setChildren(new Map())
     setSelected(null)
+    setRenamingId(null)
     setMenuId(null)
     if (workspaceId === null) {
       setNodes([])
@@ -174,21 +187,31 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
       return
     }
     const parentId: string = parent.id
-    const created: WorkspaceNode = await createTextFile(workspaceId, parentId, template.name, template.text)
+    const siblings: WorkspaceNode[] = await fetchNodes(workspaceId, parentId)
+    const taken: Set<string> = new Set(siblings.map((item: WorkspaceNode) => item.name))
+    const name: string = uniqueFileName(template.name, taken)
+    const created: WorkspaceNode = await createTextFile(workspaceId, parentId, name, template.text)
     await reload(parentId)
     openFile(created)
   }
 
-  async function renameNode(node: WorkspaceNode): Promise<void> {
-    if (workspaceId === null || !canChange(node)) {
+  function beginRename(node: WorkspaceNode): void {
+    if (!canChange(node)) {
       return
     }
-    const name: string | null = window.prompt("New name", node.name)
-    if (name === null || name.trim() === "") {
+    setSelected(node.id)
+    setRenamingId(node.id)
+    setError(null)
+  }
+
+  async function commitRename(node: WorkspaceNode, name: string): Promise<void> {
+    if (workspaceId === null) {
       return
     }
     const parentId: string | null = node.parent_id
-    await moveNode(workspaceId, node.id, { name: name.trim() })
+    const updated: WorkspaceNode = await moveNode(workspaceId, node.id, { name })
+    publishNodeLabel(updated)
+    setRenamingId(null)
     await reload(parentId)
   }
 
@@ -262,7 +285,7 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
         label: "Rename",
         onSelect: () => {
           closeMenu()
-          void run(() => renameNode(node))
+          beginRename(node)
         },
       })
       items.push({
@@ -352,10 +375,23 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
                 open={open}
                 childrenById={children}
                 selected={selected}
+                renamingId={renamingId}
                 me={me}
                 menuId={menuId}
                 menuFor={menuFor}
                 onSelect={setSelected}
+                onBeginRename={beginRename}
+                onCommitRename={async (node: WorkspaceNode, name: string) => {
+                  try {
+                    await commitRename(node, name)
+                  } catch (err: unknown) {
+                    setError(errorMessage(err))
+                    throw err
+                  }
+                }}
+                onCancelRename={() => {
+                  setRenamingId(null)
+                }}
                 onOpenMenu={openMenu}
                 onCloseMenu={closeMenu}
                 onToggle={(item: WorkspaceNode) => void run(() => toggle(item))}
@@ -377,22 +413,63 @@ function NodeRow(props: {
   open: Set<string>
   childrenById: Map<string, WorkspaceNode[]>
   selected: string | null
+  renamingId: string | null
   me: Me | null
   menuId: string | null
   menuFor: (node: WorkspaceNode) => MenuAction[]
   onSelect: (id: string) => void
+  onBeginRename: (node: WorkspaceNode) => void
+  onCommitRename: (node: WorkspaceNode, name: string) => Promise<void>
+  onCancelRename: () => void
   onOpenMenu: (key: string) => void
   onCloseMenu: () => void
   onToggle: (node: WorkspaceNode) => void
   onOpen: (node: WorkspaceNode) => void
   onDrop: (event: DragEvent<HTMLDivElement>, folder: WorkspaceNode) => void
 }): ReactElement {
+  const openTimer: RefObject<number | null> = useRef<number | null>(null)
   const expanded: boolean = props.open.has(props.node.id)
   const nested: WorkspaceNode[] = props.childrenById.get(props.node.id) ?? []
   const selected: boolean = props.selected === props.node.id
+  const renaming: boolean = props.renamingId === props.node.id
   const label: string = rowLabel(props.node, props.me)
   const items: MenuAction[] = props.menuFor(props.node)
   const userHome: boolean = isUserHome(props.node)
+
+  useEffect(() => {
+    return () => {
+      if (openTimer.current !== null) {
+        window.clearTimeout(openTimer.current)
+      }
+    }
+  }, [])
+
+  function activate(): void {
+    props.onSelect(props.node.id)
+    if (props.node.kind === "FOLDER") {
+      props.onToggle(props.node)
+      return
+    }
+    if (openTimer.current !== null) {
+      window.clearTimeout(openTimer.current)
+    }
+    openTimer.current = window.setTimeout(() => {
+      openTimer.current = null
+      props.onOpen(props.node)
+    }, 220)
+  }
+
+  function renameFromDoubleClick(event: MouseEvent<HTMLButtonElement>): void {
+    event.preventDefault()
+    event.stopPropagation()
+    if (openTimer.current !== null) {
+      window.clearTimeout(openTimer.current)
+      openTimer.current = null
+    }
+    if (props.node.kind === "FILE" && canChange(props.node)) {
+      props.onBeginRename(props.node)
+    }
+  }
   const rowClass: string = selected
     ? `tree-row ws-row current-branch${props.depth === 0 ? " ws-root" : ""}`
     : `tree-row ws-row${props.depth === 0 ? " ws-root" : ""}`
@@ -413,36 +490,33 @@ function NodeRow(props: {
           }
         }}
       >
-        <button
-          type="button"
-          className="ws-hit"
-          title={props.node.path}
-          draggable
-          onDragStart={(event: DragEvent<HTMLButtonElement>) => {
-            event.dataTransfer.setData("text/plain", props.node.id)
-            event.dataTransfer.effectAllowed = "move"
-          }}
-          onClick={() => {
-            props.onSelect(props.node.id)
-            if (props.node.kind === "FOLDER") {
-              props.onToggle(props.node)
-            } else {
-              props.onOpen(props.node)
-            }
-          }}
-        >
-          {props.node.kind === "FOLDER" ? (
-            <span className="chevron" aria-hidden="true">
-              <Chevron open={expanded} />
-            </span>
-          ) : (
-            <span className="chevron-spacer" />
-          )}
-          <span className={`ws-ico ${iconKind(props.node, userHome)}`} aria-hidden="true">
-            {userHome ? <PersonIcon /> : props.node.kind === "FOLDER" ? <FolderIcon open={expanded} /> : <FileIcon />}
-          </span>
-          <span className="tree-label">{label}</span>
-        </button>
+        {renaming ? (
+          <div className="ws-rename">
+            <RowGlyph node={props.node} expanded={expanded} userHome={userHome} />
+            <NameField
+              initial={props.node.name}
+              label={label}
+              onCommit={(name: string) => props.onCommitRename(props.node, name)}
+              onCancel={props.onCancelRename}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="ws-hit"
+            title={props.node.path}
+            draggable
+            onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+              event.dataTransfer.setData("text/plain", props.node.id)
+              event.dataTransfer.effectAllowed = "move"
+            }}
+            onClick={activate}
+            onDoubleClick={renameFromDoubleClick}
+          >
+            <RowGlyph node={props.node} expanded={expanded} userHome={userHome} />
+            <span className="tree-label">{label}</span>
+          </button>
+        )}
         {items.length === 0 ? null : (
           <div
             className="ws-more"
@@ -574,6 +648,108 @@ function TreeMenu(props: {
       ) : null}
     </div>
   )
+}
+
+function RowGlyph(props: { node: WorkspaceNode; expanded: boolean; userHome: boolean }): ReactElement {
+  return (
+    <>
+      {props.node.kind === "FOLDER" ? (
+        <span className="chevron" aria-hidden="true">
+          <Chevron open={props.expanded} />
+        </span>
+      ) : (
+        <span className="chevron-spacer" />
+      )}
+      <span className={`ws-ico ${iconKind(props.node, props.userHome)}`} aria-hidden="true">
+        {props.userHome ? <PersonIcon /> : props.node.kind === "FOLDER" ? <FolderIcon open={props.expanded} /> : <FileIcon />}
+      </span>
+    </>
+  )
+}
+
+function NameField(props: {
+  initial: string
+  label: string
+  onCommit: (name: string) => Promise<void>
+  onCancel: () => void
+}): ReactElement {
+  const inputRef: RefObject<HTMLInputElement | null> = useRef<HTMLInputElement | null>(null)
+  const closed: RefObject<boolean> = useRef<boolean>(false)
+
+  useEffect(() => {
+    const input: HTMLInputElement | null = inputRef.current
+    if (input === null) {
+      return
+    }
+    input.focus()
+    const dot: number = input.value.lastIndexOf(".")
+    const end: number = dot > 0 ? dot : input.value.length
+    input.setSelectionRange(0, end)
+  }, [])
+
+  function finish(commit: boolean, value: string): void {
+    if (closed.current) {
+      return
+    }
+    const next: string = value.trim()
+    if (!commit || next === "" || next === props.initial) {
+      closed.current = true
+      props.onCancel()
+      return
+    }
+    closed.current = true
+    void props.onCommit(next).catch(() => {
+      closed.current = false
+      inputRef.current?.focus()
+    })
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      className="ws-rename-input"
+      aria-label={`Rename ${props.label}`}
+      defaultValue={props.initial}
+      spellCheck={false}
+      onMouseDown={(event: MouseEvent<HTMLInputElement>) => {
+        event.stopPropagation()
+      }}
+      onClick={(event: MouseEvent<HTMLInputElement>) => {
+        event.stopPropagation()
+      }}
+      onDoubleClick={(event: MouseEvent<HTMLInputElement>) => {
+        event.stopPropagation()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault()
+          finish(true, event.currentTarget.value)
+        } else if (event.key === "Escape") {
+          event.preventDefault()
+          finish(false, "")
+        }
+      }}
+      onBlur={(event) => {
+        finish(true, event.currentTarget.value)
+      }}
+    />
+  )
+}
+
+function uniqueFileName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) {
+    return base
+  }
+  const dot: number = base.lastIndexOf(".")
+  const stem: string = dot > 0 ? base.slice(0, dot) : base
+  const extension: string = dot > 0 ? base.slice(dot) : ""
+  let index: number = 2
+  let candidate: string = `${stem}-${index}${extension}`
+  while (taken.has(candidate)) {
+    index += 1
+    candidate = `${stem}-${index}${extension}`
+  }
+  return candidate
 }
 
 function canChange(node: WorkspaceNode): boolean {

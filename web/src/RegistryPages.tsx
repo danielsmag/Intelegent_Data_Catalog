@@ -1614,7 +1614,7 @@ function ColumnTable(props: {
         {props.columns.map((column: CatalogColumnRecord) => (
           <tr key={column.id}>
             <td>{column.name}</td>
-            <td>{column.data_type ?? column.discovered_data_type ?? "Unknown"}</td>
+            <td className="type">{column.data_type ?? column.discovered_data_type ?? "Unknown"}</td>
             <td>{column.nullable === null ? "Unknown" : column.nullable ? "Yes" : "No"}</td>
             <td>{column.is_primary_key === null ? "Unknown" : column.is_primary_key ? "Yes" : "No"}</td>
             <td>

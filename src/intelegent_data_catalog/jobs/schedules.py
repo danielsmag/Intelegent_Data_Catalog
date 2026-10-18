@@ -30,7 +30,6 @@ from intelegent_data_catalog.persistence.models import (
     SyncScheduleRow,
 )
 
-
 _DEFAULT_INTERVAL_SECONDS: int = 600
 
 

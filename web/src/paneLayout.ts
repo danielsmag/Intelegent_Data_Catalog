@@ -38,7 +38,7 @@ const STORAGE_KEY: string = "idc-pane-widths"
 
 let widths: PaneWidths = readWidths()
 const listeners: Set<() => void> = new Set()
-let persistTimer: ReturnType<typeof window.setTimeout> | undefined
+let persistTimer: number | undefined
 
 function clamp(pane: PaneId, value: number): number {
   const rounded: number = Math.round(value)

@@ -23,6 +23,9 @@ from intelegent_data_catalog.core.settings import (
     load_settings,
     resolve_project_root,
 )
+from intelegent_data_catalog.notebooks.directory import KernelDirectory
+from intelegent_data_catalog.notebooks.gateway import KernelGatewayClient
+from intelegent_data_catalog.notebooks.tickets import KernelTickets
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.sources.trino.client import TrinoClient
 from intelegent_data_catalog.storage.object_store import ObjectStore, build_object_store
@@ -118,6 +121,29 @@ def build_database(settings: AppSettings) -> CatalogDatabase:
     return CatalogDatabase(settings.database.url)
 
 
+def build_kernel_gateway(settings: AppSettings) -> KernelGatewayClient:
+    """Open an HTTP client for the notebook kernel gateway."""
+    timeout: httpx.Timeout = httpx.Timeout(
+        settings.notebook.execute_timeout_seconds,
+        connect=10.0,
+    )
+    client: httpx.Client = httpx.Client(timeout=timeout)
+    return KernelGatewayClient(
+        http=client,
+        base_url=settings.notebook.gateway_url,
+        token=settings.notebook.gateway_token.get_secret_value(),
+        kernel_name=settings.notebook.kernel_name,
+    )
+
+
+def build_kernel_tickets(settings: AppSettings) -> KernelTickets:
+    """Build ticket signing from the notebook settings."""
+    return KernelTickets(
+        secret=settings.notebook.ticket_secret.get_secret_value(),
+        ttl_seconds=settings.notebook.ticket_ttl_seconds,
+    )
+
+
 class AppContainer(containers.DeclarativeContainer):
     """Wires settings, logging, Polaris, Spark, and the catalog services."""
 
@@ -178,3 +204,12 @@ class AppContainer(containers.DeclarativeContainer):
         build_object_store,
         settings.provided.object_store,
     )
+    kernel_gateway: providers.Singleton[KernelGatewayClient] = providers.Singleton(
+        build_kernel_gateway,
+        settings,
+    )
+    kernel_tickets: providers.Singleton[KernelTickets] = providers.Singleton(
+        build_kernel_tickets,
+        settings,
+    )
+    kernel_directory: providers.Singleton[KernelDirectory] = providers.Singleton(KernelDirectory)

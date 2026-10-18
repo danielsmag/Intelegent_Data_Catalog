@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react"
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react"
 import { useEditorDrag, watchTabDrag, type DropTarget } from "./editorDrag"
 import {
   closeAllTabs,
@@ -12,7 +12,7 @@ import {
   type EditorGroup,
   type EditorTab,
 } from "./editorLayout"
-import { PlusIcon } from "./icons"
+import { PanelChevron, PlusIcon } from "./icons"
 
 type MenuState = {
   x: number
@@ -31,6 +31,46 @@ export function EditorTabBar(props: { groupId: string }): ReactElement | null {
   const group: EditorGroup | undefined = layout.groups[props.groupId]
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [splitMenu, setSplitMenu] = useState<Point | null>(null)
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const [canScrollBack, setCanScrollBack] = useState<boolean>(false)
+  const [canScrollForward, setCanScrollForward] = useState<boolean>(false)
+  const tabSignature: string =
+    group === undefined ? "" : group.tabs.map((tab: EditorTab) => `${tab.id}:${tab.title}`).join("|")
+  useEffect(() => {
+    const node: HTMLDivElement | null = tabsRef.current
+    if (node === null) {
+      return
+    }
+    function sync(): void {
+      const current: HTMLDivElement | null = tabsRef.current
+      if (current === null) {
+        return
+      }
+      setCanScrollBack(current.scrollLeft > 1)
+      setCanScrollForward(current.scrollLeft + current.clientWidth < current.scrollWidth - 1)
+    }
+    function onWheel(event: WheelEvent): void {
+      const current: HTMLDivElement | null = tabsRef.current
+      if (current === null || current.scrollWidth <= current.clientWidth) {
+        return
+      }
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.deltaY === 0) {
+        return
+      }
+      current.scrollLeft += event.deltaY
+      event.preventDefault()
+    }
+    sync()
+    node.addEventListener("scroll", sync, { passive: true })
+    node.addEventListener("wheel", onWheel, { passive: false })
+    const observer: ResizeObserver = new ResizeObserver(sync)
+    observer.observe(node)
+    return () => {
+      node.removeEventListener("scroll", sync)
+      node.removeEventListener("wheel", onWheel)
+      observer.disconnect()
+    }
+  }, [tabSignature])
   if (group === undefined) {
     return null
   }
@@ -42,9 +82,23 @@ export function EditorTabBar(props: { groupId: string }): ReactElement | null {
     drag?.source.kind === "path" && drag.target?.kind === "insert" && drag.target.groupId === props.groupId
       ? drag.target.blankTabId
       : null
+  function scrollTabs(direction: -1 | 1): void {
+    tabsRef.current?.scrollBy({ left: direction * 180, behavior: "smooth" })
+  }
   return (
     <div className="editor-tabbar" role="tablist" aria-label="Open pages">
-      <div className="editor-tabs" data-editor-tabs="" data-group-id={props.groupId} data-tab-count={group.tabs.length}>
+      {canScrollBack ? (
+        <button type="button" className="editor-tab-scroll" aria-label="Scroll tabs back" onClick={() => scrollTabs(-1)}>
+          <PanelChevron direction="left" />
+        </button>
+      ) : null}
+      <div
+        className="editor-tabs"
+        ref={tabsRef}
+        data-editor-tabs=""
+        data-group-id={props.groupId}
+        data-tab-count={group.tabs.length}
+      >
         {group.tabs.map((tab: EditorTab, index: number) => (
           <EditorTabButton
             key={tab.id}
@@ -62,6 +116,11 @@ export function EditorTabBar(props: { groupId: string }): ReactElement | null {
         ))}
         {insertIndex === group.tabs.length ? <i className="editor-insert editor-insert-end" /> : null}
       </div>
+      {canScrollForward ? (
+        <button type="button" className="editor-tab-scroll" aria-label="Scroll tabs forward" onClick={() => scrollTabs(1)}>
+          <PanelChevron direction="right" />
+        </button>
+      ) : null}
       <div className="editor-tab-actions">
         <button
           type="button"
@@ -138,6 +197,13 @@ function EditorTabButton(props: {
   filling: boolean
   onMenu: (menu: MenuState) => void
 }): ReactElement {
+  const slotRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!props.active) {
+      return
+    }
+    slotRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [props.active])
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     if (event.button !== 0) {
       return
@@ -149,7 +215,7 @@ function EditorTabButton(props: {
     watchTabDrag(event, { groupId: props.groupId, tabId: props.tab.id, title: props.tab.title })
   }
   return (
-    <div className="editor-tab-slot">
+    <div className="editor-tab-slot" ref={slotRef}>
       {props.showInsert ? <i className="editor-insert" /> : null}
       <div
         role="tab"

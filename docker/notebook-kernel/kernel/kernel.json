@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "/opt/venv/bin/python",
+    "-m",
+    "ipykernel_launcher",
+    "-f",
+    "{connection_file}",
+    "--IPKernelApp.exec_files=/opt/kernel/startup.py"
+  ],
+  "display_name": "PySpark",
+  "language": "python",
+    "env": {
+    "SPARK_HOME": "/opt/spark",
+    "PYTHONPATH": "/opt/kernel:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.9-src.zip",
+    "PYSPARK_PYTHON": "/opt/venv/bin/python",
+    "PYSPARK_DRIVER_PYTHON": "/opt/venv/bin/python"
+  }
+}

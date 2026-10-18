@@ -14,13 +14,13 @@ from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.query.spark_bridge import SparkQueryPreview, spark_preview
 from intelegent_data_catalog.registry.schemas import CatalogTableRead, SpaceRead
 from intelegent_data_catalog.registry.seed_lake import SeedLakeRegistrar, project_seed_lake
-from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import (
     DiscoveryBatch,
     DiscoveryRequest,
     SourceColumnRecord,
     SourceTableRecord,
 )
+from tests.registry_factory import OpenRegistry, open_registry
 
 _LOG: logging.Logger = logging.getLogger("test-seed-lake")
 
@@ -57,24 +57,25 @@ def test_publish_lists_seed_tables_and_spark_sql(tmp_path: Path) -> None:
         assert source.calls == 2
         session: Session = database.session()
         try:
-            service: RegistryService = RegistryService(session)
-            space: SpaceRead = next(item for item in service.list_spaces() if item.slug == "sales")
+            service: OpenRegistry = open_registry(session)
+            spaces: list[SpaceRead] = service.spaces.list_spaces()
+            space: SpaceRead = next(item for item in spaces if item.slug == "sales")
             scope_id: UUID = next(
-                item.id for item in service.list_scopes(space.id) if item.slug == "sales"
+                item.id for item in service.scopes.list_scopes(space.id) if item.slug == "sales"
             )
-            tables: list[CatalogTableRead] = service.list_tables(scope_id)
+            tables: list[CatalogTableRead] = service.tables.list_tables(scope_id)
             names: set[str] = {table.name for table in tables}
             assert names == {"customers", "orders", "customer_spend"}
             customers: CatalogTableRead = next(
                 table for table in tables if table.name == "customers"
             )
             preview: SparkQueryPreview = spark_preview(
-                service.list_asset_bindings(customers.id),
+                service.bindings.list_asset_bindings(customers.id),
                 100,
             )
             assert preview.sql == "SELECT * FROM catalog.sales.customers LIMIT 100"
-            assert len(service.list_data_sources()) == 1
-            assert len(service.list_engine_connections()) == 2
+            assert len(service.sources.list_data_sources()) == 1
+            assert len(service.engines.list_engine_connections()) == 2
         finally:
             session.close()
     finally:

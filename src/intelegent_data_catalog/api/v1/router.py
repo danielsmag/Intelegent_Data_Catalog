@@ -12,6 +12,7 @@ from intelegent_data_catalog.api.v1.routes import (
     catalog,
     configuration,
     health,
+    notebooks,
     platform,
     query,
     registry,
@@ -33,5 +34,6 @@ router.include_router(configuration.router, tags=["configuration"], dependencies
 router.include_router(registry.router, tags=["registry"], dependencies=_guarded)
 router.include_router(workspaces.router, tags=["workspaces"], dependencies=_signed_in)
 router.include_router(workspace_files.router, tags=["workspace-files"], dependencies=_signed_in)
+router.include_router(notebooks.router, tags=["notebooks"])
 router.include_router(catalog.router, tags=["catalog"], dependencies=_authenticated)
 router.include_router(query.router, tags=["query"], dependencies=_authenticated)

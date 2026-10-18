@@ -184,7 +184,7 @@ def create_marquez_mapping(body: MarquezMappingWrite, platform: PlatformDep) -> 
 def read_spark_query(table_id: UUID, platform: PlatformDep) -> SparkQueryResponse:
     """Return the Spark SELECT for a table, or an explicit unavailable state."""
     preview: SparkQueryPreview = spark_preview(
-        platform.registry.list_asset_bindings(table_id),
+        platform.bindings.list_asset_bindings(table_id),
         platform.sample_limit,
     )
     return SparkQueryResponse(
@@ -199,7 +199,7 @@ def read_spark_query(table_id: UUID, platform: PlatformDep) -> SparkQueryRespons
 def run_spark_query(table_id: UUID, platform: PlatformDep) -> QueryResult:
     """Run the bounded Spark SELECT. A missing binding does not fall back to Trino."""
     preview: SparkQueryPreview = spark_preview(
-        platform.registry.list_asset_bindings(table_id),
+        platform.bindings.list_asset_bindings(table_id),
         platform.sample_limit,
     )
     if not preview.available or preview.sql is None:
@@ -251,7 +251,7 @@ def build_knowledge_context(
     When Neo4j is configured, the background build asks the model for a column subgraph.
     PostgreSQL catalog rows stay unchanged.
     """
-    table_name: str = platform.registry.get_table(table_id).name
+    table_name: str = platform.tables.get_table(table_id).name
     selected: KnowledgeContextRequest = body if body is not None else KnowledgeContextRequest()
     options: TableContextOptions = TableContextOptions(
         include_data_profile=selected.include_data_profile,
@@ -333,7 +333,7 @@ def build_scope_knowledge_context(
 
     Accepted links replace prior LLM relationships for tables in this scope.
     """
-    scope_name: str = platform.registry.get_scope(scope_id).name
+    scope_name: str = platform.scopes.get_scope(scope_id).name
     selected: ScopeContextRequest = body if body is not None else ScopeContextRequest()
     options: ScopeContextOptions = ScopeContextOptions(
         include_table_knowledge=selected.include_table_knowledge,
@@ -395,7 +395,7 @@ def build_space_knowledge_context(
 
     Accepted links replace prior cross-scope LLM relationships in this space.
     """
-    space_name: str = platform.registry.get_space(space_id).name
+    space_name: str = platform.spaces.get_space(space_id).name
     selected: SpaceContextRequest = body if body is not None else SpaceContextRequest()
     options: SpaceContextOptions = SpaceContextOptions(
         include_scope_knowledge=selected.include_scope_knowledge,
@@ -462,7 +462,7 @@ def generate_space_context(
     configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a space context write and return before the model finishes."""
-    space_name: str = platform.registry.get_space(space_id).name
+    space_name: str = platform.spaces.get_space(space_id).name
     return _start_context(
         builds,
         space_id,
@@ -494,7 +494,7 @@ def generate_scope_context(
     configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a scope context write and return before the model finishes."""
-    scope_name: str = platform.registry.get_scope(scope_id).name
+    scope_name: str = platform.scopes.get_scope(scope_id).name
     return _start_context(
         builds,
         scope_id,
@@ -517,7 +517,7 @@ def generate_table_context(
     configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a table context write and return before the model finishes."""
-    table_name: str = platform.registry.get_table(table_id).name
+    table_name: str = platform.tables.get_table(table_id).name
     return _start_context(
         builds,
         table_id,
@@ -540,7 +540,7 @@ def generate_table_column_contexts(
     configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start context writes for every column on the table."""
-    table_name: str = platform.registry.get_table(table_id).name
+    table_name: str = platform.tables.get_table(table_id).name
     return _start_context(
         builds,
         table_id,
@@ -563,7 +563,7 @@ def generate_column_context(
     configurations: EntityConfigurationDep,
 ) -> ContextGenerationJobRead:
     """Start a column context write and return before the model finishes."""
-    column: ColumnRead = platform.registry.get_column(column_id)
+    column: ColumnRead = platform.tables.get_column(column_id)
     return _start_context(
         builds,
         column_id,

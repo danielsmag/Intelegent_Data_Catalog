@@ -56,6 +56,21 @@ create_login_and_database "$CATALOG_DB_USER" "$CATALOG_DB_PASSWORD" "$CATALOG_DB
 create_login_and_database "$SOURCE_DB_USER" "$SOURCE_DB_PASSWORD" "$SOURCE_DB_NAME"
 create_login_and_database "$MARQUEZ_DB_USER" "$MARQUEZ_DB_PASSWORD" "$MARQUEZ_DB_NAME"
 
+reader_password="${SOURCE_DB_READER_PASSWORD:-sales_reader}"
+psql_super --dbname postgres \
+  --set=role=sales_reader \
+  --set=password="$reader_password" <<'SQL'
+SELECT format('CREATE ROLE %I WITH LOGIN PASSWORD %L', :'role', :'password')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'role')
+\gexec
+SQL
+psql_super --dbname postgres \
+  --set=role=sales_reader \
+  --set=database="$SOURCE_DB_NAME" <<'SQL'
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'database', :'role')
+\gexec
+SQL
+
 psql -v ON_ERROR_STOP=1 \
   --username "$SOURCE_DB_USER" \
   --dbname "$SOURCE_DB_NAME" \

@@ -145,6 +145,20 @@ class PayloadTooLargeError(CatalogError):
         super().__init__(message)
 
 
+class NotebookDisabledError(CatalogError):
+    """Raised when a notebook kernel is requested and kernels are turned off."""
+
+    def __init__(self, message: str = "notebook kernels are disabled") -> None:
+        super().__init__(message)
+
+
+class NotebookGatewayError(CatalogError):
+    """Raised when the notebook kernel gateway cannot run a request."""
+
+    def __init__(self, message: str = "notebook kernel gateway is unavailable") -> None:
+        super().__init__(message)
+
+
 class PersistenceUnavailableError(CatalogError):
     """Raised when the catalog database cannot be used. The message stays generic."""
 

@@ -21,6 +21,7 @@ from intelegent_data_catalog.persistence.enums import (
     EngineType,
     SyncRunStatus,
 )
+from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingCreate,
     AssetBindingRead,
@@ -40,7 +41,12 @@ from intelegent_data_catalog.registry.schemas import (
     SpaceRead,
     SyncRunRead,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from intelegent_data_catalog.services.bindings import BindingService
+from intelegent_data_catalog.services.data_sources import DataSourceService
+from intelegent_data_catalog.services.engines import EngineService
+from intelegent_data_catalog.services.scopes import ScopeService
+from intelegent_data_catalog.services.spaces import SpaceService
+from intelegent_data_catalog.services.tables import TableService
 from intelegent_data_catalog.sources import CatalogSource
 from intelegent_data_catalog.sources.sync import MetadataSyncService
 
@@ -71,11 +77,23 @@ class SeedLakeRegistrar:
         """Register the seed tables. False means Trino did not list them yet."""
         session: Session = self._database.session()
         try:
-            service: RegistryService = RegistryService(session)
+            repo: RegistryRepository = RegistryRepository(session)
+            spaces: SpaceService = SpaceService(repo)
+            scopes: ScopeService = ScopeService(repo)
+            sources: DataSourceService = DataSourceService(repo)
+            tables: TableService = TableService(repo)
+            engines: EngineService = EngineService(repo)
+            bindings: BindingService = BindingService(repo)
             scope_id: UUID
             trino_binding_id: UUID
             spark_binding_id: UUID
-            scope_id, trino_binding_id, spark_binding_id = self._ensure_layout(service)
+            scope_id, trino_binding_id, spark_binding_id = self._ensure_layout(
+                spaces,
+                scopes,
+                sources,
+                engines,
+                bindings,
+            )
             sync: MetadataSyncService = MetadataSyncService(session, self._source)
             result: SyncRunRead = sync.run(trino_binding_id)
             if result.status is SyncRunStatus.FAILED or result.counts.tables_seen == 0:
@@ -86,29 +104,36 @@ class SeedLakeRegistrar:
                     result.sanitized_error,
                 )
                 return False
-            self._attach_spark_queries(service, scope_id, spark_binding_id)
+            self._attach_spark_queries(tables, bindings, scope_id, spark_binding_id)
             self._logger.info("seed lake projected tables=%s", result.counts.tables_seen)
             return True
         finally:
             session.close()
 
-    def _ensure_layout(self, service: RegistryService) -> tuple[UUID, UUID, UUID]:
-        scope_id: UUID = self._ensure_scope(service)
-        source: DataSourceRead = self._ensure_source(service)
+    def _ensure_layout(
+        self,
+        spaces: SpaceService,
+        scopes: ScopeService,
+        sources: DataSourceService,
+        engines: EngineService,
+        bindings: BindingService,
+    ) -> tuple[UUID, UUID, UUID]:
+        scope_id: UUID = self._ensure_scope(spaces, scopes)
+        source: DataSourceRead = self._ensure_source(sources)
         trino: EngineConnectionRead = self._ensure_engine(
-            service,
+            engines,
             name="Trino",
             engine_type=EngineType.TRINO,
             endpoint=f"http://{self._settings.trino.host}:{self._settings.trino.port}",
         )
         spark: EngineConnectionRead = self._ensure_engine(
-            service,
+            engines,
             name="Spark SQL",
             engine_type=EngineType.SPARK_SQL,
             endpoint=self._settings.query.spark_url,
         )
         trino_binding: SourceBindingRead = self._ensure_binding(
-            service,
+            bindings,
             data_source_id=source.id,
             engine_connection_id=trino.id,
             binding_key=_TRINO_CATALOG,
@@ -116,7 +141,7 @@ class SeedLakeRegistrar:
             schema_allowlist=[_SCHEMA],
         )
         spark_binding: SourceBindingRead = self._ensure_binding(
-            service,
+            bindings,
             data_source_id=source.id,
             engine_connection_id=spark.id,
             binding_key=self._settings.polaris.catalog,
@@ -125,10 +150,10 @@ class SeedLakeRegistrar:
         )
         return scope_id, trino_binding.id, spark_binding.id
 
-    def _ensure_scope(self, service: RegistryService) -> UUID:
-        space: SpaceRead | None = _find_space(service, _SPACE_SLUG)
+    def _ensure_scope(self, spaces: SpaceService, scopes: ScopeService) -> UUID:
+        space: SpaceRead | None = _find_space(spaces, _SPACE_SLUG)
         if space is None:
-            space = service.create_space(
+            space = spaces.create_space(
                 SpaceCreate(
                     name=_SPACE_NAME,
                     slug=_SPACE_SLUG,
@@ -137,12 +162,12 @@ class SeedLakeRegistrar:
             )
         scope: ScopeRead | None = None
         candidate: ScopeRead
-        for candidate in service.list_scopes(space.id):
+        for candidate in scopes.list_scopes(space.id):
             if candidate.slug == _SCHEMA:
                 scope = candidate
                 break
         if scope is None:
-            scope = service.create_scope(
+            scope = scopes.create_scope(
                 space.id,
                 ScopeCreate(
                     name=_SCOPE_NAME,
@@ -152,11 +177,11 @@ class SeedLakeRegistrar:
             )
         return scope.id
 
-    def _ensure_source(self, service: RegistryService) -> DataSourceRead:
-        current: DataSourceRead | None = _find_marked(service.list_data_sources())
+    def _ensure_source(self, sources: DataSourceService) -> DataSourceRead:
+        current: DataSourceRead | None = _find_marked(sources.list_data_sources())
         if current is not None:
             return current
-        return service.create_data_source(
+        return sources.create_data_source(
             DataSourceCreate(
                 name="Polaris",
                 type=DataSourceType.ICEBERG_REST,
@@ -166,17 +191,17 @@ class SeedLakeRegistrar:
 
     def _ensure_engine(
         self,
-        service: RegistryService,
+        engines: EngineService,
         *,
         name: str,
         engine_type: EngineType,
         endpoint: str,
     ) -> EngineConnectionRead:
         engine: EngineConnectionRead
-        for engine in service.list_engine_connections():
+        for engine in engines.list_engine_connections():
             if engine.engine_type is engine_type and _is_marked(engine.configuration):
                 return engine
-        return service.create_engine_connection(
+        return engines.create_engine_connection(
             EngineConnectionCreate(
                 name=name,
                 engine_type=engine_type,
@@ -187,7 +212,7 @@ class SeedLakeRegistrar:
 
     def _ensure_binding(
         self,
-        service: RegistryService,
+        bindings: BindingService,
         *,
         data_source_id: UUID,
         engine_connection_id: UUID,
@@ -197,12 +222,12 @@ class SeedLakeRegistrar:
     ) -> SourceBindingRead:
         current: SourceBindingRead | None = None
         binding: SourceBindingRead
-        for binding in service.list_source_bindings(data_source_id, engine_connection_id):
+        for binding in bindings.list_source_bindings(data_source_id, engine_connection_id):
             if binding.binding_key == binding_key:
                 current = binding
                 break
         if current is None:
-            return service.create_source_binding(
+            return bindings.create_source_binding(
                 SourceBindingCreate(
                     data_source_id=data_source_id,
                     engine_connection_id=engine_connection_id,
@@ -214,7 +239,7 @@ class SeedLakeRegistrar:
         allowlist_matches: bool = list(current.configuration.schema_allowlist) == schema_allowlist
         if current.default_scope_id == scope_id and allowlist_matches:
             return current
-        return service.update_source_binding(
+        return bindings.update_source_binding(
             current.id,
             SourceBindingUpdate(
                 default_scope_id=scope_id,
@@ -224,22 +249,23 @@ class SeedLakeRegistrar:
 
     def _attach_spark_queries(
         self,
-        service: RegistryService,
+        tables: TableService,
+        bindings: BindingService,
         scope_id: UUID,
         spark_binding_id: UUID,
     ) -> None:
         spark_catalog: str = self._settings.polaris.catalog
         table: CatalogTableRead
-        for table in service.list_tables(scope_id):
+        for table in tables.list_tables(scope_id):
             if table.physical_namespace != _SCHEMA:
                 continue
-            bindings: list[AssetBindingRead] = service.list_asset_bindings(table.id)
+            stored: list[AssetBindingRead] = bindings.list_asset_bindings(table.id)
             selected: bool = any(
-                item.role is BindingRole.QUERY and item.is_selected for item in bindings
+                item.role is BindingRole.QUERY and item.is_selected for item in stored
             )
             if selected:
                 continue
-            service.create_asset_binding(
+            bindings.create_asset_binding(
                 table.id,
                 AssetBindingCreate(
                     source_engine_binding_id=spark_binding_id,
@@ -288,9 +314,9 @@ def project_seed_lake(
     return False
 
 
-def _find_space(service: RegistryService, slug: str) -> SpaceRead | None:
+def _find_space(spaces: SpaceService, slug: str) -> SpaceRead | None:
     space: SpaceRead
-    for space in service.list_spaces():
+    for space in spaces.list_spaces():
         if space.slug == slug:
             return space
     return None

@@ -108,7 +108,10 @@ from intelegent_data_catalog.persistence.models import AirflowInstanceRow, Colum
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
 from intelegent_data_catalog.registry.repository import RegistryRepository
-from intelegent_data_catalog.registry.service import RegistryService
+from intelegent_data_catalog.services.bindings import BindingService
+from intelegent_data_catalog.services.scopes import ScopeService
+from intelegent_data_catalog.services.spaces import SpaceService
+from intelegent_data_catalog.services.tables import TableService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
 from intelegent_data_catalog.sources.enrichment import PostgresForeignKeyEnricher
 from intelegent_data_catalog.sources.sync import MetadataSyncService
@@ -124,7 +127,11 @@ class RequestPlatform:
     def __init__(self, session: Session, settings: AppSettings, query: QueryService) -> None:
         self._session: Session = session
         self._settings: AppSettings = settings
-        self.registry: RegistryService = RegistryService(session)
+        repo: RegistryRepository = RegistryRepository(session)
+        self.spaces: SpaceService = SpaceService(repo)
+        self.scopes: ScopeService = ScopeService(repo)
+        self.tables: TableService = TableService(repo)
+        self.bindings: BindingService = BindingService(repo)
         self.annotations: CatalogAnnotations = CatalogAnnotations(session)
         neo4j: Neo4jProjection | None = None
         if settings.neo4j.enabled:

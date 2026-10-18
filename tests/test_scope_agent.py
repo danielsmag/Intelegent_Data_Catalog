@@ -51,7 +51,7 @@ from intelegent_data_catalog.registry.schemas import (
     SourceRef,
     SpaceCreate,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_scope_graph import _context, _link
 
 
@@ -217,31 +217,31 @@ def test_replace_keeps_non_llm_rows_and_rewrites_llm_rows(tmp_path: Path) -> Non
     database: CatalogDatabase = _database(tmp_path)
     session: Session = database.session()
     try:
-        service: RegistryService = RegistryService(session)
-        space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
-        scope_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        source_id: UUID = service.create_data_source(
+        service: OpenRegistry = open_registry(session)
+        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
+        scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
+        source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
         orders_id: UUID = _table(service, scope_id, source_id, "orders")
         customers_id: UUID = _table(service, scope_id, source_id, "customers")
-        order_customer: UUID = service.create_column(
+        order_customer: UUID = service.tables.create_column(
             orders_id,
             ColumnCreate(name="customer_id", data_type="bigint", ordinal_position=0),
         ).id
-        order_region: UUID = service.create_column(
+        order_region: UUID = service.tables.create_column(
             orders_id,
             ColumnCreate(name="region", data_type="varchar", ordinal_position=1),
         ).id
-        customer_id: UUID = service.create_column(
+        customer_id: UUID = service.tables.create_column(
             customers_id,
             ColumnCreate(name="id", data_type="bigint", ordinal_position=0, is_primary_key=True),
         ).id
-        customer_region: UUID = service.create_column(
+        customer_region: UUID = service.tables.create_column(
             customers_id,
             ColumnCreate(name="region", data_type="varchar", ordinal_position=1),
         ).id
-        service.create_relationship(
+        service.relationships.create_relationship(
             RelationshipCreate(
                 source_table_id=orders_id,
                 target_table_id=customers_id,
@@ -326,8 +326,8 @@ def _database(tmp_path: Path) -> CatalogDatabase:
     return CatalogDatabase(url)
 
 
-def _table(service: RegistryService, scope_id: UUID, source_id: UUID, name: str) -> UUID:
-    return service.create_table(
+def _table(service: OpenRegistry, scope_id: UUID, source_id: UUID, name: str) -> UUID:
+    return service.tables.create_table(
         scope_id,
         CatalogTableCreate(
             data_source_id=source_id,

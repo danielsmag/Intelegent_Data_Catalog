@@ -26,7 +26,9 @@ from intelegent_data_catalog.registry.schemas import (
     ScopeAttachmentResult,
     SourceRef,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from intelegent_data_catalog.services.data_sources import DataSourceService
+from intelegent_data_catalog.services.scopes import ScopeService
+from intelegent_data_catalog.services.tables import TableService
 
 _MAX_TABLES: int = 500
 _TYPE_LIMIT: int = 512
@@ -43,13 +45,21 @@ _CONNECTOR_TYPES: dict[str, DataSourceType] = {
 class ScopeAttachmentService:
     """Registers source tables under a scope without moving tables that already exist."""
 
-    def __init__(self, registry: RegistryService, explorer: ExplorerService) -> None:
-        self._registry: RegistryService = registry
+    def __init__(
+        self,
+        scopes: ScopeService,
+        tables: TableService,
+        sources: DataSourceService,
+        explorer: ExplorerService,
+    ) -> None:
+        self._scopes: ScopeService = scopes
+        self._tables: TableService = tables
+        self._sources: DataSourceService = sources
         self._explorer: ExplorerService = explorer
 
     def attach(self, scope_id: UUID, body: ScopeAttachmentCreate) -> ScopeAttachmentResult:
         """Attach selected tables, or every table in the schema when tables is omitted."""
-        self._registry.get_scope(scope_id)
+        self._scopes.get_scope(scope_id)
         observed: list[ObservedTable] = self._explorer.observed(
             body.source_id,
             body.catalog,
@@ -98,7 +108,7 @@ class ScopeAttachmentService:
         origin: MetadataOrigin,
     ) -> AttachmentItem:
         source_key: str = source_key_from_parts(catalog, namespace, table.name)
-        existing: CatalogTableRead | None = self._registry.find_table_by_source_key(
+        existing: CatalogTableRead | None = self._tables.find_table_by_source_key(
             source.id,
             source_key,
         )
@@ -116,7 +126,7 @@ class ScopeAttachmentService:
                 scope_id=existing.scope_id,
             )
         kind: TableKind = TableKind.VIEW if table.kind == TableKind.VIEW.value else TableKind.TABLE
-        created: CatalogTableRead = self._registry.create_table(
+        created: CatalogTableRead = self._tables.create_table(
             scope_id,
             CatalogTableCreate(
                 data_source_id=source.id,
@@ -132,7 +142,7 @@ class ScopeAttachmentService:
         )
         column: ObservedColumn
         for column in table.columns:
-            self._registry.create_column(created.id, _column_body(column, origin))
+            self._tables.create_column(created.id, _column_body(column, origin))
         return AttachmentItem(
             name=table.name,
             source_key=source_key,
@@ -143,10 +153,10 @@ class ScopeAttachmentService:
 
     def _data_source(self, source_id: str, catalog: str, connector: str) -> DataSourceRead:
         current: DataSourceRead
-        for current in self._registry.list_data_sources():
+        for current in self._sources.list_data_sources():
             if _is_explorer_source(current.configuration, source_id, catalog):
                 return current
-        return self._registry.create_data_source(
+        return self._sources.create_data_source(
             DataSourceCreate(
                 name=_source_name(source_id, catalog),
                 type=_source_type(source_id, connector),

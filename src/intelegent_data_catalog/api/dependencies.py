@@ -24,10 +24,19 @@ from intelegent_data_catalog.entity_configuration import EntityConfigurationServ
 from intelegent_data_catalog.exceptions import AuthenticationError, PersistenceUnavailableError
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
 from intelegent_data_catalog.jobs.schedules import SyncScheduleService
+from intelegent_data_catalog.notebooks.service import NotebookKernelService
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.files import WorkspaceFileService
-from intelegent_data_catalog.registry.service import RegistryService
+from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.workspaces import WorkspaceService
+from intelegent_data_catalog.services.bindings import BindingService
+from intelegent_data_catalog.services.data_sources import DataSourceService
+from intelegent_data_catalog.services.engines import EngineService
+from intelegent_data_catalog.services.relationships import RelationshipService
+from intelegent_data_catalog.services.scopes import ScopeService
+from intelegent_data_catalog.services.spaces import SpaceService
+from intelegent_data_catalog.services.sync_runs import SyncRunService
+from intelegent_data_catalog.services.tables import TableService
 
 
 def get_container(request: Request) -> AppContainer:
@@ -62,15 +71,14 @@ def get_explorer_service(
     return service
 
 
-def get_registry_service(
+def get_catalog_session(
     container: Annotated[AppContainer, Depends(get_container)],
-) -> Iterator[RegistryService]:
-    """Open a catalog session for one request."""
+) -> Iterator[Session]:
+    """Open one catalog session for the request."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
-    service: RegistryService = RegistryService(session)
     try:
-        yield service
+        yield session
     except SQLAlchemyError as err:
         session.rollback()
         raise PersistenceUnavailableError("catalog database unavailable") from err
@@ -81,10 +89,60 @@ def get_registry_service(
         session.close()
 
 
+CatalogSessionDep = Annotated[Session, Depends(get_catalog_session)]
+
+
+def get_space_service(session: CatalogSessionDep) -> SpaceService:
+    """Return the space service for this request."""
+    return SpaceService(RegistryRepository(session))
+
+
+def get_scope_service(session: CatalogSessionDep) -> ScopeService:
+    """Return the scope service for this request."""
+    return ScopeService(RegistryRepository(session))
+
+
+def get_data_source_service(session: CatalogSessionDep) -> DataSourceService:
+    """Return the data source service for this request."""
+    return DataSourceService(RegistryRepository(session))
+
+
+def get_table_service(session: CatalogSessionDep) -> TableService:
+    """Return the table service for this request."""
+    return TableService(RegistryRepository(session))
+
+
+def get_relationship_service(session: CatalogSessionDep) -> RelationshipService:
+    """Return the relationship service for this request."""
+    return RelationshipService(RegistryRepository(session))
+
+
+def get_engine_service(session: CatalogSessionDep) -> EngineService:
+    """Return the engine connection service for this request."""
+    return EngineService(RegistryRepository(session))
+
+
+def get_binding_service(session: CatalogSessionDep) -> BindingService:
+    """Return the binding service for this request."""
+    return BindingService(RegistryRepository(session))
+
+
+def get_sync_run_service(session: CatalogSessionDep) -> SyncRunService:
+    """Return the sync run service for this request."""
+    return SyncRunService(RegistryRepository(session))
+
+
 CatalogServiceDep = Annotated[CatalogService, Depends(get_catalog_service)]
 QueryServiceDep = Annotated[QueryService, Depends(get_query_service)]
 ExplorerServiceDep = Annotated[ExplorerService, Depends(get_explorer_service)]
-RegistryServiceDep = Annotated[RegistryService, Depends(get_registry_service)]
+SpaceServiceDep = Annotated[SpaceService, Depends(get_space_service)]
+ScopeServiceDep = Annotated[ScopeService, Depends(get_scope_service)]
+DataSourceServiceDep = Annotated[DataSourceService, Depends(get_data_source_service)]
+TableServiceDep = Annotated[TableService, Depends(get_table_service)]
+RelationshipServiceDep = Annotated[RelationshipService, Depends(get_relationship_service)]
+EngineServiceDep = Annotated[EngineService, Depends(get_engine_service)]
+BindingServiceDep = Annotated[BindingService, Depends(get_binding_service)]
+SyncRunServiceDep = Annotated[SyncRunService, Depends(get_sync_run_service)]
 
 
 def get_scope_attachment(
@@ -93,8 +151,14 @@ def get_scope_attachment(
     """Open one catalog session and attach source tables into a scope."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
+    repo: RegistryRepository = RegistryRepository(session)
     explorer: ExplorerService = container.explorer_service()
-    service: ScopeAttachmentService = ScopeAttachmentService(RegistryService(session), explorer)
+    service: ScopeAttachmentService = ScopeAttachmentService(
+        ScopeService(repo),
+        TableService(repo),
+        DataSourceService(repo),
+        explorer,
+    )
     try:
         yield service
     except SQLAlchemyError as err:
@@ -308,6 +372,42 @@ def get_workspace_files(
 
 
 WorkspaceFilesDep = Annotated[WorkspaceFileService, Depends(get_workspace_files)]
+
+
+def get_notebook_kernels(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[NotebookKernelService]:
+    """Open one catalog session for notebook kernel calls."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    settings: AppSettings = container.settings()
+    files: WorkspaceFileService = WorkspaceFileService(
+        session,
+        container.object_store(),
+        settings.object_store.max_upload_bytes,
+    )
+    service: NotebookKernelService = NotebookKernelService(
+        session=session,
+        files=files,
+        gateway=container.kernel_gateway(),
+        directory=container.kernel_directory(),
+        tickets=container.kernel_tickets(),
+        settings=settings,
+        logger=container.logger().getChild("notebook"),
+    )
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+NotebookKernelDep = Annotated[NotebookKernelService, Depends(get_notebook_kernels)]
 
 
 def require_auth(

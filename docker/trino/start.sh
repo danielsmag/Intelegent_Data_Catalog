@@ -43,8 +43,8 @@ EOF
 cat >/etc/trino/catalog/appdb.properties <<EOF
 connector.name=postgresql
 connection-url=jdbc:postgresql://postgres:5432/${SOURCE_DB_NAME:-sales}
-connection-user=${SOURCE_DB_USER:-sales}
-connection-password=${SOURCE_DB_PASSWORD:-sales}
+connection-user=${SOURCE_DB_READER_USER:-sales_reader}
+connection-password=${SOURCE_DB_READER_PASSWORD:-sales_reader}
 EOF
 
 exec /usr/lib/trino/bin/run-trino

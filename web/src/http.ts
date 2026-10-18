@@ -1,7 +1,7 @@
-import { getAccessToken, authEnabled, startLogin } from "./auth"
+import { getAccessToken, authEnabled, renewSession, startLogin } from "./auth"
 import { getActiveWorkspaceId } from "./workspaceStore"
 
-export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(path: string, init: RequestInit = {}, allowRenew: boolean = true): Promise<Response> {
   const headers: Headers = new Headers(init.headers)
   const token: string | null = getAccessToken()
   if (token !== null && !headers.has("Authorization")) {
@@ -12,10 +12,15 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     headers.set("X-Workspace-Id", workspaceId)
   }
   const response: Response = await fetch(path, { ...init, headers })
-  if (response.status === 401 && authEnabled()) {
-    await startLogin()
+  if (response.status !== 401 || !authEnabled() || !allowRenew) {
+    return response
   }
-  return response
+  const renewed: boolean = await renewSession()
+  if (!renewed) {
+    await startLogin()
+    return response
+  }
+  return apiFetch(path, init, false)
 }
 
 export async function readDetail(response: Response): Promise<string> {

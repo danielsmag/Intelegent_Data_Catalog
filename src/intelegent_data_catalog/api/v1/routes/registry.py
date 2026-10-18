@@ -7,8 +7,15 @@ from fastapi import APIRouter, Query, Response
 
 from intelegent_data_catalog.api.dependencies import (
     AccessDep,
-    RegistryServiceDep,
+    BindingServiceDep,
+    DataSourceServiceDep,
+    EngineServiceDep,
+    RelationshipServiceDep,
     ScopeAttachmentDep,
+    ScopeServiceDep,
+    SpaceServiceDep,
+    SyncRunServiceDep,
+    TableServiceDep,
 )
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.exceptions import EntityNotFoundError
@@ -52,19 +59,19 @@ router: APIRouter = APIRouter()
 
 
 @router.get("/spaces", response_model=list[SpaceRead])
-def list_spaces(service: RegistryServiceDep, access: AccessDep) -> list[SpaceRead]:
+def list_spaces(service: SpaceServiceDep, access: AccessDep) -> list[SpaceRead]:
     """List business spaces visible to the active workspace."""
     return service.list_spaces(access.visible_space_ids)
 
 
 @router.post("/spaces", response_model=SpaceRead, status_code=201)
-def create_space(body: SpaceCreate, service: RegistryServiceDep, access: AccessDep) -> SpaceRead:
+def create_space(body: SpaceCreate, service: SpaceServiceDep, access: AccessDep) -> SpaceRead:
     """Create a business space. Isolated spaces bind to the active workspace."""
     return service.create_space(body, workspace_id=access.workspace_id)
 
 
 @router.get("/spaces/{space_id}", response_model=SpaceRead)
-def read_space(space_id: UUID, service: RegistryServiceDep) -> SpaceRead:
+def read_space(space_id: UUID, service: SpaceServiceDep) -> SpaceRead:
     """Return one space."""
     return service.get_space(space_id)
 
@@ -73,7 +80,7 @@ def read_space(space_id: UUID, service: RegistryServiceDep) -> SpaceRead:
 def patch_space(
     space_id: UUID,
     body: SpaceUpdate,
-    service: RegistryServiceDep,
+    service: SpaceServiceDep,
     access: AccessDep,
 ) -> SpaceRead:
     """Patch a space."""
@@ -81,14 +88,14 @@ def patch_space(
 
 
 @router.delete("/spaces/{space_id}", status_code=204)
-def remove_space(space_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_space(space_id: UUID, service: SpaceServiceDep) -> Response:
     """Delete a space that has no scopes."""
     service.delete_space(space_id)
     return Response(status_code=204)
 
 
 @router.get("/spaces/{space_id}/scopes", response_model=list[ScopeRead])
-def list_scopes(space_id: UUID, service: RegistryServiceDep) -> list[ScopeRead]:
+def list_scopes(space_id: UUID, service: ScopeServiceDep) -> list[ScopeRead]:
     """List scopes in a space."""
     return service.list_scopes(space_id)
 
@@ -97,14 +104,14 @@ def list_scopes(space_id: UUID, service: RegistryServiceDep) -> list[ScopeRead]:
 def create_scope(
     space_id: UUID,
     body: ScopeCreate,
-    service: RegistryServiceDep,
+    service: ScopeServiceDep,
 ) -> ScopeRead:
     """Create a scope in a space."""
     return service.create_scope(space_id, body)
 
 
 @router.get("/scopes/{scope_id}", response_model=ScopeRead)
-def read_scope(scope_id: UUID, service: RegistryServiceDep) -> ScopeRead:
+def read_scope(scope_id: UUID, service: ScopeServiceDep) -> ScopeRead:
     """Return one scope."""
     return service.get_scope(scope_id)
 
@@ -113,33 +120,33 @@ def read_scope(scope_id: UUID, service: RegistryServiceDep) -> ScopeRead:
 def patch_scope(
     scope_id: UUID,
     body: ScopeUpdate,
-    service: RegistryServiceDep,
+    service: ScopeServiceDep,
 ) -> ScopeRead:
     """Patch a scope."""
     return service.update_scope(scope_id, body)
 
 
 @router.delete("/scopes/{scope_id}", status_code=204)
-def remove_scope(scope_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_scope(scope_id: UUID, service: ScopeServiceDep) -> Response:
     """Delete a scope that has no tables."""
     service.delete_scope(scope_id)
     return Response(status_code=204)
 
 
 @router.get("/data-sources", response_model=list[DataSourceRead])
-def list_data_sources(service: RegistryServiceDep) -> list[DataSourceRead]:
+def list_data_sources(service: DataSourceServiceDep) -> list[DataSourceRead]:
     """List registered data sources."""
     return service.list_data_sources()
 
 
 @router.post("/data-sources", response_model=DataSourceRead, status_code=201)
-def create_data_source(body: DataSourceCreate, service: RegistryServiceDep) -> DataSourceRead:
+def create_data_source(body: DataSourceCreate, service: DataSourceServiceDep) -> DataSourceRead:
     """Register a data source. This does not provision a connector."""
     return service.create_data_source(body)
 
 
 @router.get("/data-sources/{data_source_id}", response_model=DataSourceRead)
-def read_data_source(data_source_id: UUID, service: RegistryServiceDep) -> DataSourceRead:
+def read_data_source(data_source_id: UUID, service: DataSourceServiceDep) -> DataSourceRead:
     """Return one data source."""
     return service.get_data_source(data_source_id)
 
@@ -148,21 +155,21 @@ def read_data_source(data_source_id: UUID, service: RegistryServiceDep) -> DataS
 def patch_data_source(
     data_source_id: UUID,
     body: DataSourceUpdate,
-    service: RegistryServiceDep,
+    service: DataSourceServiceDep,
 ) -> DataSourceRead:
     """Patch a data source. Secrets stay in credential_ref."""
     return service.update_data_source(data_source_id, body)
 
 
 @router.delete("/data-sources/{data_source_id}", status_code=204)
-def remove_data_source(data_source_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_data_source(data_source_id: UUID, service: DataSourceServiceDep) -> Response:
     """Delete a data source that has no tables or bindings."""
     service.delete_data_source(data_source_id)
     return Response(status_code=204)
 
 
 @router.get("/scopes/{scope_id}/tables", response_model=list[CatalogTableRead])
-def list_scope_tables(scope_id: UUID, service: RegistryServiceDep) -> list[CatalogTableRead]:
+def list_scope_tables(scope_id: UUID, service: TableServiceDep) -> list[CatalogTableRead]:
     """List catalog tables in a scope."""
     return service.list_tables(scope_id)
 
@@ -181,14 +188,14 @@ def attach_scope_assets(
 def create_scope_table(
     scope_id: UUID,
     body: CatalogTableCreate,
-    service: RegistryServiceDep,
+    service: TableServiceDep,
 ) -> CatalogTableRead:
     """Create a catalog table in a scope."""
     return service.create_table(scope_id, body)
 
 
 @router.get("/tables/{table_id}", response_model=CatalogTableRead)
-def read_catalog_table(table_id: UUID, service: RegistryServiceDep) -> CatalogTableRead:
+def read_catalog_table(table_id: UUID, service: TableServiceDep) -> CatalogTableRead:
     """Return one catalog table."""
     return service.get_table(table_id)
 
@@ -197,21 +204,21 @@ def read_catalog_table(table_id: UUID, service: RegistryServiceDep) -> CatalogTa
 def patch_catalog_table(
     table_id: UUID,
     body: CatalogTableUpdate,
-    service: RegistryServiceDep,
+    service: TableServiceDep,
 ) -> CatalogTableRead:
     """Patch user-facing table fields and the manual scope assignment."""
     return service.update_table(table_id, body)
 
 
 @router.delete("/tables/{table_id}", status_code=204)
-def remove_catalog_table(table_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_catalog_table(table_id: UUID, service: TableServiceDep) -> Response:
     """Delete a catalog table that is not used by a relationship."""
     service.delete_table(table_id)
     return Response(status_code=204)
 
 
 @router.get("/tables/{table_id}/columns", response_model=list[ColumnRead])
-def list_table_columns(table_id: UUID, service: RegistryServiceDep) -> list[ColumnRead]:
+def list_table_columns(table_id: UUID, service: TableServiceDep) -> list[ColumnRead]:
     """List columns on a catalog table."""
     return service.list_columns(table_id)
 
@@ -220,7 +227,7 @@ def list_table_columns(table_id: UUID, service: RegistryServiceDep) -> list[Colu
 def create_table_column(
     table_id: UUID,
     body: ColumnCreate,
-    service: RegistryServiceDep,
+    service: TableServiceDep,
 ) -> ColumnRead:
     """Add a column to a catalog table."""
     return service.create_column(table_id, body)
@@ -230,14 +237,14 @@ def create_table_column(
 def patch_column(
     column_id: UUID,
     body: ColumnUpdate,
-    service: RegistryServiceDep,
+    service: TableServiceDep,
 ) -> ColumnRead:
     """Patch user column fields."""
     return service.update_column(column_id, body)
 
 
 @router.delete("/columns/{column_id}", status_code=204)
-def remove_column(column_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_column(column_id: UUID, service: TableServiceDep) -> Response:
     """Delete a column that is not used by a relationship."""
     service.delete_column(column_id)
     return Response(status_code=204)
@@ -246,21 +253,22 @@ def remove_column(column_id: UUID, service: RegistryServiceDep) -> Response:
 @router.post("/relationships", response_model=RelationshipRead, status_code=201)
 def create_relationship(
     body: RelationshipCreate,
-    service: RegistryServiceDep,
+    spaces: SpaceServiceDep,
+    relationships: RelationshipServiceDep,
     access: AccessDep,
 ) -> RelationshipRead:
     """Create a relationship and its column mappings."""
     access_context: AccessContext = access
     table_id: UUID
     for table_id in (body.source_table_id, body.target_table_id):
-        space_id: UUID = service.space_id_for_table(table_id)
+        space_id: UUID = spaces.space_id_for_table(table_id)
         if not access_context.allows_space(space_id):
             raise EntityNotFoundError("table", str(table_id))
-    return service.create_relationship(body)
+    return relationships.create_relationship(body)
 
 
 @router.get("/relationships/{relationship_id}", response_model=RelationshipRead)
-def read_relationship(relationship_id: UUID, service: RegistryServiceDep) -> RelationshipRead:
+def read_relationship(relationship_id: UUID, service: RelationshipServiceDep) -> RelationshipRead:
     """Return one relationship."""
     return service.get_relationship(relationship_id)
 
@@ -269,14 +277,14 @@ def read_relationship(relationship_id: UUID, service: RegistryServiceDep) -> Rel
 def patch_relationship(
     relationship_id: UUID,
     body: RelationshipUpdate,
-    service: RegistryServiceDep,
+    service: RelationshipServiceDep,
 ) -> RelationshipRead:
     """Patch a relationship."""
     return service.update_relationship(relationship_id, body)
 
 
 @router.delete("/relationships/{relationship_id}", status_code=204)
-def remove_relationship(relationship_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_relationship(relationship_id: UUID, service: RelationshipServiceDep) -> Response:
     """Delete a relationship."""
     service.delete_relationship(relationship_id)
     return Response(status_code=204)
@@ -285,14 +293,14 @@ def remove_relationship(relationship_id: UUID, service: RegistryServiceDep) -> R
 @router.get("/tables/{table_id}/relationships", response_model=TableRelationships)
 def read_table_relationships(
     table_id: UUID,
-    service: RegistryServiceDep,
+    service: RelationshipServiceDep,
 ) -> TableRelationships:
     """Return incoming and outgoing relationships for a table."""
     return service.list_table_relationships(table_id)
 
 
 @router.get("/engine-connections", response_model=list[EngineConnectionRead])
-def list_engine_connections(service: RegistryServiceDep) -> list[EngineConnectionRead]:
+def list_engine_connections(service: EngineServiceDep) -> list[EngineConnectionRead]:
     """List Trino and Spark SQL connections."""
     return service.list_engine_connections()
 
@@ -300,7 +308,7 @@ def list_engine_connections(service: RegistryServiceDep) -> list[EngineConnectio
 @router.post("/engine-connections", response_model=EngineConnectionRead, status_code=201)
 def create_engine_connection(
     body: EngineConnectionCreate,
-    service: RegistryServiceDep,
+    service: EngineServiceDep,
 ) -> EngineConnectionRead:
     """Register an engine connection."""
     return service.create_engine_connection(body)
@@ -309,7 +317,7 @@ def create_engine_connection(
 @router.get("/engine-connections/{engine_connection_id}", response_model=EngineConnectionRead)
 def read_engine_connection(
     engine_connection_id: UUID,
-    service: RegistryServiceDep,
+    service: EngineServiceDep,
 ) -> EngineConnectionRead:
     """Return one engine connection."""
     return service.get_engine_connection(engine_connection_id)
@@ -319,7 +327,7 @@ def read_engine_connection(
 def patch_engine_connection(
     engine_connection_id: UUID,
     body: EngineConnectionUpdate,
-    service: RegistryServiceDep,
+    service: EngineServiceDep,
 ) -> EngineConnectionRead:
     """Patch an engine connection."""
     return service.update_engine_connection(engine_connection_id, body)
@@ -328,7 +336,7 @@ def patch_engine_connection(
 @router.delete("/engine-connections/{engine_connection_id}", status_code=204)
 def remove_engine_connection(
     engine_connection_id: UUID,
-    service: RegistryServiceDep,
+    service: EngineServiceDep,
 ) -> Response:
     """Delete an engine connection that has no source bindings."""
     service.delete_engine_connection(engine_connection_id)
@@ -337,7 +345,7 @@ def remove_engine_connection(
 
 @router.get("/source-bindings", response_model=list[SourceBindingRead])
 def list_source_bindings(
-    service: RegistryServiceDep,
+    service: BindingServiceDep,
     data_source_id: Annotated[UUID | None, Query()] = None,
     engine_connection_id: Annotated[UUID | None, Query()] = None,
 ) -> list[SourceBindingRead]:
@@ -348,7 +356,7 @@ def list_source_bindings(
 @router.post("/source-bindings", response_model=SourceBindingRead, status_code=201)
 def create_source_binding(
     body: SourceBindingCreate,
-    service: RegistryServiceDep,
+    service: BindingServiceDep,
 ) -> SourceBindingRead:
     """Bind a data source to an engine connection."""
     return service.create_source_binding(body)
@@ -357,7 +365,7 @@ def create_source_binding(
 @router.get("/source-bindings/{source_binding_id}", response_model=SourceBindingRead)
 def read_source_binding(
     source_binding_id: UUID,
-    service: RegistryServiceDep,
+    service: BindingServiceDep,
 ) -> SourceBindingRead:
     """Return one source binding."""
     return service.get_source_binding(source_binding_id)
@@ -367,21 +375,21 @@ def read_source_binding(
 def patch_source_binding(
     source_binding_id: UUID,
     body: SourceBindingUpdate,
-    service: RegistryServiceDep,
+    service: BindingServiceDep,
 ) -> SourceBindingRead:
     """Patch a source binding."""
     return service.update_source_binding(source_binding_id, body)
 
 
 @router.delete("/source-bindings/{source_binding_id}", status_code=204)
-def remove_source_binding(source_binding_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_source_binding(source_binding_id: UUID, service: BindingServiceDep) -> Response:
     """Delete a source binding that has no asset bindings or sync runs."""
     service.delete_source_binding(source_binding_id)
     return Response(status_code=204)
 
 
 @router.get("/tables/{table_id}/bindings", response_model=list[AssetBindingRead])
-def list_asset_bindings(table_id: UUID, service: RegistryServiceDep) -> list[AssetBindingRead]:
+def list_asset_bindings(table_id: UUID, service: BindingServiceDep) -> list[AssetBindingRead]:
     """List discovery and query bindings for a table."""
     return service.list_asset_bindings(table_id)
 
@@ -390,14 +398,14 @@ def list_asset_bindings(table_id: UUID, service: RegistryServiceDep) -> list[Ass
 def create_asset_binding(
     table_id: UUID,
     body: AssetBindingCreate,
-    service: RegistryServiceDep,
+    service: BindingServiceDep,
 ) -> AssetBindingRead:
     """Store an explicit engine address for a table."""
     return service.create_asset_binding(table_id, body)
 
 
 @router.get("/bindings/{binding_id}", response_model=AssetBindingRead)
-def read_asset_binding(binding_id: UUID, service: RegistryServiceDep) -> AssetBindingRead:
+def read_asset_binding(binding_id: UUID, service: BindingServiceDep) -> AssetBindingRead:
     """Return one asset binding."""
     return service.get_asset_binding(binding_id)
 
@@ -406,14 +414,14 @@ def read_asset_binding(binding_id: UUID, service: RegistryServiceDep) -> AssetBi
 def patch_asset_binding(
     binding_id: UUID,
     body: AssetBindingUpdate,
-    service: RegistryServiceDep,
+    service: BindingServiceDep,
 ) -> AssetBindingRead:
     """Patch an asset binding address or selection."""
     return service.update_asset_binding(binding_id, body)
 
 
 @router.delete("/bindings/{binding_id}", status_code=204)
-def remove_asset_binding(binding_id: UUID, service: RegistryServiceDep) -> Response:
+def remove_asset_binding(binding_id: UUID, service: BindingServiceDep) -> Response:
     """Delete one asset binding."""
     service.delete_asset_binding(binding_id)
     return Response(status_code=204)
@@ -421,7 +429,7 @@ def remove_asset_binding(binding_id: UUID, service: RegistryServiceDep) -> Respo
 
 @router.get("/sync-runs", response_model=list[SyncRunRead])
 def list_sync_runs(
-    service: RegistryServiceDep,
+    service: SyncRunServiceDep,
     source_engine_binding_id: Annotated[UUID | None, Query()] = None,
 ) -> list[SyncRunRead]:
     """List recorded metadata sync runs."""
@@ -429,13 +437,13 @@ def list_sync_runs(
 
 
 @router.post("/sync-runs", response_model=SyncRunRead, status_code=201)
-def create_sync_run(body: SyncRunCreate, service: RegistryServiceDep) -> SyncRunRead:
+def create_sync_run(body: SyncRunCreate, service: SyncRunServiceDep) -> SyncRunRead:
     """Record a metadata sync run. This does not contact Trino."""
     return service.create_sync_run(body)
 
 
 @router.get("/sync-runs/{sync_run_id}", response_model=SyncRunRead)
-def read_sync_run(sync_run_id: UUID, service: RegistryServiceDep) -> SyncRunRead:
+def read_sync_run(sync_run_id: UUID, service: SyncRunServiceDep) -> SyncRunRead:
     """Return one sync run."""
     return service.get_sync_run(sync_run_id)
 
@@ -444,7 +452,7 @@ def read_sync_run(sync_run_id: UUID, service: RegistryServiceDep) -> SyncRunRead
 def patch_sync_run(
     sync_run_id: UUID,
     body: SyncRunUpdate,
-    service: RegistryServiceDep,
+    service: SyncRunServiceDep,
 ) -> SyncRunRead:
     """Update a recorded sync run."""
     return service.update_sync_run(sync_run_id, body)

@@ -39,7 +39,7 @@ from intelegent_data_catalog.registry.schemas import (
     SourceRef,
     SpaceCreate,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_scope_graph import _link
 
 
@@ -143,17 +143,17 @@ def test_provider_reports_scopes_without_context(tmp_path: Path) -> None:
     database: CatalogDatabase = _database(tmp_path)
     session: Session = database.session()
     try:
-        service: RegistryService = RegistryService(session)
-        space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
-        ordering_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        billing_id: UUID = service.create_scope(space_id, ScopeCreate(name="Billing")).id
-        source_id: UUID = service.create_data_source(
+        service: OpenRegistry = open_registry(session)
+        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
+        ordering_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
+        billing_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Billing")).id
+        source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
         _table(service, ordering_id, source_id, "orders")
         repository: RegistryRepository = RegistryRepository(session)
-        space = service.get_space(space_id)
-        scope = service.get_scope(ordering_id)
+        space = service.spaces.get_space(space_id)
+        scope = service.scopes.get_scope(ordering_id)
         ScopeKnowledgeContextStore(session).save(
             ScopeAnalysisContext(
                 scope=ScopeSummary(
@@ -242,8 +242,8 @@ def _database(tmp_path: Path) -> CatalogDatabase:
     return CatalogDatabase(url)
 
 
-def _table(service: RegistryService, scope_id: UUID, source_id: UUID, name: str) -> UUID:
-    return service.create_table(
+def _table(service: OpenRegistry, scope_id: UUID, source_id: UUID, name: str) -> UUID:
+    return service.tables.create_table(
         scope_id,
         CatalogTableCreate(
             data_source_id=source_id,

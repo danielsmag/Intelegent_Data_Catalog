@@ -27,6 +27,7 @@ dependencies = [
     "sqlglot>=30.20.0",
     "trino>=0.340.0",
     "uvicorn>=0.54.0",
+    "websockets>=14.0",
 ]
 
 [project.scripts]

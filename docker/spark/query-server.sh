@@ -24,6 +24,9 @@ set +a
 catalog_name="${POLARIS_CATALOG_NAME}"
 query_port="${QUERY_PORT:-8091}"
 
+# shellcheck disable=SC1091
+source /opt/seed/spark-catalog-conf.sh
+
 cat >/tmp/spark-query.properties <<EOF
 spark.master=local[1]
 spark.app.name=catalog-query
@@ -33,19 +36,9 @@ spark.driver.bindAddress=127.0.0.1
 spark.ui.enabled=false
 spark.sql.shuffle.partitions=1
 spark.sql.ansi.enabled=true
-spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-spark.sql.defaultCatalog=${catalog_name}
-spark.sql.catalog.${catalog_name}=org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.${catalog_name}.type=rest
-spark.sql.catalog.${catalog_name}.uri=${POLARIS_URI}
-spark.sql.catalog.${catalog_name}.warehouse=${POLARIS_CATALOG_NAME}
-spark.sql.catalog.${catalog_name}.scope=PRINCIPAL_ROLE:ALL
-spark.sql.catalog.${catalog_name}.oauth2-server-uri=${POLARIS_TOKEN_URI}
-spark.sql.catalog.${catalog_name}.header.X-Iceberg-Access-Delegation=vended-credentials
-spark.sql.catalog.${catalog_name}.header.Polaris-Realm=${POLARIS_REALM}
-spark.jars.ivy=/tmp/ivy
-spark.redaction.regex=(?i)secret|password|token|credential
 EOF
+write_spark_catalog_conf /tmp/spark-catalog.properties
+cat /tmp/spark-catalog.properties >>/tmp/spark-query.properties
 
 export PYSPARK_PYTHON=python3
 export QUERY_PORT="${query_port}"

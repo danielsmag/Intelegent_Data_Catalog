@@ -77,7 +77,7 @@ from intelegent_data_catalog.registry.schemas import (
     SourceRef,
     SpaceCreate,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_knowledge_builder import _context
 
 
@@ -178,10 +178,10 @@ def test_table_agent_describes_columns_in_batches(tmp_path: Path) -> None:
     session: Session = database.session()
     try:
         table_id: UUID = _table(session)
-        service: RegistryService = RegistryService(session)
+        service: OpenRegistry = open_registry(session)
         index: int
         for index in range(26):
-            service.create_column(
+            service.tables.create_column(
                 table_id, ColumnCreate(name=f"c{index:02d}", ordinal_position=index)
             )
         seen: list[int] = []
@@ -232,7 +232,7 @@ def test_scope_agent_describes_the_scope(tmp_path: Path) -> None:
     session: Session = database.session()
     try:
         table_id: UUID = _table(session)
-        scope_id: UUID = RegistryService(session).get_table(table_id).scope_id
+        scope_id: UUID = open_registry(session).tables.get_table(table_id).scope_id
         prompts: list[str] = []
 
         def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -277,8 +277,8 @@ def test_space_agent_describes_the_space(tmp_path: Path) -> None:
     session: Session = database.session()
     try:
         table_id: UUID = _table(session)
-        scope_id: UUID = RegistryService(session).get_table(table_id).scope_id
-        space_id: UUID = RegistryService(session).get_scope(scope_id).space_id
+        scope_id: UUID = open_registry(session).tables.get_table(table_id).scope_id
+        space_id: UUID = open_registry(session).scopes.get_scope(scope_id).space_id
         prompts: list[str] = []
 
         def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -398,13 +398,13 @@ def _database(tmp_path: Path) -> CatalogDatabase:
 
 
 def _table(session: Session) -> UUID:
-    service: RegistryService = RegistryService(session)
-    space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
-    scope_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
-    source_id: UUID = service.create_data_source(
+    service: OpenRegistry = open_registry(session)
+    space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
+    scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
+    source_id: UUID = service.sources.create_data_source(
         DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
     ).id
-    return service.create_table(
+    return service.tables.create_table(
         scope_id,
         CatalogTableCreate(
             data_source_id=source_id,
@@ -421,8 +421,8 @@ def _table(session: Session) -> UUID:
 def _column(session: Session) -> tuple[UUID, UUID]:
     table_id: UUID = _table(session)
     column_id: UUID = (
-        RegistryService(session)
-        .create_column(table_id, ColumnCreate(name="customer_id", ordinal_position=0))
+        open_registry(session)
+        .tables.create_column(table_id, ColumnCreate(name="customer_id", ordinal_position=0))
         .id
     )
     return table_id, column_id

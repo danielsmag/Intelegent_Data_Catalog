@@ -88,7 +88,7 @@ from intelegent_data_catalog.registry.schemas import (
     SourceRef,
     SpaceCreate,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from tests.registry_factory import OpenRegistry, open_registry
 
 
 def test_default_access_mode_is_profile_only() -> None:
@@ -635,25 +635,28 @@ def test_session_factory_loads_postgres_graph_and_lineage(tmp_path: Path) -> Non
     database: CatalogDatabase = _database(tmp_path)
     session: Session = database.session()
     try:
-        service: RegistryService = RegistryService(session)
+        service: OpenRegistry = open_registry(session)
         annotations: CatalogAnnotations = CatalogAnnotations(session)
-        space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
-        ordering_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        customer_scope_id: UUID = service.create_scope(space_id, ScopeCreate(name="Customer")).id
-        source_id: UUID = service.create_data_source(
+        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
+        ordering_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
+        customer_scope_id: UUID = service.scopes.create_scope(
+            space_id,
+            ScopeCreate(name="Customer"),
+        ).id
+        source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
         orders_id: UUID = _table(service, ordering_id, source_id, "orders")
         customers_id: UUID = _table(service, customer_scope_id, source_id, "customers")
-        order_key: UUID = service.create_column(
+        order_key: UUID = service.tables.create_column(
             orders_id,
             ColumnCreate(name="id", data_type="bigint", ordinal_position=0, is_primary_key=True),
         ).id
-        order_customer: UUID = service.create_column(
+        order_customer: UUID = service.tables.create_column(
             orders_id,
             ColumnCreate(name="customer_id", data_type="bigint", ordinal_position=1),
         ).id
-        customer_key: UUID = service.create_column(
+        customer_key: UUID = service.tables.create_column(
             customers_id,
             ColumnCreate(
                 name="id",
@@ -663,7 +666,7 @@ def test_session_factory_loads_postgres_graph_and_lineage(tmp_path: Path) -> Non
                 is_unique=True,
             ),
         ).id
-        service.create_relationship(
+        service.relationships.create_relationship(
             RelationshipCreate(
                 source_table_id=orders_id,
                 target_table_id=customers_id,
@@ -1074,12 +1077,12 @@ def _database(tmp_path: Path) -> CatalogDatabase:
 
 
 def _table(
-    service: RegistryService,
+    service: OpenRegistry,
     scope_id: UUID,
     data_source_id: UUID,
     name: str,
 ) -> UUID:
-    return service.create_table(
+    return service.tables.create_table(
         scope_id,
         CatalogTableCreate(
             data_source_id=data_source_id,

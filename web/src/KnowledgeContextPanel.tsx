@@ -37,7 +37,7 @@ export function KnowledgeContextPanel(props: { context: KnowledgeContext }): Rea
         {context.columns.map((column: KnowledgeColumn) => (
           <li key={column.id}>
             <strong>{column.name}</strong>
-            <span className="comment">
+            <span className="type">
               {column.data_type ?? column.discovered_data_type ?? "Unknown type"}
             </span>
             <KeyMarks column={column} />

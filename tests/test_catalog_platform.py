@@ -25,15 +25,16 @@ from intelegent_data_catalog.registry.annotations import CatalogAnnotations, Tag
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingCreate,
     CatalogTableRead,
+    ColumnRead,
     DataSourceCreate,
     EngineConnectionCreate,
     EngineRef,
     RelationshipCreate,
+    RelationshipRead,
     ScopeCreate,
     SourceBindingCreate,
     SpaceCreate,
 )
-from intelegent_data_catalog.registry.service import RegistryService
 from intelegent_data_catalog.sources.discovery import (
     DiscoveryBatch,
     DiscoveryRequest,
@@ -41,6 +42,7 @@ from intelegent_data_catalog.sources.discovery import (
     SourceTableRecord,
 )
 from intelegent_data_catalog.sources.sync import MetadataSyncService
+from tests.registry_factory import OpenRegistry, open_registry
 
 
 class _FakeSource:
@@ -62,7 +64,7 @@ def test_sync_is_idempotent_and_keeps_user_text(tmp_path: Path) -> None:
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
-    service: RegistryService = RegistryService(session)
+    service: OpenRegistry = open_registry(session)
     try:
         binding_id: UUID
         source_id: UUID
@@ -81,17 +83,17 @@ def test_sync_is_idempotent_and_keeps_user_text(tmp_path: Path) -> None:
         orders: CatalogTableRead = next(table for table in tables if table.name == "orders")
         from intelegent_data_catalog.registry.schemas import CatalogTableUpdate
 
-        service.update_table(orders.id, CatalogTableUpdate(description="User orders"))
+        service.tables.update_table(orders.id, CatalogTableUpdate(description="User orders"))
         sync.run(binding_id)
-        kept: CatalogTableRead = service.get_table(orders.id)
+        kept: CatalogTableRead = service.tables.get_table(orders.id)
         assert kept.description == "User orders"
         assert kept.source_key == "lakehouse.sales.orders"
-        other: UUID = service.create_data_source(
+        other: UUID = service.sources.create_data_source(
             DataSourceCreate(name="App", type=DataSourceType.POSTGRES)
         ).id
         from intelegent_data_catalog.registry.schemas import CatalogTableCreate, SourceRef
 
-        service.create_table(
+        service.tables.create_table(
             kept.scope_id,
             CatalogTableCreate(
                 data_source_id=other,
@@ -114,7 +116,7 @@ def test_partial_scan_does_not_mark_tables_missing(tmp_path: Path) -> None:
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
-    service: RegistryService = RegistryService(session)
+    service: OpenRegistry = open_registry(session)
     try:
         binding_id: UUID
         binding_id, _source_id = _binding(service)
@@ -144,7 +146,7 @@ def test_removed_column_disables_relationship_and_unknown_fk_keeps_manual(tmp_pa
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
-    service: RegistryService = RegistryService(session)
+    service: OpenRegistry = open_registry(session)
     try:
         binding_id: UUID
         binding_id, _source_id = _binding(service)
@@ -155,13 +157,15 @@ def test_removed_column_disables_relationship_and_unknown_fk_keeps_manual(tmp_pa
         tables: list[CatalogTableRead] = _tables(service)
         orders: CatalogTableRead = next(table for table in tables if table.name == "orders")
         customers: CatalogTableRead = next(table for table in tables if table.name == "customers")
-        order_column = next(
-            column for column in service.list_columns(orders.id) if column.name == "customer_id"
+        order_columns: list[ColumnRead] = service.tables.list_columns(orders.id)
+        order_column: ColumnRead = next(
+            column for column in order_columns if column.name == "customer_id"
         )
+        customer_columns: list[ColumnRead] = service.tables.list_columns(customers.id)
         customer_column = next(
-            column for column in service.list_columns(customers.id) if column.name == "customer_id"
+            column for column in customer_columns if column.name == "customer_id"
         )
-        relationship = service.create_relationship(
+        relationship = service.relationships.create_relationship(
             RelationshipCreate(
                 source_table_id=orders.id,
                 target_table_id=customers.id,
@@ -178,13 +182,15 @@ def test_removed_column_disables_relationship_and_unknown_fk_keeps_manual(tmp_pa
             relationship_capability=CapabilitySupport.UNKNOWN,
         )
         MetadataSyncService(session, _FakeSource(unknown)).run(binding_id)
-        assert service.get_relationship(relationship.id).status is RelationshipStatus.UNVERIFIED
+        stored: RelationshipRead = service.relationships.get_relationship(relationship.id)
+        assert stored.status is RelationshipStatus.UNVERIFIED
         MetadataSyncService(
             session,
             _FakeSource(_batch("lakehouse", ["orders", "customers"], columns=["order_id"])),
         ).run(binding_id)
-        assert service.get_relationship(relationship.id).status is RelationshipStatus.DISABLED
-        names: list[str] = [column.name for column in service.list_columns(orders.id)]
+        disabled: RelationshipRead = service.relationships.get_relationship(relationship.id)
+        assert disabled.status is RelationshipStatus.DISABLED
+        names: list[str] = [column.name for column in service.tables.list_columns(orders.id)]
         assert "customer_id" in names
     finally:
         session.close()
@@ -196,7 +202,7 @@ def test_spark_preview_uses_the_selected_query_binding(tmp_path: Path) -> None:
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
-    service: RegistryService = RegistryService(session)
+    service: OpenRegistry = open_registry(session)
     try:
         binding_id: UUID
         source_id: UUID
@@ -205,24 +211,24 @@ def test_spark_preview_uses_the_selected_query_binding(tmp_path: Path) -> None:
         orders: CatalogTableRead = next(
             table for table in _tables(service) if table.name == "orders"
         )
-        missing = spark_preview(service.list_asset_bindings(orders.id), 100)
+        missing = spark_preview(service.bindings.list_asset_bindings(orders.id), 100)
         assert missing.available is False
         assert missing.message == NOT_CONFIGURED
-        spark_id: UUID = service.create_engine_connection(
+        spark_id: UUID = service.engines.create_engine_connection(
             EngineConnectionCreate(
                 name="Spark",
                 engine_type=EngineType.SPARK_SQL,
                 endpoint="http://spark:8091",
             )
         ).id
-        query_binding: UUID = service.create_source_binding(
+        query_binding: UUID = service.bindings.create_source_binding(
             SourceBindingCreate(
                 data_source_id=source_id,
                 engine_connection_id=spark_id,
                 binding_key="catalog",
             )
         ).id
-        service.create_asset_binding(
+        service.bindings.create_asset_binding(
             orders.id,
             AssetBindingCreate(
                 source_engine_binding_id=query_binding,
@@ -232,7 +238,7 @@ def test_spark_preview_uses_the_selected_query_binding(tmp_path: Path) -> None:
                 is_selected=True,
             ),
         )
-        preview = spark_preview(service.list_asset_bindings(orders.id), 100)
+        preview = spark_preview(service.bindings.list_asset_bindings(orders.id), 100)
         assert preview.sql == "SELECT * FROM catalog.sales.orders LIMIT 100"
         assert preview.engine_ref_key == "catalog.sales.orders"
         assert "lakehouse" not in (preview.sql or "")
@@ -246,7 +252,7 @@ def test_graph_keeps_catalog_ids_and_unresolved_lineage(tmp_path: Path) -> None:
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
-    service: RegistryService = RegistryService(session)
+    service: OpenRegistry = open_registry(session)
     try:
         binding_id: UUID
         binding_id, _source_id = _binding(service)
@@ -279,7 +285,7 @@ def test_search_finds_columns_and_tags(tmp_path: Path) -> None:
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
-    service: RegistryService = RegistryService(session)
+    service: OpenRegistry = open_registry(session)
     annotations: CatalogAnnotations = CatalogAnnotations(session)
     try:
         binding_id: UUID
@@ -323,20 +329,20 @@ def _session(tmp_path: Path) -> tuple[CatalogDatabase, Session]:
     return database, database.session()
 
 
-def _binding(service: RegistryService) -> tuple[UUID, UUID]:
-    space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
-    scope_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
-    source_id: UUID = service.create_data_source(
+def _binding(service: OpenRegistry) -> tuple[UUID, UUID]:
+    space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
+    scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
+    source_id: UUID = service.sources.create_data_source(
         DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
     ).id
-    engine_id: UUID = service.create_engine_connection(
+    engine_id: UUID = service.engines.create_engine_connection(
         EngineConnectionCreate(
             name="Trino",
             engine_type=EngineType.TRINO,
             endpoint="http://trino:8080",
         )
     ).id
-    binding_id: UUID = service.create_source_binding(
+    binding_id: UUID = service.bindings.create_source_binding(
         SourceBindingCreate(
             data_source_id=source_id,
             engine_connection_id=engine_id,
@@ -380,7 +386,7 @@ def _batch(
     )
 
 
-def _tables(service: RegistryService) -> list[CatalogTableRead]:
-    space_id: UUID = service.list_spaces()[0].id
-    scope_id: UUID = service.list_scopes(space_id)[0].id
-    return service.list_tables(scope_id)
+def _tables(service: OpenRegistry) -> list[CatalogTableRead]:
+    space_id: UUID = service.spaces.list_spaces()[0].id
+    scope_id: UUID = service.scopes.list_scopes(space_id)[0].id
+    return service.tables.list_tables(scope_id)

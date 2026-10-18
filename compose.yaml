@@ -45,6 +45,15 @@ x-catalog-environment: &catalog-environment
   CATALOG_OBJECT_STORE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-polaris_pass}
   CATALOG_OBJECT_STORE__BUCKET: ${WORKSPACE_BUCKET:-workspace}
   CATALOG_OBJECT_STORE__REGION: ${AWS_REGION:-us-west-2}
+  CATALOG_NOTEBOOK__ENABLED: "true"
+  CATALOG_NOTEBOOK__GATEWAY_URL: http://notebook-kernel:8888
+  CATALOG_NOTEBOOK__GATEWAY_TOKEN: ${NOTEBOOK_GATEWAY_TOKEN:-dev-notebook-token}
+  CATALOG_NOTEBOOK__TICKET_SECRET: ${NOTEBOOK_TICKET_SECRET:-dev-notebook-ticket}
+  CATALOG_NOTEBOOK__SEED_POSTGRES__ENABLED: "true"
+  CATALOG_NOTEBOOK__SEED_POSTGRES__HOST: postgres
+  CATALOG_NOTEBOOK__SEED_POSTGRES__DATABASE: ${SOURCE_DB_NAME:-sales}
+  CATALOG_CREDENTIALS__SOURCE_DB__USER: sales_reader
+  CATALOG_CREDENTIALS__SOURCE_DB__PASSWORD: ${SOURCE_DB_READER_PASSWORD:-sales_reader}
 
 services:
   neo4j:
@@ -130,6 +139,7 @@ services:
       SOURCE_DB_USER: ${SOURCE_DB_USER:-sales}
       SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:-sales}
       SOURCE_DB_NAME: ${SOURCE_DB_NAME:-sales}
+      SOURCE_DB_READER_PASSWORD: ${SOURCE_DB_READER_PASSWORD:-sales_reader}
       MARQUEZ_DB_USER: marquez
       MARQUEZ_DB_PASSWORD: marquez
       MARQUEZ_DB_NAME: marquez
@@ -258,6 +268,8 @@ services:
       SOURCE_DB_USER: ${SOURCE_DB_USER:-sales}
       SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:-sales}
       SOURCE_DB_NAME: ${SOURCE_DB_NAME:-sales}
+      SOURCE_DB_READER_USER: ${SOURCE_DB_READER_USER:-sales_reader}
+      SOURCE_DB_READER_PASSWORD: ${SOURCE_DB_READER_PASSWORD:-sales_reader}
     volumes:
       - ./.local/polaris:/bootstrap:ro
       - ./docker/trino/start.sh:/opt/trino/start.sh:ro
@@ -365,6 +377,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_started
+      notebook-kernel:
+        condition: service_healthy
     ports:
       - "${CATALOG_API_PORT:-8090}:8090"
     environment: *catalog-environment
@@ -563,6 +577,40 @@ services:
       timeout: 5s
       retries: 36
       start_period: 180s
+
+  notebook-kernel:
+    build:
+      context: .
+      dockerfile: docker/notebook-kernel/Dockerfile
+    image: intelegent-data-catalog-notebook-kernel:local
+    container_name: intelegent-data-catalog-notebook-kernel
+    init: true
+    restart: unless-stopped
+    mem_limit: 3g
+    cpus: 2
+    depends_on:
+      polaris-setup:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      trino:
+        condition: service_healthy
+    environment:
+      POLARIS_URI: http://polaris:8181/api/catalog
+      POLARIS_TOKEN_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
+      NOTEBOOK_GATEWAY_TOKEN: ${NOTEBOOK_GATEWAY_TOKEN:-dev-notebook-token}
+    volumes:
+      - ./.local/polaris:/bootstrap:ro
+      - ./docker/spark/spark-catalog-conf.sh:/opt/spark/spark-catalog-conf.sh:ro
+      - spark_ivy:/tmp/ivy
+    healthcheck:
+      test: ["CMD", "/opt/venv/bin/python", "/opt/kernel/healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
 
 volumes:
   neo4j_data:

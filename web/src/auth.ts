@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react"
 import { UserManager, type User } from "oidc-client-ts"
+import { syncFocusedTabUrl } from "./editorLayout"
 
 export type AuthStatus = "disabled" | "loading" | "anonymous" | "signed-in"
 
@@ -19,6 +20,8 @@ let snapshot: AuthState = {
 }
 let manager: UserManager | null = null
 let loginStarted: boolean = false
+let callbackStarted: boolean = false
+let renewInFlight: Promise<boolean> | null = null
 
 function emit(): void {
   for (const listener of listeners) {
@@ -44,6 +47,18 @@ function userManager(): UserManager {
     response_type: "code",
     scope: "openid profile email",
     automaticSilentRenew: false,
+  })
+  manager.events.addUserLoaded((next: User) => {
+    applyUser(next)
+  })
+  manager.events.addUserUnloaded(() => {
+    applyUser(null)
+  })
+  manager.events.addAccessTokenExpiring(() => {
+    void renewSession()
+  })
+  manager.events.addAccessTokenExpired(() => {
+    void renewSession()
   })
   return manager
 }
@@ -99,19 +114,67 @@ export function useAuthState(): AuthState {
   return useSyncExternalStore(subscribeAuth, getAuthState, getAuthState)
 }
 
+export async function renewSession(): Promise<boolean> {
+  if (!authEnabled() || window.location.pathname === "/callback") {
+    return false
+  }
+  if (renewInFlight !== null) {
+    return renewInFlight
+  }
+  const pending: Promise<boolean> = refreshWithToken()
+    .catch(() => false)
+    .finally(() => {
+      renewInFlight = null
+    })
+  renewInFlight = pending
+  return pending
+}
+
+async function refreshWithToken(): Promise<boolean> {
+  const stored: User | null = user ?? (await userManager().getUser())
+  if (!hasRefreshToken(stored)) {
+    return false
+  }
+  const next: User | null = await userManager().signinSilent()
+  if (next === null) {
+    return false
+  }
+  applyUser(next)
+  return true
+}
+
 export async function ensureSignedIn(): Promise<void> {
   if (!authEnabled()) {
     applyUser(null)
     return
   }
   if (window.location.pathname === "/callback") {
-    const signedIn: User = await userManager().signinRedirectCallback()
-    applyUser(signedIn)
-    window.history.replaceState(null, "", "/")
+    if (callbackStarted) {
+      return
+    }
+    callbackStarted = true
+    try {
+      const signedIn: User = await userManager().signinRedirectCallback()
+      applyUser(signedIn)
+      syncFocusedTabUrl()
+    } catch (err: unknown) {
+      callbackStarted = false
+      throw err
+    }
     return
   }
   const existing: User | null = await userManager().getUser()
+  if (existing !== null && existing.expired === true && hasRefreshToken(existing)) {
+    const renewed: boolean = await renewSession()
+    if (renewed) {
+      return
+    }
+  }
   applyUser(existing)
+}
+
+function hasRefreshToken(account: User | null): boolean {
+  return account !== null && typeof account.refresh_token === "string" && account.refresh_token !== ""
 }
 
 export async function startLogin(): Promise<void> {

@@ -496,6 +496,44 @@ class ObservabilitySettings(BaseModel):
         return self
 
 
+class CredentialEntry(BaseModel):
+    """Username and password for one ``credential_ref``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user: str = ""
+    password: SecretStr = Field(default=SecretStr(""))
+
+
+class SeedPostgresSettings(BaseModel):
+    """JDBC catalog used when the registry has no Postgres binding with this name."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    name: str = Field(default="appdb", min_length=1)
+    host: str = Field(default="postgres", min_length=1)
+    port: int = Field(default=5432, ge=1, le=65535)
+    database: str = Field(default="sales", min_length=1)
+    credential_ref: str = Field(default="source_db", min_length=1)
+
+
+class NotebookSettings(BaseModel):
+    """Kernel gateway the API proxies for workspace notebooks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    gateway_url: str = Field(default="http://127.0.0.1:8888", min_length=1)
+    gateway_token: SecretStr = Field(default=SecretStr(""))
+    ticket_secret: SecretStr = Field(default=SecretStr("dev-notebook-ticket"))
+    ticket_ttl_seconds: int = Field(default=60, ge=1)
+    max_output_bytes: int = Field(default=1_000_000, ge=1)
+    execute_timeout_seconds: float = Field(default=300.0, gt=0)
+    kernel_name: str = Field(default="pyspark", min_length=1)
+    seed_postgres: SeedPostgresSettings = Field(default_factory=SeedPostgresSettings)
+
+
 class AppSettings(BaseSettings):
     """Settings from settings.toml, overridden by CATALOG_ environment variables."""
 
@@ -523,6 +561,8 @@ class AppSettings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     object_store: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
+    notebook: NotebookSettings = Field(default_factory=NotebookSettings)
+    credentials: dict[str, CredentialEntry] = Field(default_factory=dict)
 
     @classmethod
     def settings_customise_sources(

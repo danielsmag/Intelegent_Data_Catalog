@@ -87,7 +87,7 @@ from intelegent_data_catalog.registry.schemas import (
     SpaceCreate,
     SpaceRead,
 )
-from intelegent_data_catalog.registry.service import RegistryService
+from tests.registry_factory import OpenRegistry, open_registry
 
 
 def test_airflow_agent_retries_an_unknown_table() -> None:
@@ -401,8 +401,8 @@ def test_runner_calls_the_model_once_per_instance(tmp_path: Path) -> None:
         _dag(repo, same, "same_a")
         _dag(repo, same, "same_b")
         other_scope: UUID = (
-            RegistryService(session)
-            .create_scope(
+            open_registry(session)
+            .scopes.create_scope(
                 space_id,
                 ScopeCreate(name="Billing"),
             )
@@ -601,9 +601,9 @@ def test_read_fills_a_snapshot_missing_the_airflow_summary(tmp_path: Path) -> No
         space_id: UUID
         scope_id, _table_id, space_id = _scope_table(session)
         del _table_id
-        service: RegistryService = RegistryService(session)
-        scope: ScopeRead = service.get_scope(scope_id)
-        space: SpaceRead = service.get_space(space_id)
+        service: OpenRegistry = open_registry(session)
+        scope: ScopeRead = service.scopes.get_scope(scope_id)
+        space: SpaceRead = service.spaces.get_space(space_id)
         repo: AirflowRepository = AirflowRepository(session)
         instance_id: UUID = _instance(repo, "Iceberg", "http://airflow.test")
         repo.commit()
@@ -758,13 +758,13 @@ def _run(
 
 
 def _scope_table(session: Session) -> tuple[UUID, UUID, UUID]:
-    service: RegistryService = RegistryService(session)
-    space_id: UUID = service.create_space(SpaceCreate(name="Commerce")).id
-    scope_id: UUID = service.create_scope(space_id, ScopeCreate(name="Ordering")).id
-    source_id: UUID = service.create_data_source(
+    service: OpenRegistry = open_registry(session)
+    space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
+    scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
+    source_id: UUID = service.sources.create_data_source(
         DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST),
     ).id
-    table_id: UUID = service.create_table(
+    table_id: UUID = service.tables.create_table(
         scope_id,
         CatalogTableCreate(
             data_source_id=source_id,

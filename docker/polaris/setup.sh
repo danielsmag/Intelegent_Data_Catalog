@@ -242,6 +242,92 @@ tmp_file=$(mktemp)
 mv "$tmp_file" /bootstrap/client.env
 chmod 644 /bootstrap/client.env
 
+NOTEBOOK_PRINCIPAL="notebook_reader"
+NOTEBOOK_ROLE="notebook_reader_role"
+NOTEBOOK_CATALOG_ROLE="notebook_catalog_role"
+nb_client_id=""
+nb_client_secret=""
+
+echo "ensuring principal ${NOTEBOOK_PRINCIPAL}"
+code=$(call GET "/api/management/v1/principals/${NOTEBOOK_PRINCIPAL}")
+if [ "$code" = "404" ]; then
+  payload=$(jq -n --arg name "$NOTEBOOK_PRINCIPAL" '{principal: {name: $name, properties: {}}}')
+  code=$(call POST "/api/management/v1/principals" "$payload")
+  require_status "$code" 200 201
+  nb_client_id=$(jq -er '.credentials.clientId' "$BODY_FILE")
+  nb_client_secret=$(jq -er '.credentials.clientSecret' "$BODY_FILE")
+elif [ "$code" = "200" ]; then
+  existing_id=$(jq -er '.clientId' "$BODY_FILE")
+  saved_id=""
+  if [ -f /bootstrap/notebook.env ]; then
+    saved_id=$(read_env_value POLARIS_CLIENT_ID /bootstrap/notebook.env)
+  fi
+  if [ -n "$saved_id" ] && [ "$saved_id" = "$existing_id" ]; then
+    nb_client_id=$existing_id
+    nb_client_secret=$(read_env_value POLARIS_CLIENT_SECRET /bootstrap/notebook.env)
+    echo "notebook principal exists; reusing saved credentials"
+  else
+    echo "notebook principal exists without saved credentials; recreating"
+    code=$(call DELETE "/api/management/v1/principals/${NOTEBOOK_PRINCIPAL}")
+    require_status "$code" 200 202 204
+    payload=$(jq -n --arg name "$NOTEBOOK_PRINCIPAL" '{principal: {name: $name, properties: {}}}')
+    code=$(call POST "/api/management/v1/principals" "$payload")
+    require_status "$code" 200 201
+    nb_client_id=$(jq -er '.credentials.clientId' "$BODY_FILE")
+    nb_client_secret=$(jq -er '.credentials.clientSecret' "$BODY_FILE")
+  fi
+else
+  require_status "$code" 200
+fi
+
+if [ -z "${nb_client_secret}" ]; then
+  echo "notebook principal secret is empty" >&2
+  exit 1
+fi
+
+echo "ensuring principal role ${NOTEBOOK_ROLE}"
+payload=$(jq -n --arg name "$NOTEBOOK_ROLE" '{principalRole: {name: $name, properties: {}}}')
+code=$(call POST "/api/management/v1/principal-roles" "$payload")
+require_status "$code" 200 201 409
+
+echo "ensuring catalog role ${NOTEBOOK_CATALOG_ROLE}"
+payload=$(jq -n --arg name "$NOTEBOOK_CATALOG_ROLE" '{catalogRole: {name: $name, properties: {}}}')
+code=$(call POST "/api/management/v1/catalogs/${catalog_path}/catalog-roles" "$payload")
+require_status "$code" 200 201 409
+
+echo "assigning notebook principal role"
+payload=$(jq -n --arg name "$NOTEBOOK_ROLE" '{principalRole: {name: $name}}')
+code=$(call PUT "/api/management/v1/principals/${NOTEBOOK_PRINCIPAL}/principal-roles" "$payload")
+require_status "$code" 200 201 204 409
+
+echo "assigning notebook catalog role"
+payload=$(jq -n --arg name "$NOTEBOOK_CATALOG_ROLE" '{catalogRole: {name: $name}}')
+code=$(call PUT "/api/management/v1/principal-roles/${NOTEBOOK_ROLE}/catalog-roles/${catalog_path}" "$payload")
+require_status "$code" 200 201 204 409
+
+echo "granting notebook read privileges"
+for privilege in TABLE_READ_DATA TABLE_READ_PROPERTIES TABLE_LIST NAMESPACE_LIST NAMESPACE_READ_PROPERTIES; do
+  payload=$(jq -n --arg privilege "$privilege" '{type: "catalog", privilege: $privilege}')
+  code=$(call PUT "/api/management/v1/catalogs/${catalog_path}/catalog-roles/${NOTEBOOK_CATALOG_ROLE}/grants" "$payload")
+  if [ "$code" = "400" ] || [ "$code" = "422" ]; then
+    echo "privilege ${privilege} was not granted (${code})" >&2
+    cat "$BODY_FILE" >&2 || true
+  else
+    require_status "$code" 200 201 204 409
+  fi
+done
+
+tmp_file=$(mktemp)
+{
+  printf 'POLARIS_CLIENT_ID=%s\n' "$nb_client_id"
+  printf 'POLARIS_CLIENT_SECRET=%s\n' "$nb_client_secret"
+  printf 'POLARIS_CATALOG_NAME=%s\n' "$POLARIS_CATALOG_NAME"
+  printf 'POLARIS_REALM=%s\n' "$POLARIS_REALM"
+} >"$tmp_file"
+mv "$tmp_file" /bootstrap/notebook.env
+chmod 644 /bootstrap/notebook.env
+
 echo "catalog ${POLARIS_CATALOG_NAME} ready"
 echo "spark principal client id ${client_id}"
-echo "credentials written to .local/polaris/client.env"
+echo "notebook principal client id ${nb_client_id}"
+echo "credentials written to .local/polaris/client.env and notebook.env"

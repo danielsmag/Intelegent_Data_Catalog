@@ -19,6 +19,8 @@ from intelegent_data_catalog.exceptions import (
     GraphUnavailableError,
     LlmError,
     LlmUnavailableError,
+    NotebookDisabledError,
+    NotebookGatewayError,
     PayloadTooLargeError,
     PersistenceUnavailableError,
     PolarisError,
@@ -51,8 +53,10 @@ _STATUS_BY_ERROR: dict[type[CatalogError], int] = {
     TrinoUnavailableError: 502,
     AirflowAuthError: 502,
     AirflowUnavailableError: 502,
+    NotebookGatewayError: 502,
     GraphUnavailableError: 503,
     PersistenceUnavailableError: 503,
+    NotebookDisabledError: 501,
 }
 
 
