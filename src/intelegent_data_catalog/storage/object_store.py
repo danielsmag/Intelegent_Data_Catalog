@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime
 from typing import Protocol, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from intelegent_data_catalog.core.settings import ObjectStoreSettings
 from intelegent_data_catalog.exceptions import EntityNotFoundError
@@ -210,6 +210,30 @@ def _one_object(raw: object) -> StoredObject | None:
         etag=etag,
         size_bytes=size_bytes,
         last_modified=last_modified,
+    )
+
+
+def definition_store_settings(
+    base: ObjectStoreSettings,
+    *,
+    endpoint: str,
+    access_key: str,
+    secret_key: SecretStr,
+    region: str,
+    bucket: str,
+) -> ObjectStoreSettings:
+    """Definition store. Blank fields fall back to the workspace object store."""
+    chosen_secret: SecretStr = secret_key
+    if secret_key.get_secret_value().strip() == "":
+        chosen_secret = base.secret_key
+    return base.model_copy(
+        update={
+            "endpoint": endpoint.strip() or base.endpoint,
+            "access_key": access_key.strip() or base.access_key,
+            "secret_key": chosen_secret,
+            "region": region.strip() or base.region,
+            "bucket": bucket.strip() or base.bucket,
+        },
     )
 
 

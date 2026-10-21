@@ -20,6 +20,7 @@ from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.logger import configure_logging
 from intelegent_data_catalog.core.settings import (
     AppSettings,
+    AssetDefinitionsSettings,
     ObjectStoreSettings,
     load_settings,
     resolve_project_root,
@@ -29,7 +30,11 @@ from intelegent_data_catalog.notebooks.gateway import KernelGatewayClient
 from intelegent_data_catalog.notebooks.tickets import KernelTickets
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.sources.trino.client import TrinoClient
-from intelegent_data_catalog.storage.object_store import ObjectStore, build_object_store
+from intelegent_data_catalog.storage.object_store import (
+    ObjectStore,
+    build_object_store,
+    definition_store_settings,
+)
 
 
 def open_http_client(settings: AppSettings) -> Iterator[httpx.Client]:
@@ -138,11 +143,16 @@ def build_kernel_gateway(settings: AppSettings) -> KernelGatewayClient:
 
 
 def build_asset_definition_store(settings: AppSettings) -> ObjectStore:
-    """Object store for asset definition files. An empty bucket uses the workspace bucket."""
-    chosen: str = settings.asset_definitions.bucket.strip()
-    store_settings: ObjectStoreSettings = settings.object_store
-    if chosen != "" and chosen != store_settings.bucket:
-        store_settings = store_settings.model_copy(update={"bucket": chosen})
+    """Object store for asset definition files. Blank fields use the workspace store."""
+    pages: AssetDefinitionsSettings = settings.asset_definitions
+    store_settings: ObjectStoreSettings = definition_store_settings(
+        settings.object_store,
+        endpoint=pages.endpoint,
+        access_key=pages.access_key,
+        secret_key=pages.secret_key,
+        region=pages.region,
+        bucket=pages.bucket,
+    )
     return build_object_store(store_settings)
 
 

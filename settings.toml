@@ -130,9 +130,14 @@ region = "us-west-2"
 max_upload_bytes = 52428800
 
 # Python files under spaces/, scopes/, and assets/. Beat polls only when enabled.
+# Host clients use localhost. Compose overrides the endpoint to http://minio:9000.
 [asset_definitions]
-enabled = false
-bucket = ""
+enabled = true
+endpoint = "http://127.0.0.1:9000"
+access_key = "polaris_root"
+secret_key = "polaris_pass"
+bucket = "workspace"
+region = "us-west-2"
 prefix = "asset-definitions/"
 spaces_folder = "spaces"
 scopes_folder = "scopes"

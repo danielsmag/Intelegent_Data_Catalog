@@ -469,7 +469,11 @@ class AssetDefinitionsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    endpoint: str = ""
+    access_key: str = ""
+    secret_key: SecretStr = Field(default=SecretStr(""))
     bucket: str = ""
+    region: str = ""
     prefix: str = "asset-definitions/"
     spaces_folder: str = Field(default="spaces", min_length=1)
     scopes_folder: str = Field(default="scopes", min_length=1)
