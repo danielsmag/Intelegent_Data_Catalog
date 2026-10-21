@@ -29,6 +29,7 @@ export type RouteIds = {
   spaceId: string | null
   scopeId: string | null
   tableId: string | null
+  assetId: string | null
   instanceId: string | null
   dagId: string | null
   source: string | null
@@ -121,6 +122,12 @@ export function titleFromPath(path: string): string {
   if (head === "sources") {
     return "Sources"
   }
+  if (head === "assets") {
+    return "Asset"
+  }
+  if (head === "workspace" && parts[1] === "assets") {
+    return "Assets"
+  }
   if (head === "workspace") {
     return "File"
   }
@@ -149,6 +156,7 @@ export function parseRouteIds(pathname: string): RouteIds {
     spaceId: null,
     scopeId: null,
     tableId: null,
+    assetId: null,
     instanceId: null,
     dagId: null,
     source: null,
@@ -166,6 +174,9 @@ export function parseRouteIds(pathname: string): RouteIds {
   }
   if (head === "registry" && second === "tables" && parts[2] !== undefined) {
     ids.tableId = decodeURIComponent(parts[2])
+  }
+  if (head === "assets" && second !== undefined) {
+    ids.assetId = decodeURIComponent(second)
   }
   if (head === "airflow" && second !== undefined) {
     ids.instanceId = decodeURIComponent(second)

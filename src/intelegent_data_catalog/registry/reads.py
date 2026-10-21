@@ -131,6 +131,7 @@ def table_read(row: CatalogTableRow) -> CatalogTableRead:
     """Map a catalog table row."""
     return CatalogTableRead(
         id=row.id,
+        asset_id=row.asset_id,
         scope_id=row.scope_id,
         data_source_id=row.data_source_id,
         name=row.name,

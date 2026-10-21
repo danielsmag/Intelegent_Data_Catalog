@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,7 @@ from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.models import (
     AssetEngineBindingRow,
+    AssetMembershipRow,
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
@@ -35,6 +36,11 @@ class RegistryRepository:
 
     def __init__(self, session: Session) -> None:
         self._session: Session = session
+
+    @property
+    def session(self) -> Session:
+        """Session this repository writes."""
+        return self._session
 
     def add_space(
         self,
@@ -168,11 +174,19 @@ class RegistryRepository:
         return self._session.scalar(statement)
 
     def count_tables_in_scope(self, scope_id: uuid.UUID) -> int:
-        """Count tables assigned to a scope."""
+        """Count tables assigned to a scope, including membership links."""
+        member_ids: Select[tuple[uuid.UUID]] = select(AssetMembershipRow.asset_id).where(
+            AssetMembershipRow.scope_id == scope_id,
+        )
         statement: Select[int] = (
             select(func.count())
             .select_from(CatalogTableRow)
-            .where(CatalogTableRow.scope_id == scope_id)
+            .where(
+                or_(
+                    CatalogTableRow.scope_id == scope_id,
+                    CatalogTableRow.asset_id.in_(member_ids),
+                ),
+            )
         )
         return self._count(statement)
 
@@ -240,10 +254,18 @@ class RegistryRepository:
         return self._add(row)
 
     def list_tables(self, scope_id: uuid.UUID) -> list[CatalogTableRow]:
-        """Return tables in one scope in name order."""
+        """Return tables in one scope in name order, including membership links."""
+        member_ids: Select[tuple[uuid.UUID]] = select(AssetMembershipRow.asset_id).where(
+            AssetMembershipRow.scope_id == scope_id,
+        )
         statement: Select[CatalogTableRow] = (
             select(CatalogTableRow)
-            .where(CatalogTableRow.scope_id == scope_id)
+            .where(
+                or_(
+                    CatalogTableRow.scope_id == scope_id,
+                    CatalogTableRow.asset_id.in_(member_ids),
+                ),
+            )
             .order_by(CatalogTableRow.name)
         )
         return list[CatalogTableRow](self._session.scalars(statement))

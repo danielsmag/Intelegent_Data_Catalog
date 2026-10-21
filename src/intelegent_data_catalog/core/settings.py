@@ -460,6 +460,42 @@ class AuthSettings(BaseModel):
         return self
 
 
+class AssetDefinitionsSettings(BaseModel):
+    """S3 prefix of Python files that declare spaces, scopes, and assets.
+
+    Beat polls the prefix only when ``enabled`` is true. Manual scans still run.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    bucket: str = ""
+    prefix: str = "asset-definitions/"
+    spaces_folder: str = Field(default="spaces", min_length=1)
+    scopes_folder: str = Field(default="scopes", min_length=1)
+    assets_folder: str = Field(default="assets", min_length=1)
+    poll_interval_seconds: float = Field(default=10.0, gt=0)
+    exec_timeout_seconds: float = Field(default=30.0, gt=0)
+    max_file_bytes: int = Field(default=1024 * 1024, ge=1)
+
+    @model_validator(mode="after")
+    def _normalize_prefix_and_folders(self) -> AssetDefinitionsSettings:
+        prefix: str = self.prefix.strip().strip("/")
+        self.prefix = f"{prefix}/" if prefix != "" else ""
+        folders: tuple[str, str, str] = (
+            self.spaces_folder,
+            self.scopes_folder,
+            self.assets_folder,
+        )
+        if len(set(folders)) != 3:
+            raise ValueError("spaces_folder, scopes_folder, and assets_folder must be distinct")
+        folder: str
+        for folder in folders:
+            if folder != folder.strip() or "/" in folder or folder in {"", ".", ".."}:
+                raise ValueError("definition folder must be a single path segment")
+        return self
+
+
 class ObjectStoreSettings(BaseModel):
     """S3-compatible store for workspace files. An empty endpoint uses memory."""
 
@@ -561,6 +597,7 @@ class AppSettings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     object_store: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
+    asset_definitions: AssetDefinitionsSettings = Field(default_factory=AssetDefinitionsSettings)
     notebook: NotebookSettings = Field(default_factory=NotebookSettings)
     credentials: dict[str, CredentialEntry] = Field(default_factory=dict)
 

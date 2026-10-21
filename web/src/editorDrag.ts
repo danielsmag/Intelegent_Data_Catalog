@@ -13,10 +13,25 @@ export type DropTarget =
   | { kind: "insert"; groupId: string; index: number; blankTabId: string | null }
   | { kind: "edge"; groupId: string; direction: SplitDirection }
   | { kind: "group"; groupId: string }
+  | { kind: "zone"; zoneId: string; accepts: "asset" }
 
 export type DragSource =
   | { kind: "tab"; fromGroupId: string; tabId: string }
   | { kind: "path"; path: string }
+  | { kind: "asset"; assetIds: string[]; path: string }
+
+type DropHandler = (assetIds: string[]) => void
+
+const dropZoneHandlers: Map<string, DropHandler> = new Map()
+
+export function registerDropZone(zoneId: string, handler: DropHandler): () => void {
+  dropZoneHandlers.set(zoneId, handler)
+  return () => {
+    if (dropZoneHandlers.get(zoneId) === handler) {
+      dropZoneHandlers.delete(zoneId)
+    }
+  }
+}
 
 export type EditorDrag = {
   source: DragSource
@@ -51,6 +66,15 @@ function targetAt(x: number, y: number): DropTarget | null {
   const hit: Element | null = document.elementFromPoint(x, y)
   if (hit === null) {
     return null
+  }
+  if (drag?.source.kind === "asset") {
+    const zone: Element | null = hit.closest("[data-drop-zone]")
+    if (zone instanceof HTMLElement) {
+      const zoneId: string | undefined = zone.dataset.dropZone
+      if (zoneId !== undefined && zoneId !== "") {
+        return { kind: "zone", zoneId, accepts: "asset" }
+      }
+    }
   }
   const edge: Element | null = hit.closest("[data-drop-edge]")
   if (edge instanceof HTMLElement) {
@@ -109,6 +133,17 @@ function swallowClick(): void {
 }
 
 function applyDrop(source: DragSource, target: DropTarget): void {
+  if (source.kind === "asset") {
+    if (target.kind === "zone") {
+      const handler: DropHandler | undefined = dropZoneHandlers.get(target.zoneId)
+      if (handler !== undefined) {
+        handler(source.assetIds)
+      }
+      return
+    }
+    applyPathDrop({ kind: "path", path: source.path }, target)
+    return
+  }
   if (source.kind === "tab") {
     if (target.kind === "insert") {
       moveTab(source.fromGroupId, source.tabId, target.groupId, target.index)
@@ -117,6 +152,13 @@ function applyDrop(source: DragSource, target: DropTarget): void {
     if (target.kind === "edge") {
       splitOffTab(source.fromGroupId, source.tabId, target.direction, target.groupId)
     }
+    return
+  }
+  applyPathDrop(source, target)
+}
+
+function applyPathDrop(source: { kind: "path"; path: string }, target: DropTarget): void {
+  if (target.kind === "zone") {
     return
   }
   if (target.kind === "insert" && target.blankTabId !== null) {
@@ -199,6 +241,22 @@ function watchDrag(event: { button: number; pointerId: number; clientX: number; 
 
 export function watchTabDrag(event: { button: number; pointerId: number; clientX: number; clientY: number }, source: { groupId: string; tabId: string; title: string }): void {
   watchDrag(event, { kind: "tab", fromGroupId: source.groupId, tabId: source.tabId }, source.title)
+}
+
+export function watchAssetDrag(
+  event: { button: number; pointerId: number; clientX: number; clientY: number },
+  source: { assetIds: string[]; title: string },
+): void {
+  const first: string | undefined = source.assetIds[0]
+  if (first === undefined) {
+    return
+  }
+  const extra: string = source.assetIds.length > 1 ? ` +${source.assetIds.length - 1}` : ""
+  watchDrag(
+    event,
+    { kind: "asset", assetIds: source.assetIds, path: `/assets/${first}` },
+    `${source.title}${extra}`,
+  )
 }
 
 export function watchPathDrag(event: { button: number; pointerId: number; clientX: number; clientY: number }, source: { path: string; title: string }): void {

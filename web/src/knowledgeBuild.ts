@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react"
 import { errorMessage } from "./api"
 import { showPageAlert, type PageAlertTone } from "./pageAlertStack"
+import { fetchAssetBuild, startAssetBuild, type AssetBuildJob } from "./assetsApi"
 import {
   fetchContextGeneration,
   fetchKnowledgeBuild,
@@ -246,6 +247,18 @@ export function onContextGenerationFinished(
   handler: FinishedHandler<ContextGenerationJob>,
 ): () => void {
   return contextGenerations.onFinished(handler)
+}
+
+const assetBuilds: BuildFollower<AssetBuildJob> = createFollower(
+  fetchAssetBuild,
+  (job: AssetBuildJob): string => outcome(job.asset_name, job.status, job.error),
+  (job: AssetBuildJob): string => `Build asset context for ${job.asset_name}`,
+)
+
+export async function requestAssetBuild(assetId: string): Promise<AssetBuildJob> {
+  const job: AssetBuildJob = await startAssetBuild(assetId)
+  assetBuilds.follow(job)
+  return job
 }
 
 export async function requestContextGeneration(

@@ -6,7 +6,7 @@ from celery import Celery
 from celery.signals import worker_init, worker_process_init
 
 from intelegent_data_catalog.core.settings import AppSettings, load_settings
-from intelegent_data_catalog.jobs.names import DISPATCH_DUE_SYNCS
+from intelegent_data_catalog.jobs.names import DISPATCH_DUE_SYNCS, SCAN_ASSET_DEFINITIONS
 
 _settings: AppSettings = load_settings()
 
@@ -28,6 +28,11 @@ app.conf.beat_schedule = {
         "schedule": timedelta(seconds=_settings.celery.dispatch_interval_seconds),
     },
 }
+if _settings.asset_definitions.enabled:
+    app.conf.beat_schedule["scan-asset-definitions"] = {
+        "task": SCAN_ASSET_DEFINITIONS,
+        "schedule": timedelta(seconds=_settings.asset_definitions.poll_interval_seconds),
+    }
 
 
 def _start_worker_container(**_kwargs: object) -> None:

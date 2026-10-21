@@ -6,6 +6,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository
+from intelegent_data_catalog.assets.base import Asset, AssetAgentProvider
+from intelegent_data_catalog.assets.kinds.table_asset import TableAssetAgentAdapter
+from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
+from intelegent_data_catalog.assets.registry import AssetRegistry
+from intelegent_data_catalog.assets.store import AssetKnowledgeStore
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings, ModelId, ReasoningEffort
@@ -91,6 +96,8 @@ from intelegent_data_catalog.knowledge.models import (
     pipelines_missing_instance_summary,
 )
 from intelegent_data_catalog.knowledge.operations.airflow_operation import AirflowInstanceAgent
+from intelegent_data_catalog.knowledge.operations.dag_operation import AirflowDagAgent
+from intelegent_data_catalog.knowledge.operations.file_operation import FileAgent
 from intelegent_data_catalog.knowledge.operations.scope_operation import ScopeAgent
 from intelegent_data_catalog.knowledge.operations.space_operation import SpaceAgent
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
@@ -104,7 +111,12 @@ from intelegent_data_catalog.knowledge.store import (
 )
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.factory import CatalogModels, thinking_level
-from intelegent_data_catalog.persistence.models import AirflowInstanceRow, ColumnRow
+from intelegent_data_catalog.persistence.models import (
+    AirflowDagRow,
+    AirflowInstanceRow,
+    AssetRow,
+    ColumnRow,
+)
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
 from intelegent_data_catalog.registry.repository import RegistryRepository
@@ -117,6 +129,7 @@ from intelegent_data_catalog.sources.enrichment import PostgresForeignKeyEnriche
 from intelegent_data_catalog.sources.sync import MetadataSyncService
 from intelegent_data_catalog.sources.trino.client import TrinoClient
 from intelegent_data_catalog.sources.trino.discovery import TrinoCatalogSource
+from intelegent_data_catalog.storage.object_store import ObjectStore
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 
@@ -124,7 +137,13 @@ logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
 class RequestPlatform:
     """Services for one catalog request."""
 
-    def __init__(self, session: Session, settings: AppSettings, query: QueryService) -> None:
+    def __init__(
+        self,
+        session: Session,
+        settings: AppSettings,
+        query: QueryService,
+        objects: ObjectStore | None = None,
+    ) -> None:
         self._session: Session = session
         self._settings: AppSettings = settings
         repo: RegistryRepository = RegistryRepository(session)
@@ -168,6 +187,7 @@ class RequestPlatform:
         )
         self.query: QueryService = query
         self.sample_limit: int = settings.query.sample_limit
+        self._objects: ObjectStore | None = objects
 
     def build_knowledge_context(
         self,
@@ -343,7 +363,41 @@ class RequestPlatform:
                 if row is None:
                     raise EntityNotFoundError("column", str(subject_id))
                 self._table_factory(None, models).create(row.table_id).describe_column(subject_id)
+            case "asset":
+                AssetRegistry(
+                    self._session,
+                    _PlatformAgents(
+                        self,
+                        AssetContextOptions(model=options.model, effort=options.effort),
+                    ),
+                ).load(subject_id).describe()
         logger.info("generate context done kind=%s subject_id=%s", options.kind, subject_id)
+
+    def build_asset_context(
+        self,
+        asset_id: UUID,
+        options: AssetContextOptions,
+    ) -> AssetAnalysisContext:
+        """Build one asset context with the agent for its kind and store the snapshot."""
+        logger.info("build asset context start asset_id=%s", asset_id)
+        asset: Asset = AssetRegistry(self._session, _PlatformAgents(self, options)).load(asset_id)
+        built: AssetAnalysisContext = asset.build_context(options)
+        logger.info("build asset context done asset_id=%s kind=%s", asset_id, built.kind.value)
+        return built
+
+    def read_asset_context(self, asset_id: UUID) -> AssetAnalysisContext:
+        """Return the last context saved for this asset."""
+        saved: AssetAnalysisContext | None = AssetKnowledgeStore(self._session).get(asset_id)
+        if saved is None:
+            raise EntityNotFoundError("knowledge context", str(asset_id))
+        return saved
+
+    def asset_name(self, asset_id: UUID) -> str:
+        """Return the asset name, or raise when the id is unknown."""
+        row: AssetRow | None = self._session.get(AssetRow, asset_id)
+        if row is None:
+            raise EntityNotFoundError("asset", str(asset_id))
+        return row.name
 
     def _models(self, key: ModelId, effort: ReasoningEffort) -> CatalogModels:
         """Build the agents for one saved model and effort. Later calls reuse them."""
@@ -503,6 +557,50 @@ class RequestPlatform:
             max_tasks=self._settings.context.airflow_max_tasks,
         )
         return runner
+
+
+class _PlatformAgents(AssetAgentProvider):
+    """Opens the agent for the model and effort stored on one build."""
+
+    def __init__(self, platform: RequestPlatform, options: AssetContextOptions) -> None:
+        self._platform: RequestPlatform = platform
+        self._options: AssetContextOptions = options
+
+    def for_table(self, table_id: UUID) -> TableAssetAgentAdapter:
+        models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
+        column_graph: ColumnSubgraphBuilder | None = None
+        if self._platform._neo4j is not None and models.column is not None:
+            column_graph = ColumnSubgraphBuilder(
+                candidates=ScopeColumnCatalog(RegistryRepository(self._platform._session)),
+                proposer=models.column,
+                writer=Neo4jColumnSubgraph(self._platform._neo4j),
+            )
+        agent: TableAgent = self._platform._table_factory(column_graph, models).create(table_id)
+        return TableAssetAgentAdapter(table_id, agent, self._platform._session)
+
+    def for_dag(self, dag_row_id: UUID, instance_id: UUID) -> AirflowDagAgent:
+        models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
+        repository: AirflowRepository = AirflowRepository(self._platform._session)
+        builder: AirflowGraphBuilder = AirflowGraphBuilder(models.airflow_proposer, repository)
+        factory: AirflowAgentFactory = self._platform._airflow_factory(builder, models)
+        instance_agent: AirflowInstanceAgent = factory.create(instance_id)
+        dag: AirflowDagRow | None = self._platform._session.get(AirflowDagRow, dag_row_id)
+        if dag is None:
+            raise EntityNotFoundError("airflow dag", str(dag_row_id))
+        return AirflowDagAgent(dag, instance_agent, models.dag_describer)
+
+    def for_file(self, asset_id: UUID, notebook: bool) -> FileAgent:
+        del notebook
+        models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
+        asset: AssetRow | None = self._platform._session.get(AssetRow, asset_id)
+        if asset is None:
+            raise EntityNotFoundError("asset", str(asset_id))
+        return FileAgent(
+            asset,
+            self._platform._session,
+            self._platform._objects,
+            models.file_describer,
+        )
 
 
 class _TableSubgraph:

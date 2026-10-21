@@ -29,12 +29,18 @@ from intelegent_data_catalog.persistence.enums import (
     AirflowInstanceStatus,
     AirflowMappingDirection,
     AirflowMappingOrigin,
+    AssetKind,
+    AssetRefreshMode,
+    AssetStatus,
     BindingRole,
     BindingState,
     CatalogJobKind,
     CatalogJobStatus,
     ContextOrigin,
     DataSourceType,
+    DefinitionFileStatus,
+    DefinitionItemStatus,
+    DefinitionKind,
     EngineConnectionStatus,
     EngineType,
     MetadataOrigin,
@@ -121,6 +127,139 @@ class ScopeRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AssetRow(Base):
+    """One catalog object. Detail lives on the matching source row."""
+
+    __tablename__: str = "assets"
+    __table_args__: tuple[CheckConstraint | Index, ...] = (
+        _enum_check("kind", tuple(item.value for item in AssetKind), "ck_assets_kind"),
+        _enum_check("status", tuple(item.value for item in AssetStatus), "ck_assets_status"),
+        _enum_check(
+            "context_origin",
+            tuple(item.value for item in ContextOrigin),
+            "ck_assets_context_origin",
+        ),
+        Index(
+            "uq_assets_owner_slug",
+            "workspace_id",
+            "owner_user_id",
+            "slug",
+            unique=True,
+            sqlite_where=text("owner_user_id IS NOT NULL"),
+            postgresql_where=text("owner_user_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_assets_shared_slug",
+            "workspace_id",
+            "slug",
+            unique=True,
+            sqlite_where=text("owner_user_id IS NULL"),
+            postgresql_where=text("owner_user_id IS NULL"),
+        ),
+        Index("ix_assets_kind", "kind"),
+        Index("ix_assets_workspace_owner", "workspace_id", "owner_user_id"),
+        Index("ix_assets_updated_at", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    properties: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+_ONE_MEMBERSHIP: str = (
+    "(space_id IS NOT NULL AND scope_id IS NULL) OR (space_id IS NULL AND scope_id IS NOT NULL)"
+)
+
+
+class AssetMembershipRow(Base):
+    """Asset attached to one space or one scope. One asset may have many rows."""
+
+    __tablename__: str = "asset_memberships"
+    __table_args__: tuple[CheckConstraint | Index, ...] = (
+        CheckConstraint(_ONE_MEMBERSHIP, name="ck_asset_memberships_one_target"),
+        Index("ix_asset_memberships_asset", "asset_id"),
+        Index("ix_asset_memberships_scope", "scope_id"),
+        Index("ix_asset_memberships_space", "space_id"),
+        Index(
+            "uq_asset_memberships_scope",
+            "asset_id",
+            "scope_id",
+            unique=True,
+            sqlite_where=text("scope_id IS NOT NULL"),
+            postgresql_where=text("scope_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_asset_memberships_space",
+            "asset_id",
+            "space_id",
+            unique=True,
+            sqlite_where=text("space_id IS NOT NULL"),
+            postgresql_where=text("space_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    space_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("spaces.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("scopes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AssetKnowledgeContextRow(Base):
+    """Latest built analysis context for one non-table asset."""
+
+    __tablename__: str = "asset_knowledge_contexts"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("asset_id", name="uq_asset_knowledge_contexts_asset"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class DataSourceRow(Base):
     """Registered source. Creating a row does not provision a connector."""
 
@@ -172,13 +311,25 @@ class CatalogTableRow(Base):
             sqlite_where=text("source_native_id IS NOT NULL"),
             postgresql_where=text("source_native_id IS NOT NULL"),
         ),
+        Index(
+            "uq_catalog_tables_asset",
+            "asset_id",
+            unique=True,
+            sqlite_where=text("asset_id IS NOT NULL"),
+            postgresql_where=text("asset_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    scope_id: Mapped[uuid.UUID] = mapped_column(
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("scopes.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     data_source_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -662,11 +813,23 @@ class AirflowDagRow(Base):
     """Synced DAG snapshot. Live runs are read from Airflow and not stored here."""
 
     __tablename__: str = "airflow_dags"
-    __table_args__: tuple[UniqueConstraint, ...] = (
+    __table_args__: tuple[UniqueConstraint | Index, ...] = (
         UniqueConstraint("instance_id", "dag_id", name="uq_airflow_dags_instance_dag"),
+        Index(
+            "uq_airflow_dags_asset",
+            "asset_id",
+            unique=True,
+            sqlite_where=text("asset_id IS NOT NULL"),
+            postgresql_where=text("asset_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     instance_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("airflow_instances.id", ondelete="CASCADE"),
@@ -951,20 +1114,26 @@ class CatalogJobRow(Base):
 
 
 _ONE_CONFIGURATION: str = (
-    "(space_id IS NOT NULL AND scope_id IS NULL AND catalog_table_id IS NULL) OR "
-    "(space_id IS NULL AND scope_id IS NOT NULL AND catalog_table_id IS NULL) OR "
-    "(space_id IS NULL AND scope_id IS NULL AND catalog_table_id IS NOT NULL)"
+    "(space_id IS NOT NULL AND scope_id IS NULL AND catalog_table_id IS NULL "
+    "AND asset_id IS NULL) OR "
+    "(space_id IS NULL AND scope_id IS NOT NULL AND catalog_table_id IS NULL "
+    "AND asset_id IS NULL) OR "
+    "(space_id IS NULL AND scope_id IS NULL AND catalog_table_id IS NOT NULL "
+    "AND asset_id IS NULL) OR "
+    "(space_id IS NULL AND scope_id IS NULL AND catalog_table_id IS NULL "
+    "AND asset_id IS NOT NULL)"
 )
 
 
 class EntityConfigurationRow(Base):
-    """Saved refresh interval and build options for one space, scope, or table."""
+    """Saved refresh interval and build options for one space, scope, table, or asset."""
 
     __tablename__: str = "entity_configurations"
     __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
         UniqueConstraint("space_id", name="uq_entity_configurations_space"),
         UniqueConstraint("scope_id", name="uq_entity_configurations_scope"),
         UniqueConstraint("catalog_table_id", name="uq_entity_configurations_table"),
+        UniqueConstraint("asset_id", name="uq_entity_configurations_asset"),
         CheckConstraint(_ONE_CONFIGURATION, name="ck_entity_configurations_one_subject"),
         CheckConstraint("interval_seconds >= 1", name="ck_entity_configurations_interval"),
         CheckConstraint(
@@ -974,6 +1143,11 @@ class EntityConfigurationRow(Base):
         CheckConstraint(
             "effort IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh')",
             name="ck_entity_configurations_effort",
+        ),
+        _enum_check(
+            "refresh_mode",
+            tuple(item.value for item in AssetRefreshMode),
+            "ck_entity_configurations_refresh_mode",
         ),
     )
 
@@ -992,6 +1166,17 @@ class EntityConfigurationRow(Base):
         Uuid(as_uuid=True),
         ForeignKey("catalog_tables.id", ondelete="CASCADE"),
         nullable=True,
+    )
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    refresh_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=AssetRefreshMode.INTERVAL.value,
+        server_default=text("'INTERVAL'"),
     )
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -1103,9 +1288,21 @@ class WorkspaceNodeRow(Base):
         ),
         CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_workspace_nodes_size"),
         Index("ix_workspace_nodes_parent", "workspace_id", "parent_id"),
+        Index(
+            "uq_workspace_nodes_asset",
+            "asset_id",
+            unique=True,
+            sqlite_where=text("asset_id IS NOT NULL"),
+            postgresql_where=text("asset_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
@@ -1132,5 +1329,92 @@ class WorkspaceNodeRow(Base):
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AssetDefinitionFileRow(Base):
+    """One Python file scanned from the asset-definition prefix."""
+
+    __tablename__: str = "asset_definition_files"
+    __table_args__: tuple[CheckConstraint | Index | UniqueConstraint, ...] = (
+        UniqueConstraint("key", name="uq_asset_definition_files_key"),
+        _enum_check(
+            "folder_kind",
+            tuple(item.value for item in DefinitionKind),
+            "ck_asset_definition_files_kind",
+        ),
+        _enum_check(
+            "status",
+            tuple(item.value for item in DefinitionFileStatus),
+            "ck_asset_definition_files_status",
+        ),
+        CheckConstraint("size_bytes >= 0", name="ck_asset_definition_files_size"),
+        CheckConstraint("item_count >= 0", name="ck_asset_definition_files_items"),
+        Index("ix_asset_definition_files_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    key: Mapped[str] = mapped_column(String(1024), nullable=False)
+    folder_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    etag: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AssetDefinitionItemRow(Base):
+    """One space, scope, or asset declared by a definition file."""
+
+    __tablename__: str = "asset_definition_items"
+    __table_args__: tuple[CheckConstraint | Index | UniqueConstraint, ...] = (
+        UniqueConstraint("file_id", "item_key", name="uq_asset_definition_items_file_key"),
+        _enum_check(
+            "kind",
+            tuple(item.value for item in DefinitionKind),
+            "ck_asset_definition_items_kind",
+        ),
+        _enum_check(
+            "status",
+            tuple(item.value for item in DefinitionItemStatus),
+            "ck_asset_definition_items_status",
+        ),
+        Index("ix_asset_definition_items_status", "status"),
+        Index("ix_asset_definition_items_asset", "asset_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("asset_definition_files.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    item_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    declaration: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    space_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("spaces.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("scopes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

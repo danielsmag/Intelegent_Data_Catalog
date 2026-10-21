@@ -31,7 +31,8 @@ export type ScopeRecord = {
 
 export type CatalogTableRecord = {
   id: string
-  scope_id: string
+  asset_id?: string | null
+  scope_id: string | null
   data_source_id: string
   name: string
   display_name: string | null
@@ -674,9 +675,9 @@ export async function fetchLatestSpaceBuild(
   return (await response.json()) as SpaceBuildJob
 }
 
-export type ContextSubjectKind = "space" | "scope" | "table" | "table_columns" | "column" | "airflow"
+export type ContextSubjectKind = "space" | "scope" | "table" | "table_columns" | "column" | "airflow" | "asset"
 
-export type ContextEntityKind = "space" | "scope" | "table" | "column" | "airflow"
+export type ContextEntityKind = "space" | "scope" | "table" | "column" | "airflow" | "asset"
 
 export type ContextGenerationJob = {
   id: string
@@ -750,6 +751,8 @@ function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
       return `/api/v1/columns/${id}/context/generate`
     case "airflow":
       return `/api/v1/airflow/instances/${id}/context/generate`
+    case "asset":
+      return `/api/v1/assets/${id}/context/generate`
   }
 }
 
@@ -767,6 +770,8 @@ function contextLatestPath(kind: ContextSubjectKind, id: string): string {
       return `/api/v1/columns/${id}/context/generation`
     case "airflow":
       return `/api/v1/airflow/instances/${id}/context/generation`
+    case "asset":
+      return `/api/v1/assets/${id}/context/generation`
   }
 }
 
@@ -782,6 +787,8 @@ function contextPatchPath(kind: ContextEntityKind, id: string): string {
       return `/api/v1/columns/${id}`
     case "airflow":
       return `/api/v1/airflow/instances/${id}`
+    case "asset":
+      return `/api/v1/assets/${id}`
   }
 }
 
@@ -791,6 +798,7 @@ export async function fetchDataSources(signal: AbortSignal): Promise<DataSourceR
 
 export type HierarchyTable = {
   id: string
+  assetId: string | null
   name: string
   status: string
 }
@@ -835,6 +843,7 @@ export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpac
             name: scope.name,
             tables: tables.map((table: CatalogTableRecord) => ({
               id: table.id,
+              assetId: table.asset_id ?? null,
               name: table.name,
               status: table.status,
             })),
@@ -900,7 +909,7 @@ export async function searchCatalog(query: string, signal: AbortSignal): Promise
   return body.hits
 }
 
-export type BuildTraceKind = "table" | "scope" | "space" | "airflow"
+export type BuildTraceKind = "table" | "scope" | "space" | "airflow" | "asset"
 
 export type BuildTraceEvent = {
   id: string

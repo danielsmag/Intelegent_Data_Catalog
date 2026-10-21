@@ -14,10 +14,35 @@ class DataSourceType(StrEnum):
 
 
 class TableKind(StrEnum):
-    """Catalog asset kind. Formats such as ICEBERG stay on ``table_format``."""
+    """Catalog table kind. Formats such as ICEBERG stay on ``table_format``."""
 
     TABLE = "TABLE"
     VIEW = "VIEW"
+
+
+class AssetKind(StrEnum):
+    """Kind of catalog asset. Detail rows live in the matching source table."""
+
+    TABLE = "TABLE"
+    AIRFLOW_DAG = "AIRFLOW_DAG"
+    NOTEBOOK = "NOTEBOOK"
+    FILE = "FILE"
+
+
+class AssetStatus(StrEnum):
+    """Observation state of an asset. Missing means the source no longer lists it."""
+
+    ACTIVE = "ACTIVE"
+    MISSING = "MISSING"
+    DEPRECATED = "DEPRECATED"
+
+
+class AssetRefreshMode(StrEnum):
+    """When an asset rebuilds its context."""
+
+    INTERVAL = "INTERVAL"
+    ON_CHANGE = "ON_CHANGE"
+    MANUAL = "MANUAL"
 
 
 class TableStatus(StrEnum):
@@ -145,6 +170,7 @@ class CatalogJobKind(StrEnum):
     SPACE = "space"
     CONTEXT = "context"
     AIRFLOW = "airflow"
+    ASSET = "asset"
 
 
 class CatalogJobStatus(StrEnum):
@@ -161,6 +187,7 @@ class RefreshSubjectKind(StrEnum):
     SPACE = "space"
     SCOPE = "scope"
     TABLE = "table"
+    ASSET = "asset"
 
 
 class SpaceIsolationMode(StrEnum):
@@ -182,6 +209,31 @@ class WorkspaceNodeKind(StrEnum):
 
     FOLDER = "FOLDER"
     FILE = "FILE"
+
+
+class DefinitionKind(StrEnum):
+    """Object a definition file is allowed to declare."""
+
+    SPACE = "SPACE"
+    SCOPE = "SCOPE"
+    ASSET = "ASSET"
+
+
+class DefinitionFileStatus(StrEnum):
+    """Result of the last scan of one definition file."""
+
+    OK = "OK"
+    ERROR = "ERROR"
+    REMOVED = "REMOVED"
+
+
+class DefinitionItemStatus(StrEnum):
+    """Whether one declared object was applied to the catalog."""
+
+    APPLIED = "APPLIED"
+    UNRESOLVED = "UNRESOLVED"
+    ERROR = "ERROR"
+    REMOVED = "REMOVED"
 
 
 class CapabilitySupport(StrEnum):

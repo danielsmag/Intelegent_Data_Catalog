@@ -25,6 +25,7 @@ from intelegent_data_catalog.persistence.enums import SyncRunStatus
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import (
     CatalogJobRow,
+    CatalogTableRow,
     EntityConfigurationRow,
     MetadataSyncRunRow,
     SyncScheduleRow,
@@ -343,10 +344,11 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
         _finish_job(database, publisher.job_ids[1])
         _age_job(database, publisher.job_ids[1])
         stored: CatalogJobRow = _job(database, publisher.job_ids[0])
-        assert stored.kind == "knowledge"
-        assert stored.subject_id == UUID(table_id)
-        assert stored.options["include_lineage"] is False
-        assert stored.options["include_data_profile"] is False
+        assert stored.kind == "asset"
+        flags: object = stored.options["flags"]
+        assert isinstance(flags, dict)
+        assert flags["include_lineage"] is False
+        assert flags["include_data_profile"] is False
         assert stored.options["model"] == "gpt-4.1"
         assert stored.options["effort"] == "xhigh"
         disabled: httpx.Response = _send(
@@ -385,11 +387,18 @@ def _claim_context(database: CatalogDatabase, jobs: CatalogJobs) -> int:
 def _age_table_configuration(database: CatalogDatabase, table_id: UUID) -> None:
     session: Session = database.session()
     try:
-        row: EntityConfigurationRow | None = session.scalar(
-            select(EntityConfigurationRow).where(
-                EntityConfigurationRow.catalog_table_id == table_id,
-            ),
-        )
+        table: CatalogTableRow | None = session.get(CatalogTableRow, table_id)
+        asset_id: UUID | None = None if table is None else table.asset_id
+        if asset_id is None:
+            row: EntityConfigurationRow | None = session.scalar(
+                select(EntityConfigurationRow).where(
+                    EntityConfigurationRow.catalog_table_id == table_id,
+                ),
+            )
+        else:
+            row = session.scalar(
+                select(EntityConfigurationRow).where(EntityConfigurationRow.asset_id == asset_id),
+            )
         assert row is not None
         row.created_at = utc_now() - timedelta(hours=1)
         session.commit()

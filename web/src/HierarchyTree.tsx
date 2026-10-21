@@ -598,7 +598,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                             {scope.tables.length > 0 ? (
                               <TreeGroup
                                 groupKey={`tables:${scope.id}`}
-                                label="Iceberg tables"
+                                label="Assets"
                                 depth="depth-section"
                                 figure="figure-table"
                                 icon={<IcebergIcon />}
@@ -610,7 +610,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                   return (
                                     <WorkbenchLink
                                       key={table.id}
-                                      to={`/registry/tables/${table.id}`}
+                                      to={table.assetId !== null ? `/assets/${table.assetId}` : `/registry/tables/${table.id}`}
                                       className="tree-row depth-node figure-table"
                                       role="treeitem"
                                       aria-current={tableSelected ? "page" : undefined}

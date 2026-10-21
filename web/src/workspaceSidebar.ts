@@ -43,3 +43,46 @@ export function subscribeWorkspaceSidebar(listener: () => void): () => void {
 export function useWorkspaceSidebarOpen(): boolean {
   return useSyncExternalStore(subscribeWorkspaceSidebar, getWorkspaceSidebarOpen, () => true)
 }
+
+export type WorkspaceSidebarTab = "files" | "assets"
+
+const tabKey: string = "workspace-sidebar-tab"
+let tab: WorkspaceSidebarTab = readTab()
+const tabListeners: Set<() => void> = new Set()
+
+function readTab(): WorkspaceSidebarTab {
+  try {
+    return localStorage.getItem(tabKey) === "assets" ? "assets" : "files"
+  } catch {
+    return "files"
+  }
+}
+
+function emitTab(): void {
+  for (const listener of tabListeners) {
+    listener()
+  }
+}
+
+export function setWorkspaceSidebarTab(next: WorkspaceSidebarTab): void {
+  tab = next
+  try {
+    localStorage.setItem(tabKey, next)
+  } catch {
+    // Private mode can block storage.
+  }
+  emitTab()
+}
+
+export function useWorkspaceSidebarTab(): WorkspaceSidebarTab {
+  return useSyncExternalStore(
+    (listener: () => void) => {
+      tabListeners.add(listener)
+      return () => {
+        tabListeners.delete(listener)
+      }
+    },
+    () => tab,
+    () => "files",
+  )
+}

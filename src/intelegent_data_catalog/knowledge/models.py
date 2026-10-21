@@ -566,6 +566,17 @@ def omitted_pipeline_names(text: str, pipelines: list[PipelineInput]) -> list[st
     return missing
 
 
+class AssetSummary(BaseModel):
+    """A non-table asset attached to a scope or space."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    kind: str
+    name: str
+    summary: str | None = None
+
+
 class ScopeCatalogContext(BaseModel):
     """Everything known about one scope before the scope agent proposes links."""
 
@@ -579,6 +590,7 @@ class ScopeCatalogContext(BaseModel):
     tables_without_context: list[UUID]
     previous: PreviousScopeFindings | None
     pipelines: list[PipelineInput] = Field(default_factory=list)
+    assets: list[AssetSummary] = Field(default_factory=list)
 
 
 class ScopeContextOptions(BaseModel):
@@ -677,6 +689,7 @@ class SpaceCatalogContext(BaseModel):
     scopes_without_context: list[UUID]
     previous: PreviousSpaceFindings | None
     pipelines: list[PipelineInput] = Field(default_factory=list)
+    assets: list[AssetSummary] = Field(default_factory=list)
 
 
 class SpaceContextOptions(BaseModel):
@@ -853,7 +866,15 @@ class AirflowAnalysisContext(BaseModel):
     previous_links_kept: int = Field(default=0, ge=0)
 
 
-ContextSubjectKind = Literal["space", "scope", "table", "table_columns", "column", "airflow"]
+ContextSubjectKind = Literal[
+    "space",
+    "scope",
+    "table",
+    "table_columns",
+    "column",
+    "airflow",
+    "asset",
+]
 
 _CONTEXT_LIMIT: int = 1200
 

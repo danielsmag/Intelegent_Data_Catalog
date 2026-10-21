@@ -4,6 +4,7 @@ import logging
 from typing import Literal, Protocol
 from uuid import UUID
 
+from intelegent_data_catalog.assets.repository import AssetRepository
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import EntityNotFoundError, GraphUnavailableError
 from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView
@@ -16,6 +17,7 @@ from intelegent_data_catalog.knowledge.context.catalog import (
 )
 from intelegent_data_catalog.knowledge.context.pipelines import AttachedPipelineSource
 from intelegent_data_catalog.knowledge.models import (
+    AssetSummary,
     ColumnMetadata,
     ColumnRelation,
     ColumnRelationKind,
@@ -241,7 +243,32 @@ class PostgresScopeCatalogContextProvider:
             tables_without_context=missing,
             previous=_previous_findings(self._previous, scope_id, selected.include_previous),
             pipelines=pipelines,
+            assets=_asset_summaries(self._repository.session, scope_id=scope_id, space_id=None),
         )
+
+
+def _asset_summaries(
+    session: object,
+    *,
+    scope_id: UUID | None,
+    space_id: UUID | None,
+) -> list[AssetSummary]:
+    from sqlalchemy.orm import Session as OrmSession
+
+    if not isinstance(session, OrmSession):
+        return []
+    repository: AssetRepository = AssetRepository(session)
+    rows: list[tuple[UUID, str, str, str | None]]
+    if scope_id is not None:
+        rows = repository.summaries_for_scope(scope_id)
+    elif space_id is not None:
+        rows = repository.summaries_for_space(space_id)
+    else:
+        return []
+    return [
+        AssetSummary(id=item[0], kind=item[1], name=item[2], summary=item[3])
+        for item in rows
+    ]
 
 
 def column_relations_from_graph(view: GraphView) -> list[ColumnRelation]:

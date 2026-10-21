@@ -21,7 +21,7 @@ _LIST_KEY: str = "catalog:build-trace"
 _SEQ_KEY: str = "catalog:build-trace:seq"
 _LIMIT: int = 400
 
-TraceKind = Literal["table", "scope", "space", "airflow"]
+TraceKind = Literal["table", "scope", "space", "airflow", "asset"]
 TraceStep = Literal[
     "started",
     "ask",
@@ -240,6 +240,8 @@ def trace_kind_for_job(kind: str, options: dict[str, object]) -> TraceKind:
         return "space"
     if kind == "airflow":
         return "airflow"
+    if kind == "asset":
+        return "asset"
     if kind == "context":
         raw: object = options.get("kind")
         if raw == "space":
@@ -248,6 +250,8 @@ def trace_kind_for_job(kind: str, options: dict[str, object]) -> TraceKind:
             return "scope"
         if raw == "airflow":
             return "airflow"
+        if raw == "asset":
+            return "asset"
         return "table"
     return "table"
 

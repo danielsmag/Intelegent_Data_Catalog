@@ -41,8 +41,11 @@ import {
 import { AppSideDock } from "./ConfigRail"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
 import { HierarchyTree } from "./HierarchyTree"
+import { AssetPage } from "./AssetPage"
+import { AssetsTablePage } from "./AssetsTablePage"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
-import { WorkspaceTree } from "./WorkspaceTree"
+import { WorkspaceSidebar } from "./WorkspaceSidebarPanel"
+import { fetchCatalogTable } from "./registryApi"
 import { WorkspacesPage } from "./WorkspacesPage"
 import { ResizeHandle } from "./ResizeHandle"
 import { QueryPage } from "./QueryPage"
@@ -135,7 +138,7 @@ function SecondSidebar(): ReactElement {
   }
   if (view === "workspace") {
     return (
-      <WorkspaceTree
+      <WorkspaceSidebar
         collapsed={!workspaceOpen}
         onToggleCollapsed={() => {
           setWorkspaceSidebarOpen(!workspaceOpen)
@@ -356,6 +359,38 @@ function createGroupNavigator(groupId: string): Navigator {
   }
 }
 
+function TableAssetRedirect(): ReactElement {
+  const tableId: string = useParams().tableId ?? ""
+  const [assetId, setAssetId] = useState<string | null>(null)
+  const [missing, setMissing] = useState<boolean>(false)
+  useEffect(() => {
+    const controller: AbortController = new AbortController()
+    void fetchCatalogTable(tableId, controller.signal)
+      .then((table) => {
+        if (table.asset_id !== undefined && table.asset_id !== null && table.asset_id !== "") {
+          setAssetId(table.asset_id)
+        } else {
+          setMissing(true)
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setMissing(true)
+        }
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [tableId])
+  if (assetId !== null) {
+    return <Navigate to={`/assets/${assetId}`} replace />
+  }
+  if (missing) {
+    return <RegistryTablePage />
+  }
+  return <p className="note">Opening asset...</p>
+}
+
 function WorkspaceFileRoute(): ReactElement {
   const nodeId: string = useParams().nodeId ?? ""
   return <WorkspaceFilePage nodeId={nodeId} />
@@ -375,8 +410,10 @@ function EditorRoutes(): ReactElement {
       <Route path="/workspaces" element={<WorkspacesPage />} />
       <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
       <Route path="/workspace/nodes/:nodeId" element={<WorkspaceFileRoute />} />
+      <Route path="/workspace/assets" element={<AssetsTablePage />} />
       <Route path="/scopes/:scopeId" element={<ScopePage />} />
-      <Route path="/registry/tables/:tableId" element={<RegistryTablePage />} />
+      <Route path="/assets/:assetId" element={<AssetPage />} />
+      <Route path="/registry/tables/:tableId" element={<TableAssetRedirect />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />
       <Route path="*" element={<MissingPage />} />
     </Routes>

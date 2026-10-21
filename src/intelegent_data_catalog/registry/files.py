@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.assets.sync import AssetSync
+from intelegent_data_catalog.assets.triggers import AssetChangeTrigger
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
@@ -14,7 +16,7 @@ from intelegent_data_catalog.exceptions import (
 )
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import WorkspaceNodeKind
-from intelegent_data_catalog.persistence.models import WorkspaceNodeRow
+from intelegent_data_catalog.persistence.models import AssetRow, WorkspaceNodeRow
 from intelegent_data_catalog.registry.schemas import (
     FolderCreate,
     NodeUpdate,
@@ -31,11 +33,18 @@ _USERS_ROOT: str = "Users"
 class WorkspaceFileService:
     """Folders and files under Shared and Users/<subject>."""
 
-    def __init__(self, session: Session, objects: ObjectStore, max_upload_bytes: int) -> None:
+    def __init__(
+        self,
+        session: Session,
+        objects: ObjectStore,
+        max_upload_bytes: int,
+        changes: AssetChangeTrigger | None = None,
+    ) -> None:
         self._session: Session = session
         self._store: WorkspaceStore = WorkspaceStore(session)
         self._objects: ObjectStore = objects
         self._max_upload_bytes: int = max_upload_bytes
+        self._changes: AssetChangeTrigger | None = changes
 
     def list_nodes(
         self,
@@ -164,7 +173,9 @@ class WorkspaceFileService:
         self._objects.put(node.object_key, payload, content_type)
         node.size_bytes = len(payload)
         node.updated_at = utc_now()
+        asset_id: UUID | None = self._touch_file(node)
         self._store.commit()
+        self._notify_change(asset_id)
         return self._read(node)
 
     def update_node(
@@ -201,6 +212,8 @@ class WorkspaceFileService:
         node.updated_at = utc_now()
         if node.kind == WorkspaceNodeKind.FOLDER.value:
             self._rewrite_descendants(node, old_path, new_path, parent.owner_user_id)
+        elif node.kind == WorkspaceNodeKind.FILE.value:
+            self._touch_file(node)
         self._store.commit()
         return self._read(node)
 
@@ -218,6 +231,9 @@ class WorkspaceFileService:
         for item in self._subtree(node):
             if item.object_key is not None:
                 keys.append(item.object_key)
+            sync: AssetSync | None = AssetSync.for_row(item)
+            if sync is not None:
+                sync.delete_file(item)
         self._store.delete(node)
         self._store.commit()
         key: str
@@ -260,8 +276,23 @@ class WorkspaceFileService:
         self._session.add(row)
         self._session.flush()
         self._objects.put(object_key, payload, content_type)
+        self._touch_file(row)
         self._store.commit()
         return self._read(row)
+
+    def _touch_file(self, row: WorkspaceNodeRow) -> UUID | None:
+        sync: AssetSync | None = AssetSync.for_row(row)
+        if sync is None:
+            return None
+        asset: AssetRow | None = sync.ensure_file(row)
+        if asset is None:
+            return None
+        return asset.id
+
+    def _notify_change(self, asset_id: UUID | None) -> None:
+        if asset_id is None or self._changes is None:
+            return
+        self._changes.changed(asset_id)
 
     def _ensure_roots(self, workspace_id: UUID, access: AccessContext) -> None:
         shared: WorkspaceNodeRow = self._ensure_folder(

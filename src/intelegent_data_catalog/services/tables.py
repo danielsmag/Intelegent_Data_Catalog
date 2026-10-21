@@ -3,6 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
+from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.exceptions import ConflictError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import TableStatus
@@ -75,6 +76,9 @@ class TableService:
             last_synced_at=None,
         )
         stored: CatalogTableRow = self._repo.add_table(row)
+        sync: AssetSync | None = AssetSync.for_row(stored)
+        if sync is not None:
+            sync.ensure_table(stored, scope_id)
         self._repo.commit()
         return table_read(stored)
 
@@ -122,6 +126,9 @@ class TableService:
             self._scope(scope_id)
             row.scope_id = scope_id
         row.updated_at = utc_now()
+        sync: AssetSync | None = AssetSync.for_row(row)
+        if sync is not None:
+            sync.ensure_table(row, row.scope_id, replace_scope="scope_id" in changes)
         self._repo.commit()
         return table_read(row)
 
@@ -132,6 +139,9 @@ class TableService:
             raise ConflictError("table is used by a relationship")
         self._repo.delete_asset_bindings_for_table(table_id)
         self._repo.delete_columns_for_table(table_id)
+        sync: AssetSync | None = AssetSync.for_row(row)
+        if sync is not None:
+            sync.delete_table(row)
         self._repo.delete(row)
         self._repo.commit()
 

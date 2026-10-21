@@ -10,11 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.selectable import Select
 
+from intelegent_data_catalog.assets.models import AssetContextOptions
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import CatalogError, ConflictError, ValidationAppError
 from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR, CancelSignal
 from intelegent_data_catalog.jobs.models import (
     AirflowBuildJobRead,
+    AssetBuildJobRead,
     CatalogJobCancelRead,
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
@@ -276,6 +278,30 @@ class CatalogJobs:
         """Return the newest space build."""
         return _space_read_optional(self._store.latest(CatalogJobKind.SPACE, subject_id, ""))
 
+    def start_asset(
+        self,
+        subject_id: UUID,
+        subject_name: str,
+        options: AssetContextOptions,
+    ) -> AssetBuildJobRead:
+        """Start an asset context build, or join the one already running."""
+        row: CatalogJobRow = self._start(
+            CatalogJobKind.ASSET,
+            subject_id,
+            subject_name,
+            "",
+            options,
+        )
+        return _asset_read(row)
+
+    def get_asset(self, job_id: UUID) -> AssetBuildJobRead | None:
+        """Return one asset build."""
+        return _asset_read_optional(self._typed(job_id, CatalogJobKind.ASSET))
+
+    def latest_asset(self, subject_id: UUID) -> AssetBuildJobRead | None:
+        """Return the newest asset build."""
+        return _asset_read_optional(self._store.latest(CatalogJobKind.ASSET, subject_id, ""))
+
     def start_airflow(
         self,
         subject_id: UUID,
@@ -431,7 +457,7 @@ def _job_status(value: str) -> KnowledgeBuildState:
 
 def _subject_kind(lane: str) -> ContextSubjectKind:
     match lane:
-        case "space" | "scope" | "table" | "table_columns" | "column" | "airflow":
+        case "space" | "scope" | "table" | "table_columns" | "column" | "airflow" | "asset":
             return lane
         case _:
             raise ValidationAppError(f"unknown context lane: {lane}")
@@ -483,6 +509,22 @@ def _space_read_optional(row: CatalogJobRow | None) -> SpaceBuildJobRead | None:
     if row is None:
         return None
     return _space_read(row)
+
+
+def _asset_read(row: CatalogJobRow) -> AssetBuildJobRead:
+    return AssetBuildJobRead(
+        id=row.id,
+        asset_id=row.subject_id,
+        asset_name=row.subject_name,
+        status=_job_status(row.status),
+        error=row.error,
+    )
+
+
+def _asset_read_optional(row: CatalogJobRow | None) -> AssetBuildJobRead | None:
+    if row is None:
+        return None
+    return _asset_read(row)
 
 
 def _airflow_read(row: CatalogJobRow) -> AirflowBuildJobRead:

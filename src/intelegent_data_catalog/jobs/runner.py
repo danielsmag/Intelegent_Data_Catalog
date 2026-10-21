@@ -8,12 +8,16 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
+from intelegent_data_catalog.assets.definitions.models import ScanResult
+from intelegent_data_catalog.assets.definitions.scanner import AssetDefinitionScanner
+from intelegent_data_catalog.assets.models import AssetContextOptions
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import CelerySettings
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR, CancelSignal, RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog import (
     CatalogAirflowBuild,
+    CatalogAssetBuild,
     CatalogContextGeneration,
     CatalogKnowledgeBuild,
     CatalogScopeBuild,
@@ -37,6 +41,7 @@ from intelegent_data_catalog.knowledge.models import (
     SpaceContextOptions,
     TableContextOptions,
 )
+from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import CatalogJobKind, CatalogJobStatus
 from intelegent_data_catalog.persistence.models import CatalogJobRow
@@ -49,6 +54,7 @@ _FAILURE_LOG: dict[str, str] = {
     CatalogJobKind.SPACE.value: "space context build failed",
     CatalogJobKind.CONTEXT.value: "context generation failed",
     CatalogJobKind.AIRFLOW.value: "airflow context build failed",
+    CatalogJobKind.ASSET.value: "asset context build failed",
 }
 _FAILURE_MESSAGE: dict[str, str] = {
     CatalogJobKind.KNOWLEDGE.value: "context build failed",
@@ -56,6 +62,7 @@ _FAILURE_MESSAGE: dict[str, str] = {
     CatalogJobKind.SPACE.value: "space context build failed",
     CatalogJobKind.CONTEXT.value: "context generation failed",
     CatalogJobKind.AIRFLOW.value: "airflow context build failed",
+    CatalogJobKind.ASSET.value: "asset context build failed",
 }
 
 
@@ -158,6 +165,26 @@ def execute_trino_sync(source_binding_id: UUID) -> None:
         session.close()
 
 
+def execute_asset_definition_scan() -> ScanResult:
+    """Scan the asset-definition prefix on a fresh session."""
+    container: AppContainer = job_container()
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    try:
+        scanner: AssetDefinitionScanner = AssetDefinitionScanner(
+            session,
+            container.asset_definition_store(),
+            container.settings().asset_definitions,
+            container.logger().getChild("asset_definitions"),
+        )
+        return scanner.scan(utc_now())
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def execute_airflow_sync(instance_id: UUID) -> None:
     """Run one Airflow snapshot sync on a fresh session."""
     container: AppContainer = job_container()
@@ -209,6 +236,11 @@ def _execute(
             CatalogAirflowBuild(container).run(
                 subject_id,
                 AirflowContextOptions.model_validate(options),
+            )
+        case CatalogJobKind.ASSET.value:
+            CatalogAssetBuild(container).run(
+                subject_id,
+                AssetContextOptions.model_validate(options),
             )
         case _:
             raise CatalogError(f"unknown catalog job kind: {kind}")

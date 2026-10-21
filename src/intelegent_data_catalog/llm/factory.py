@@ -15,6 +15,8 @@ from intelegent_data_catalog.llm.airflow_analysis import AirflowAnalysisAgent
 from intelegent_data_catalog.llm.airflow_context import AirflowContextAgent
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
+from intelegent_data_catalog.llm.dag_context import DagContextAgent
+from intelegent_data_catalog.llm.file_context import FileContextAgent
 from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
 from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
 from intelegent_data_catalog.llm.space_context import SpaceContextAgent
@@ -165,6 +167,22 @@ class CatalogModels:
             thinking=thinking,
         )
         self.airflow_describer: AirflowContextAgent = AirflowContextAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )
+        self.dag_describer: DagContextAgent = DagContextAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )
+        self.file_describer: FileContextAgent = FileContextAgent(
             build_model(settings),
             max_requests=settings.max_tool_steps,
             temperature=settings.temperature,

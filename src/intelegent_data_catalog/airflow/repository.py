@@ -11,13 +11,15 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
-from intelegent_data_catalog.persistence.enums import AirflowMappingOrigin
+from intelegent_data_catalog.persistence.enums import AirflowMappingOrigin, AssetStatus
 from intelegent_data_catalog.persistence.models import (
     AirflowAttachmentRow,
     AirflowDagRow,
     AirflowDagTableRow,
     AirflowInstanceRow,
     AirflowSyncRunRow,
+    AssetMembershipRow,
+    AssetRow,
     CatalogTableRow,
 )
 
@@ -90,6 +92,11 @@ class AirflowRepository:
 
     def __init__(self, session: Session) -> None:
         self._session: Session = session
+
+    @property
+    def session(self) -> Session:
+        """Session this repository writes."""
+        return self._session
 
     def add_instance(
         self,
@@ -218,6 +225,11 @@ class AirflowRepository:
         for row in self.list_dags(instance_id):
             if row.dag_id in keep:
                 continue
+            if row.asset_id is not None:
+                asset: AssetRow | None = self._session.get(AssetRow, row.asset_id)
+                if asset is not None:
+                    asset.status = AssetStatus.MISSING.value
+                    asset.updated_at = utc_now()
             self._session.delete(row)
             removed += 1
         if removed > 0:
@@ -496,6 +508,7 @@ class AirflowRepository:
                 direct[attachment.dag_row_id] = attachment.id
             elif attachment.airflow_instance_id is not None:
                 by_instance[attachment.airflow_instance_id] = attachment.id
+        self._merge_dag_memberships(scope_ids, space_ids, direct)
         dags: dict[uuid.UUID, AirflowDagRow] = self.dags_by_row_ids(set(direct))
         instance_id: uuid.UUID
         for instance_id in by_instance:
@@ -534,6 +547,35 @@ class AirflowRepository:
             )
         found.sort(key=lambda item: (item.instance.name, item.dag.dag_id))
         return found
+
+    def _merge_dag_memberships(
+        self,
+        scope_ids: set[uuid.UUID],
+        space_ids: set[uuid.UUID],
+        direct: dict[uuid.UUID, uuid.UUID],
+    ) -> None:
+        clauses: list[ColumnElement[bool]] = []
+        if len(scope_ids) > 0:
+            clauses.append(AssetMembershipRow.scope_id.in_(scope_ids))
+        if len(space_ids) > 0:
+            clauses.append(AssetMembershipRow.space_id.in_(space_ids))
+        if len(clauses) == 0:
+            return
+        statement = (
+            select(AssetMembershipRow, AirflowDagRow)
+            .join(AirflowDagRow, AirflowDagRow.asset_id == AssetMembershipRow.asset_id)
+            .where(or_(*clauses))
+        )
+        pair: tuple[AssetMembershipRow, AirflowDagRow]
+        for pair in self._session.execute(statement):
+            direct.setdefault(pair[1].id, pair[0].id)
+
+    def dag_by_asset(self, asset_id: uuid.UUID) -> AirflowDagRow | None:
+        """Return the DAG snapshot linked to an asset."""
+        statement: Select[tuple[AirflowDagRow]] = select(AirflowDagRow).where(
+            AirflowDagRow.asset_id == asset_id,
+        )
+        return self._session.scalar(statement)
 
     def get_dag_row(self, dag_row_id: uuid.UUID) -> AirflowDagRow | None:
         """Return one DAG snapshot by its row id."""

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
+from intelegent_data_catalog.assets.models import AssetContextOptions
 from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
@@ -113,6 +114,31 @@ class CatalogAirflowBuild:
             session.close()
 
 
+class CatalogAssetBuild:
+    """Adapter from the asset job queue to ``RequestPlatform``."""
+
+    def __init__(self, container: AppContainer) -> None:
+        self._container: AppContainer = container
+
+    def run(self, subject_id: UUID, options: AssetContextOptions) -> None:
+        """Build and save an asset context. The request session is already closed."""
+        database: CatalogDatabase = self._container.database()
+        session: Session = database.session()
+        try:
+            platform: RequestPlatform = RequestPlatform(
+                session,
+                self._container.settings(),
+                self._container.query_service(),
+                self._container.object_store(),
+            )
+            platform.build_asset_context(subject_id, options)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+
 class CatalogContextGeneration:
     """Adapter from the context queue to ``RequestPlatform``."""
 
@@ -128,6 +154,7 @@ class CatalogContextGeneration:
                 session,
                 self._container.settings(),
                 self._container.query_service(),
+                self._container.object_store(),
             )
             platform.generate_context(subject_id, options)
         except Exception:

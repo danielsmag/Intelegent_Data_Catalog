@@ -12,6 +12,9 @@ from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.api.visibility import SpaceResolver
+from intelegent_data_catalog.assets.definitions.service import AssetDefinitionService
+from intelegent_data_catalog.assets.service import AssetService
+from intelegent_data_catalog.assets.triggers import AssetChangeTrigger
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.auth.service import AccessService
@@ -209,7 +212,12 @@ def get_platform(
     session: Session = database.session()
     settings: AppSettings = container.settings()
     query: QueryService = container.query_service()
-    platform: RequestPlatform = RequestPlatform(session, settings, query)
+    platform: RequestPlatform = RequestPlatform(
+        session,
+        settings,
+        query,
+        container.object_store(),
+    )
     try:
         yield platform
     except SQLAlchemyError as err:
@@ -349,15 +357,21 @@ WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)
 
 
 def get_workspace_files(
+    request: Request,
     container: Annotated[AppContainer, Depends(get_container)],
 ) -> Iterator[WorkspaceFileService]:
     """Open one catalog session for workspace files."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
+    jobs: object = getattr(request.app.state, "catalog_jobs", None)
+    changes: AssetChangeTrigger | None = None
+    if isinstance(jobs, CatalogJobs):
+        changes = AssetChangeTrigger(session, jobs)
     service: WorkspaceFileService = WorkspaceFileService(
         session,
         container.object_store(),
         container.settings().object_store.max_upload_bytes,
+        changes,
     )
     try:
         yield service
@@ -372,6 +386,51 @@ def get_workspace_files(
 
 
 WorkspaceFilesDep = Annotated[WorkspaceFileService, Depends(get_workspace_files)]
+
+
+def get_asset_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+    access: Annotated[AccessContext, Depends(get_access)],
+) -> Iterator[AssetService]:
+    """Open one catalog session for asset reads and writes."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: AssetService = AssetService(session, access)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AssetServiceDep = Annotated[AssetService, Depends(get_asset_service)]
+
+
+def get_asset_definition_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[AssetDefinitionService]:
+    """Open one catalog session for definition file reads."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: AssetDefinitionService = AssetDefinitionService(session)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AssetDefinitionServiceDep = Annotated[AssetDefinitionService, Depends(get_asset_definition_service)]
 
 
 def get_notebook_kernels(

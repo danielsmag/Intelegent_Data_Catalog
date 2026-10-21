@@ -34,11 +34,14 @@ export type OptionField = {
   defaultValue: boolean
 }
 
+export type RefreshMode = "INTERVAL" | "ON_CHANGE" | "MANUAL"
+
 export type EntityConfig = {
   minutes: number
   enabled: boolean
   model: ModelId
   effort: ReasoningEffort
+  refreshMode: RefreshMode
   options: Record<string, boolean>
   nextRunAt: string | null
 }
@@ -48,6 +51,7 @@ export type EntityConfigController = {
   enabled: boolean
   model: ModelId
   effort: ReasoningEffort
+  refreshMode: RefreshMode
   options: Readonly<Record<string, boolean>>
   nextRunAt: string | null
   busy: boolean
@@ -59,6 +63,7 @@ export type EntityConfigController = {
     options: Readonly<Record<string, boolean>>,
     model: ModelId,
     effort: ReasoningEffort,
+    refreshMode?: RefreshMode,
   ) => void
 }
 
@@ -140,6 +145,7 @@ export function useEntityConfig(
     options: Readonly<Record<string, boolean>>,
     model: ModelId,
     effort: ReasoningEffort,
+    refreshMode: RefreshMode = config.refreshMode,
   ): void {
     setBusy(true)
     setError(null)
@@ -148,6 +154,7 @@ export function useEntityConfig(
       enabled,
       model,
       effort,
+      refreshMode,
       options: { ...options },
       nextRunAt: null,
     }
@@ -168,6 +175,7 @@ export function useEntityConfig(
     enabled: config.enabled,
     model: config.model,
     effort: config.effort,
+    refreshMode: config.refreshMode,
     options: config.options,
     nextRunAt: config.nextRunAt,
     busy,
@@ -236,6 +244,7 @@ function defaultConfig(fields: readonly OptionField[]): EntityConfig {
     enabled: true,
     model: "gpt-4.1",
     effort: "low",
+    refreshMode: "INTERVAL",
     options: defaults(fields),
     nextRunAt: null,
   }
@@ -254,6 +263,7 @@ function mergeConfig(config: EntityConfig, fields: readonly OptionField[]): Enti
     enabled: config.enabled,
     model: config.model,
     effort: config.effort,
+    refreshMode: config.refreshMode,
     options,
     nextRunAt: config.nextRunAt,
   }
@@ -284,6 +294,7 @@ async function saveEntityConfiguration(
       enabled: config.enabled,
       model: config.model,
       effort: config.effort,
+      refresh_mode: config.refreshMode,
       options: config.options,
     }),
   })
@@ -299,6 +310,9 @@ function configurationPath(kind: string, id: string): string {
   }
   if (kind === "scope") {
     return `/api/v1/scopes/${id}/configuration`
+  }
+  if (kind === "asset") {
+    return `/api/v1/assets/${id}/configuration`
   }
   return `/api/v1/tables/${id}/configuration`
 }
@@ -327,9 +341,17 @@ function configFromBody(body: unknown): EntityConfig {
     enabled: record.enabled !== false,
     model: modelId(record.model),
     effort: effortId(record.effort),
+    refreshMode: refreshModeId(record.refresh_mode),
     options,
     nextRunAt: typeof nextRunAt === "string" && nextRunAt !== "" ? nextRunAt : null,
   }
+}
+
+export function refreshModeId(value: unknown): RefreshMode {
+  if (value === "INTERVAL" || value === "ON_CHANGE" || value === "MANUAL") {
+    return value
+  }
+  return "INTERVAL"
 }
 
 export function modelId(value: unknown): ModelId {

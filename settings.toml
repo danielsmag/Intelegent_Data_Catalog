@@ -129,6 +129,18 @@ bucket = "workspace"
 region = "us-west-2"
 max_upload_bytes = 52428800
 
+# Python files under spaces/, scopes/, and assets/. Beat polls only when enabled.
+[asset_definitions]
+enabled = false
+bucket = ""
+prefix = "asset-definitions/"
+spaces_folder = "spaces"
+scopes_folder = "scopes"
+assets_folder = "assets"
+poll_interval_seconds = 10
+exec_timeout_seconds = 30
+max_file_bytes = 1048576
+
 [notebook]
 enabled = false
 gateway_url = "http://127.0.0.1:8888"

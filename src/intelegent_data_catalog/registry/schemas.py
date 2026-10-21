@@ -391,7 +391,8 @@ class CatalogTableRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: UUID
-    scope_id: UUID
+    asset_id: UUID | None = None
+    scope_id: UUID | None
     data_source_id: UUID
     name: str
     display_name: str | None

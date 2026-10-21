@@ -14,6 +14,7 @@ from intelegent_data_catalog.knowledge.context.catalog import (
 )
 from intelegent_data_catalog.knowledge.context.pipelines import AttachedPipelineSource
 from intelegent_data_catalog.knowledge.context.scope_catalog import (
+    _asset_summaries,
     _columns,
     _short_text,
     _table_summary,
@@ -292,6 +293,7 @@ class PostgresSpaceCatalogContextProvider:
             scopes_without_context=missing,
             previous=_previous_findings(self._previous, space_id, selected.include_previous),
             pipelines=pipelines,
+            assets=_asset_summaries(self._repository.session, scope_id=None, space_id=space_id),
         )
 
 

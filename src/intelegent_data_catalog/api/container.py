@@ -20,6 +20,7 @@ from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.logger import configure_logging
 from intelegent_data_catalog.core.settings import (
     AppSettings,
+    ObjectStoreSettings,
     load_settings,
     resolve_project_root,
 )
@@ -136,6 +137,15 @@ def build_kernel_gateway(settings: AppSettings) -> KernelGatewayClient:
     )
 
 
+def build_asset_definition_store(settings: AppSettings) -> ObjectStore:
+    """Object store for asset definition files. An empty bucket uses the workspace bucket."""
+    chosen: str = settings.asset_definitions.bucket.strip()
+    store_settings: ObjectStoreSettings = settings.object_store
+    if chosen != "" and chosen != store_settings.bucket:
+        store_settings = store_settings.model_copy(update={"bucket": chosen})
+    return build_object_store(store_settings)
+
+
 def build_kernel_tickets(settings: AppSettings) -> KernelTickets:
     """Build ticket signing from the notebook settings."""
     return KernelTickets(
@@ -203,6 +213,10 @@ class AppContainer(containers.DeclarativeContainer):
     object_store: providers.Singleton[ObjectStore] = providers.Singleton(
         build_object_store,
         settings.provided.object_store,
+    )
+    asset_definition_store: providers.Singleton[ObjectStore] = providers.Singleton(
+        build_asset_definition_store,
+        settings,
     )
     kernel_gateway: providers.Singleton[KernelGatewayClient] = providers.Singleton(
         build_kernel_gateway,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "
 import { Link, useParams } from "react-router-dom"
 import { useTabParam } from "./useTabParam"
 import { BuildingBanner } from "./BuildingBanner"
+import { AssetMembershipZone } from "./AssetMembershipZone"
 import { AirflowAttachmentsPanel } from "./AirflowAttachmentsPanel"
 import { AttachAirflowForm } from "./AttachAirflowForm"
 import { AttachCatalogForm } from "./AttachCatalogForm"
@@ -264,9 +265,9 @@ export function SpacesPage(): ReactElement {
   )
 }
 
-const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "airflow", "graph"]
+const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "assets", "airflow", "graph"]
 
-type SpaceTab = "overview" | "scopes" | "airflow" | "graph"
+type SpaceTab = "overview" | "scopes" | "assets" | "airflow" | "graph"
 
 const SPACE_OPTION_FIELDS: readonly OptionField[] = [
   { key: "include_scope_knowledge", label: "Include scope knowledge", defaultValue: true },
@@ -659,6 +660,7 @@ export function SpacePage(): ReactElement {
             {cards.length > 0 ? <EntityGrid items={cards} /> : null}
           </>
         ) : null}
+        {tab === "assets" ? <AssetMembershipZone targetKind="space" targetId={spaceId} /> : null}
         {tab === "airflow" ? (
           <>
             {attachingAirflow ? (
@@ -697,9 +699,9 @@ export function SpacePage(): ReactElement {
   )
 }
 
-const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "airflow", "graph"]
+const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "assets", "airflow", "graph"]
 
-type ScopeTab = "overview" | "tables" | "airflow" | "graph"
+type ScopeTab = "overview" | "tables" | "assets" | "airflow" | "graph"
 
 const SCOPE_OPTION_FIELDS: readonly OptionField[] = [
   { key: "include_table_knowledge", label: "Include table knowledge", defaultValue: true },
@@ -1081,6 +1083,7 @@ export function ScopePage(): ReactElement {
             {cards.length > 0 ? <EntityGrid items={cards} /> : null}
           </>
         ) : null}
+        {tab === "assets" ? <AssetMembershipZone targetKind="scope" targetId={scopeId} /> : null}
         {tab === "airflow" ? (
           <>
             {attachingAirflow ? (
