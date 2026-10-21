@@ -48,6 +48,7 @@ type BuildFollower<Job extends BuildStatus> = {
 function createFollower<Job extends BuildStatus>(
   fetchJob: (jobId: string) => Promise<Job>,
   message: (job: Job) => string,
+  operation: (job: Job) => string,
 ): BuildFollower<Job> {
   const handlers: Set<FinishedHandler<Job>> = new Set()
   const polling: Set<string> = new Set()
@@ -71,7 +72,7 @@ function createFollower<Job extends BuildStatus>(
     const cancelled: boolean = isCancelledBuild(job)
     const tone: PageAlertTone = job.status === "succeeded" ? "success" : cancelled ? "info" : "error"
     const text: string = cancelled ? "Build cancelled." : message(job)
-    showPageAlert(text, tone)
+    showPageAlert(text, tone, operation(job))
   }
 
   function follow(job: Job): void {
@@ -95,7 +96,7 @@ function createFollower<Job extends BuildStatus>(
         })
         .catch((err: unknown) => {
           polling.delete(job.id)
-          showPageAlert(errorMessage(err), "error")
+          showPageAlert(errorMessage(err), "error", operation(job))
         })
     }
     window.setTimeout(tick, 2000)
@@ -115,6 +116,7 @@ function outcome(name: string, status: BuildStatus["status"], error: string | nu
 const tableBuilds: BuildFollower<KnowledgeBuildJob> = createFollower(
   fetchKnowledgeBuild,
   (job: KnowledgeBuildJob): string => outcome(job.table_name, job.status, job.error),
+  (job: KnowledgeBuildJob): string => `Build context for ${job.table_name}`,
 )
 
 const scopeBuilds: BuildFollower<ScopeBuildJob> = createFollower(
@@ -126,6 +128,7 @@ const scopeBuilds: BuildFollower<ScopeBuildJob> = createFollower(
     }
     return `Scope context for ${job.scope_name} failed. ${detail}`
   },
+  (job: ScopeBuildJob): string => `Build scope context for ${job.scope_name}`,
 )
 
 export function onKnowledgeBuildFinished(handler: FinishedHandler<KnowledgeBuildJob>): () => void {
@@ -171,6 +174,7 @@ const spaceBuilds: BuildFollower<SpaceBuildJob> = createFollower(
     }
     return `Space context for ${job.space_name} failed. ${detail}`
   },
+  (job: SpaceBuildJob): string => `Build space context for ${job.space_name}`,
 )
 
 export function onSpaceBuildFinished(handler: FinishedHandler<SpaceBuildJob>): () => void {
@@ -199,6 +203,7 @@ const airflowBuilds: BuildFollower<AirflowBuildJob> = createFollower(
     }
     return `Airflow context for ${job.instance_name} failed. ${detail}`
   },
+  (job: AirflowBuildJob): string => `Analyze ${job.instance_name}`,
 )
 
 export function onAirflowBuildFinished(handler: FinishedHandler<AirflowBuildJob>): () => void {
@@ -218,9 +223,23 @@ export function followAirflowBuild(job: AirflowBuildJob): void {
   airflowBuilds.follow(job)
 }
 
+function contextOperation(job: ContextGenerationJob): string {
+  if (job.subject_kind === "table_columns") {
+    return `Generate column contexts for ${job.subject_name}`
+  }
+  if (job.subject_kind === "airflow") {
+    return `Analyze ${job.subject_name}`
+  }
+  if (job.subject_kind === "space" || job.subject_kind === "scope") {
+    return `Build ${job.subject_kind} context for ${job.subject_name}`
+  }
+  return `Generate context for ${job.subject_name}`
+}
+
 const contextGenerations: BuildFollower<ContextGenerationJob> = createFollower(
   fetchContextGeneration,
   (job: ContextGenerationJob): string => outcome(job.subject_name, job.status, job.error),
+  contextOperation,
 )
 
 export function onContextGenerationFinished(

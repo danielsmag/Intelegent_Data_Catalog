@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from intelegent_data_catalog.llm.trace import AgentTrace
+from intelegent_data_catalog.llm.trace import AgentTrace, _usage_detail
 
 
 def test_long_ask_is_truncated_at_info_and_full_at_debug(
@@ -25,3 +25,10 @@ def test_long_ask_is_truncated_at_info_and_full_at_debug(
     assert ask not in info_messages[0]
     assert len(debug_messages) == 1
     assert ask in debug_messages[0]
+
+
+def test_usage_line_includes_elapsed_time() -> None:
+    """Token counts keep the middle dot, and the run time follows them."""
+    assert _usage_detail(789, 43, 2.2) == "789 in · 43 out · 2s"
+    assert _usage_detail(1, 1, 0.2) == "1 in · 1 out · <1s"
+    assert _usage_detail(1_200, 8, 65) == "1,200 in · 8 out · 1m 5s"

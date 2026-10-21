@@ -325,7 +325,12 @@ function TraceTurn(props: {
   const failed: boolean = props.card.status === "failed" && props.card.outcome !== null
   return (
     <article className={`trace-turn trace-kind-${props.card.kind}`}>
-      <div className="trace-bubble">{requestCopy(props.card)}</div>
+      <div className="trace-bubble">
+        <span className="trace-bubble-text">{requestCopy(props.card)}</span>
+        <time className="trace-bubble-time" dateTime={props.card.startedAt}>
+          {formatClock(props.card.startedAt)}
+        </time>
+      </div>
       <button
         type="button"
         className="trace-run"
@@ -343,6 +348,7 @@ function TraceTurn(props: {
             props.card.status === "running",
             props.now,
             props.card.status === "running" ? undefined : props.card.endedAt,
+            props.card.startedAt,
             props.openSteps,
             props.expandIncoming,
             props.onToggleStep,
@@ -365,6 +371,7 @@ function renderSteps(
   running: boolean,
   now: number,
   endedAt: string | undefined,
+  startedAt: string,
   openSteps: Record<string, boolean>,
   expandIncoming: boolean,
   onToggleStep: (id: string, open: boolean) => void,
@@ -412,6 +419,7 @@ function renderSteps(
         nextAt={following === undefined ? undefined : following.at}
         running={running}
         endedAt={endedAt}
+        startedAt={startedAt}
         now={now}
         open={open}
         onToggle={() => {
@@ -429,6 +437,7 @@ function TraceStep(props: {
   nextAt: string | undefined
   running: boolean
   endedAt: string | undefined
+  startedAt: string
   now: number
   open: boolean
   onToggle: () => void
@@ -446,7 +455,7 @@ function TraceStep(props: {
     return <p className="trace-meta">{props.step.detail || "Context saved"}</p>
   }
   if (props.step.kind === "meta") {
-    return <p className="trace-meta">{props.step.detail}</p>
+    return <p className="trace-meta">{withRunTime(props.step, props.startedAt)}</p>
   }
   const label: string =
     props.step.kind === "thought"
@@ -568,6 +577,30 @@ function disclosureKeys(card: TraceCard): string[] {
     index += 1
   }
   return keys
+}
+
+function formatClock(iso: string): string {
+  const date: Date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return ""
+  }
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+}
+
+function withRunTime(step: TraceStepView, startedAt: string): string {
+  if (hasRunTime(step.detail)) {
+    return step.detail
+  }
+  const seconds: number | null = elapsedSeconds(startedAt, step.at)
+  if (seconds === null) {
+    return step.detail
+  }
+  const span: string = seconds === 0 ? "<1s" : formatSpan(seconds)
+  return `${step.detail} · ${span}`
+}
+
+function hasRunTime(detail: string): boolean {
+  return /·\s*(?:<\d+s|\d+m(?:\s+\d+s)?|\d+s)\s*$/.test(detail)
 }
 
 function requestCopy(card: TraceCard): string {

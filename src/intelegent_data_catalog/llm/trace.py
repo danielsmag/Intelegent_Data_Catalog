@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from collections.abc import Sequence
 from typing import TypeVar
 
@@ -47,9 +48,11 @@ class AgentTrace:
         self._agent_name: str = agent_name
         self._streamed: bool = False
         self._seen: set[tuple[str, str]] = set()
+        self._started_at: float = time.monotonic()
 
     def start(self, ask: str) -> None:
         """Log the instruction or prompt before the model runs."""
+        self._started_at = time.monotonic()
         self._emit("ask", ask, publish=True)
 
     def observe_tool_call(self, name: str, args: object) -> None:
@@ -92,7 +95,8 @@ class AgentTrace:
             usage.input_tokens,
             usage.output_tokens,
         )
-        usage_detail: str = f"{usage.input_tokens:,} in · {usage.output_tokens:,} out"
+        elapsed_seconds: float = time.monotonic() - self._started_at
+        usage_detail: str = _usage_detail(usage.input_tokens, usage.output_tokens, elapsed_seconds)
         self._emit("usage", usage_detail, publish=True, log=False)
 
     def _log_part(self, part: object, *, publish: bool) -> None:
@@ -130,6 +134,24 @@ class AgentTrace:
         if step is None:
             return
         publish_build_step(self._agent_name, step, body)
+
+
+def _usage_detail(input_tokens: int, output_tokens: int, elapsed_seconds: float) -> str:
+    span: str = _format_span(elapsed_seconds)
+    return f"{input_tokens:,} in · {output_tokens:,} out · {span}"
+
+
+def _format_span(elapsed_seconds: float) -> str:
+    seconds: int = max(0, round(elapsed_seconds))
+    if seconds == 0:
+        return "<1s"
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes: int = seconds // 60
+    rest: int = seconds % 60
+    if rest == 0:
+        return f"{minutes}m"
+    return f"{minutes}m {rest}s"
 
 
 def _render(value: object) -> str:
