@@ -63,6 +63,9 @@ export type AssetListItem = {
   freshness_score: number
   build_running: boolean
   refresh_mode: RefreshMode
+  interval_seconds: number
+  schedule: string | null
+  next_run_at: string | null
   updated_at: string
 }
 
@@ -93,6 +96,68 @@ export type AssetBuildJob = {
   asset_name: string
   status: "running" | "succeeded" | "failed"
   error: string | null
+}
+
+export type AssetRunStatus = "queued" | "running" | "succeeded" | "failed"
+export type AssetRunTrigger = "apply" | "schedule" | "manual"
+export type AssetRunTaskState =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped"
+  | "upstream_failed"
+
+export type AssetRunTaskSummary = {
+  task_id: string
+  state: AssetRunTaskState
+  started_at: string | null
+  finished_at: string | null
+  duration: number | null
+  error: string | null
+}
+
+export type AssetRun = {
+  id: string
+  asset_id: string
+  item_id: string | null
+  catalog_job_id: string | null
+  status: AssetRunStatus
+  trigger: AssetRunTrigger
+  try_number: number
+  operator_type: string | null
+  operator_params: Record<string, unknown>
+  error: string | null
+  queued_at: string
+  started_at: string | null
+  finished_at: string | null
+  duration: number | null
+  tasks: AssetRunTaskSummary[]
+}
+
+export type AssetRunEvent = {
+  at: string
+  step: string
+  title: string
+  detail: string
+}
+
+export type AssetRunTaskDetail = {
+  run_id: string
+  task_id: string
+  state: AssetRunTaskState
+  started_at: string | null
+  finished_at: string | null
+  duration: number | null
+  error: string | null
+  log: string
+  events: AssetRunEvent[]
+  trigger: AssetRunTrigger
+  try_number: number
+  operator_type: string | null
+  operator_params: Record<string, unknown>
+  run_status: AssetRunStatus
+  run_error: string | null
 }
 
 export async function searchAssets(query: AssetQuery, signal?: AbortSignal): Promise<AssetPage> {
@@ -201,28 +266,6 @@ export async function bulkMembership(
   return (await response.json()) as { changed: number; unchanged: number }
 }
 
-export async function createNodeAsset(
-  workspaceId: string,
-  nodeId: string,
-  scopeId: string | null,
-  spaceId: string | null,
-): Promise<AssetRecord> {
-  const response: Response = await apiFetch("/api/v1/assets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      workspace_id: workspaceId,
-      node: { node_id: nodeId },
-      scope_id: scopeId,
-      space_id: spaceId,
-    }),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as AssetRecord
-}
-
 export async function startAssetBuild(assetId: string): Promise<AssetBuildJob> {
   const response: Response = await apiFetch(`/api/v1/assets/${assetId}/knowledge-context`, {
     method: "POST",
@@ -241,6 +284,30 @@ export async function fetchAssetBuild(jobId: string): Promise<AssetBuildJob> {
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as AssetBuildJob
+}
+
+export async function fetchAssetRuns(assetId: string, signal?: AbortSignal): Promise<AssetRun[]> {
+  const response: Response = await apiFetch(`/api/v1/assets/${assetId}/runs?limit=25`, { signal })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as AssetRun[]
+}
+
+export async function fetchAssetRunTask(
+  assetId: string,
+  runId: string,
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<AssetRunTaskDetail> {
+  const response: Response = await apiFetch(
+    `/api/v1/assets/${assetId}/runs/${runId}/tasks/${taskId}`,
+    { signal },
+  )
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as AssetRunTaskDetail
 }
 
 export function detailString(detail: Record<string, unknown>, key: string): string | null {

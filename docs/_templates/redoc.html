@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ title }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { margin: 0; padding: 0; background: #08090c; }
+    </style>
+  </head>
+  <body>
+    <redoc></redoc>
+    <script src="{{ pathto('_static/redoc.js', 1) }}"></script>
+    <script id="openapi-spec" type="application/json">{{ spec_json }}</script>
+    <script>
+      var spec = JSON.parse(document.getElementById("openapi-spec").textContent);
+      Redoc.init(spec, {
+        theme: {
+          colors: {
+            primary: { main: "#3b9eff" },
+            success: { main: "#3d8f5a" },
+            warning: { main: "#f2c14e" },
+            error: { main: "#e06c75" },
+            text: { primary: "#f5f7fb", secondary: "#c5ced8" },
+            border: { dark: "#5c6574", light: "#5c6574" },
+            http: {
+              get: "#3b9eff",
+              post: "#2ee6c8",
+              put: "#f2c14e",
+              options: "#c5ced8",
+              patch: "#6bb6ff",
+              delete: "#e06c75",
+              basic: "#5c6574",
+              link: "#3b9eff",
+              head: "#c5ced8",
+            },
+          },
+          sidebar: {
+            backgroundColor: "#050608",
+            textColor: "#f5f7fb",
+            activeTextColor: "#3b9eff",
+          },
+          rightPanel: { backgroundColor: "#101218", textColor: "#f5f7fb" },
+          typography: {
+            fontSize: "14px",
+            fontFamily: "SF Pro Text, SF Pro, -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif",
+            headings: { fontWeight: "650" },
+            code: { fontFamily: "SF Mono, ui-monospace, Menlo, Consolas, monospace" },
+          },
+        },
+      });
+    </script>
+  </body>
+</html>

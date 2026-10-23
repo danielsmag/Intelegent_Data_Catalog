@@ -3,10 +3,11 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, and_, case, func, or_, select, union_all
+from sqlalchemy import Float, Select, and_, case, cast, func, or_, select, union_all
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Subquery
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.elements import ColumnElement, SQLCoreOperations
+from sqlalchemy.sql.selectable import SelectBase
 
 from intelegent_data_catalog.assets.models import (
     AssetListItem,
@@ -26,6 +27,7 @@ from intelegent_data_catalog.persistence.enums import (
     CatalogJobStatus,
 )
 from intelegent_data_catalog.persistence.models import (
+    AssetDefinitionItemRow,
     AssetMembershipRow,
     AssetRow,
     CatalogJobRow,
@@ -96,7 +98,7 @@ class AssetRepository:
         space_id: UUID | None,
     ) -> list[AssetMembershipRow]:
         """Return memberships on one scope or one space."""
-        statement: Select[tuple[AssetMembershipRow]] = select(AssetMembershipRow)
+        statement = select(AssetMembershipRow)
         if scope_id is not None:
             statement = statement.where(AssetMembershipRow.scope_id == scope_id)
         else:
@@ -105,9 +107,7 @@ class AssetRepository:
 
     def memberships(self, asset_id: UUID) -> list[AssetMembershipRow]:
         """Return every space and scope holding this asset."""
-        statement: Select[tuple[AssetMembershipRow]] = select(AssetMembershipRow).where(
-            AssetMembershipRow.asset_id == asset_id,
-        )
+        statement = select(AssetMembershipRow).where(AssetMembershipRow.asset_id == asset_id)
         return list(self._session.scalars(statement))
 
     def membership_for(
@@ -118,9 +118,7 @@ class AssetRepository:
         space_id: UUID | None,
     ) -> AssetMembershipRow | None:
         """Return the membership for one target, or none."""
-        statement: Select[tuple[AssetMembershipRow]] = select(AssetMembershipRow).where(
-            AssetMembershipRow.asset_id == asset_id,
-        )
+        statement = select(AssetMembershipRow).where(AssetMembershipRow.asset_id == asset_id)
         if scope_id is not None:
             statement = statement.where(AssetMembershipRow.scope_id == scope_id)
         else:
@@ -160,7 +158,7 @@ class AssetRepository:
 
     def list_for_scope(self, scope_id: UUID) -> list[AssetRow]:
         """Return assets attached to one scope."""
-        statement: Select[tuple[AssetRow]] = (
+        statement = (
             select(AssetRow)
             .join(AssetMembershipRow, AssetMembershipRow.asset_id == AssetRow.id)
             .where(AssetMembershipRow.scope_id == scope_id)
@@ -170,8 +168,8 @@ class AssetRepository:
 
     def list_for_space(self, space_id: UUID) -> list[AssetRow]:
         """Return assets attached to the space or to one of its scopes."""
-        scope_ids: Select[tuple[UUID]] = select(ScopeRow.id).where(ScopeRow.space_id == space_id)
-        statement: Select[tuple[AssetRow]] = (
+        scope_ids = select(ScopeRow.id).where(ScopeRow.space_id == space_id)
+        statement = (
             select(AssetRow)
             .join(AssetMembershipRow, AssetMembershipRow.asset_id == AssetRow.id)
             .where(
@@ -191,7 +189,7 @@ class AssetRepository:
 
     def summaries_for_space(self, space_id: UUID) -> list[tuple[UUID, str, str, str | None]]:
         """Non-table assets on a space or its scopes."""
-        scope_ids: Select[tuple[UUID]] = select(ScopeRow.id).where(ScopeRow.space_id == space_id)
+        scope_ids = select(ScopeRow.id).where(ScopeRow.space_id == space_id)
         return self._summaries(
             or_(
                 AssetMembershipRow.space_id == space_id,
@@ -238,15 +236,13 @@ class AssetRepository:
             .distinct()
         )
         found: list[tuple[UUID, str, str, str | None]] = []
-        pair: tuple[AssetRow, object]
-        for pair in self._session.execute(statement):
-            payload: object = pair[1]
+        for asset, payload in self._session.execute(statement):
             summary: str | None = None
-            if isinstance(payload, dict):
+            if payload:
                 raw: object = payload.get("summary")
                 if isinstance(raw, str) and raw.strip() != "":
                     summary = raw
-            found.append((pair[0].id, pair[0].kind, pair[0].name, summary))
+            found.append((asset.id, asset.kind, asset.name, summary))
         return found
 
     def _filters(self, query: AssetQuery, access: AccessContext) -> list[ColumnElement[bool]]:
@@ -288,9 +284,7 @@ class AssetRepository:
         if query.scope_id is not None:
             filters.append(AssetRow.id.in_(self._member_ids(scope_id=query.scope_id)))
         if query.space_id is not None:
-            scope_ids: Select[tuple[UUID]] = select(ScopeRow.id).where(
-                ScopeRow.space_id == query.space_id,
-            )
+            scope_ids = select(ScopeRow.id).where(ScopeRow.space_id == query.space_id)
             filters.append(
                 or_(
                     AssetRow.id.in_(self._member_ids(space_id=query.space_id)),
@@ -317,8 +311,8 @@ class AssetRepository:
         *,
         scope_id: UUID | None = None,
         space_id: UUID | None = None,
-    ) -> Select[tuple[UUID]]:
-        statement: Select[tuple[UUID]] = select(AssetMembershipRow.asset_id)
+    ) -> Select[UUID]:
+        statement = select(AssetMembershipRow.asset_id)
         if scope_id is not None:
             return statement.where(AssetMembershipRow.scope_id == scope_id)
         return statement.where(AssetMembershipRow.space_id == space_id)
@@ -337,13 +331,13 @@ class AssetRepository:
         builds = _build_times()
         counts = _membership_counts()
         modes = _refresh_modes()
-        freshness: ColumnElement[int] = _freshness_score(
+        freshness = _freshness_score(
             builds.c.last_built_at,
             modes.c.interval_seconds,
             modes.c.refresh_mode,
             dialect,
         )
-        context_state: ColumnElement[str] = _context_state_expr()
+        context_state = _context_state_expr()
         statement = (
             select(AssetRow)
             .outerjoin(builds, builds.c.asset_id == AssetRow.id)
@@ -352,26 +346,23 @@ class AssetRepository:
         )
         if len(filters) > 0:
             statement = statement.where(and_(*filters))
-        order_by: ColumnElement[object]
+        descending: bool = query.order != "asc"
         match query.sort:
             case "name":
-                order_by = AssetRow.name
+                statement = _order_page(statement, AssetRow.name, descending=descending)
             case "kind":
-                order_by = AssetRow.kind
+                statement = _order_page(statement, AssetRow.kind, descending=descending)
             case "updated_at":
-                order_by = AssetRow.updated_at
+                statement = _order_page(statement, AssetRow.updated_at, descending=descending)
             case "last_built_at":
-                order_by = builds.c.last_built_at
+                statement = _order_page(statement, builds.c.last_built_at, descending=descending)
             case "membership_count":
-                order_by = func.coalesce(counts.c.membership_count, 0)
+                counted = func.coalesce(counts.c.membership_count, 0)
+                statement = _order_page(statement, counted, descending=descending)
             case "freshness_score":
-                order_by = freshness
+                statement = _order_page(statement, freshness, descending=descending)
             case "context_state":
-                order_by = context_state
-        if query.order == "asc":
-            statement = statement.order_by(order_by.asc(), AssetRow.id.asc())
-        else:
-            statement = statement.order_by(order_by.desc(), AssetRow.id.desc())
+                statement = _order_page(statement, context_state, descending=descending)
         statement = statement.limit(query.limit).offset(query.offset)
         return list(self._session.scalars(statement))
 
@@ -383,6 +374,7 @@ class AssetRepository:
         built: dict[UUID, datetime] = self._last_built(ids)
         running: set[UUID] = self._running(ids)
         modes: dict[UUID, tuple[str, int]] = self._modes(ids)
+        schedules: dict[UUID, tuple[str | None, datetime | None]] = self._operator_schedules(ids)
         now: datetime = utc_now()
         items: list[AssetListItem] = []
         row: AssetRow
@@ -390,6 +382,9 @@ class AssetRepository:
             scopes, spaces = targets.get(row.id, ([], []))
             fallback: tuple[str, int] = (AssetRefreshMode.INTERVAL.value, _DEFAULT_INTERVAL)
             mode_name, interval = modes.get(row.id, fallback)
+            schedule_pair: tuple[str | None, datetime | None] = schedules.get(row.id, (None, None))
+            schedule: str | None = schedule_pair[0]
+            next_run: datetime | None = schedule_pair[1]
             last_built: datetime | None = built.get(row.id)
             items.append(
                 AssetListItem(
@@ -408,8 +403,11 @@ class AssetRepository:
                     last_built_at=last_built,
                     context_state=_state(row),
                     freshness_score=_score(mode_name, interval, last_built, now),
+                    interval_seconds=interval,
                     build_running=row.id in running,
                     refresh_mode=AssetRefreshMode(mode_name),
+                    schedule=schedule,
+                    next_run_at=next_run,
                     updated_at=row.updated_at,
                 ),
             )
@@ -426,44 +424,68 @@ class AssetRepository:
             .where(AssetMembershipRow.asset_id.in_(asset_ids))
         )
         found: dict[UUID, tuple[list[AssetTargetRef], list[AssetTargetRef]]] = {}
-        record: tuple[AssetMembershipRow, str | None, str | None]
-        for record in self._session.execute(statement):
-            membership: AssetMembershipRow = record[0]
+        for membership, scope_name, space_name in self._session.execute(statement):
             scopes, spaces = found.setdefault(membership.asset_id, ([], []))
-            if membership.scope_id is not None and record[1] is not None:
-                scopes.append(AssetTargetRef(id=membership.scope_id, name=record[1]))
-            if membership.space_id is not None and record[2] is not None:
-                spaces.append(AssetTargetRef(id=membership.space_id, name=record[2]))
+            if membership.scope_id is not None and scope_name:
+                scopes.append(AssetTargetRef(id=membership.scope_id, name=scope_name))
+            if membership.space_id is not None and space_name:
+                spaces.append(AssetTargetRef(id=membership.space_id, name=space_name))
         return found
 
     def _last_built(self, asset_ids: list[UUID]) -> dict[UUID, datetime]:
-        builds = _build_source().subquery()
-        statement = (
-            select(builds.c.asset_id, func.max(builds.c.built_at))
-            .where(
-                builds.c.asset_id.in_(asset_ids),
-                builds.c.status == CatalogJobStatus.SUCCEEDED.value,
-            )
-            .group_by(builds.c.asset_id)
-        )
         found: dict[UUID, datetime] = {}
-        record: tuple[object, object]
-        for record in self._session.execute(statement):
-            if isinstance(record[0], UUID) and isinstance(record[1], datetime):
-                found[record[0]] = _aware(record[1])
+        asset_builds = (
+            select(CatalogJobRow.subject_id, func.max(CatalogJobRow.created_at))
+            .where(
+                CatalogJobRow.subject_id.in_(asset_ids),
+                CatalogJobRow.kind == CatalogJobKind.ASSET.value,
+                CatalogJobRow.lane == "",
+                CatalogJobRow.status == CatalogJobStatus.SUCCEEDED.value,
+            )
+            .group_by(CatalogJobRow.subject_id)
+        )
+        for asset_id, built_at in self._session.execute(asset_builds):
+            _keep_latest(found, asset_id, built_at)
+        table_builds = (
+            select(CatalogTableRow.asset_id, func.max(CatalogJobRow.created_at))
+            .select_from(CatalogJobRow)
+            .join(CatalogTableRow, CatalogTableRow.id == CatalogJobRow.subject_id)
+            .where(
+                CatalogTableRow.asset_id.in_(asset_ids),
+                CatalogJobRow.kind == CatalogJobKind.KNOWLEDGE.value,
+                CatalogJobRow.lane == "",
+                CatalogJobRow.status == CatalogJobStatus.SUCCEEDED.value,
+            )
+            .group_by(CatalogTableRow.asset_id)
+        )
+        for table_asset_id, table_built_at in self._session.execute(table_builds):
+            _keep_latest(found, table_asset_id, table_built_at)
         return found
 
     def _running(self, asset_ids: list[UUID]) -> set[UUID]:
-        builds = _build_source().subquery()
-        statement = select(builds.c.asset_id).where(
-            builds.c.asset_id.in_(asset_ids),
-            builds.c.status == CatalogJobStatus.RUNNING.value,
-        )
         found: set[UUID] = set()
-        value: object
-        for value in self._session.scalars(statement):
-            if isinstance(value, UUID):
-                found.add(value)
+        asset_runs = select(CatalogJobRow.subject_id).where(
+            CatalogJobRow.subject_id.in_(asset_ids),
+            CatalogJobRow.kind == CatalogJobKind.ASSET.value,
+            CatalogJobRow.lane == "",
+            CatalogJobRow.status == CatalogJobStatus.RUNNING.value,
+        )
+        for asset_id in self._session.scalars(asset_runs):
+            found.add(asset_id)
+        table_runs = (
+            select(CatalogTableRow.asset_id)
+            .select_from(CatalogJobRow)
+            .join(CatalogTableRow, CatalogTableRow.id == CatalogJobRow.subject_id)
+            .where(
+                CatalogTableRow.asset_id.in_(asset_ids),
+                CatalogJobRow.kind == CatalogJobKind.KNOWLEDGE.value,
+                CatalogJobRow.lane == "",
+                CatalogJobRow.status == CatalogJobStatus.RUNNING.value,
+            )
+        )
+        for table_asset_id in self._session.scalars(table_runs):
+            if table_asset_id is not None:
+                found.add(table_asset_id)
         return found
 
     def _modes(self, asset_ids: list[UUID]) -> dict[UUID, tuple[str, int]]:
@@ -478,10 +500,37 @@ class AssetRepository:
             found[row.asset_id] = (row.refresh_mode, row.interval_seconds)
         return found
 
+    def _operator_schedules(
+        self,
+        asset_ids: list[UUID],
+    ) -> dict[UUID, tuple[str | None, datetime | None]]:
+        """Cron and next fire time from the newest definition item for each asset."""
+        statement = (
+            select(AssetDefinitionItemRow)
+            .where(AssetDefinitionItemRow.asset_id.in_(asset_ids))
+            .order_by(AssetDefinitionItemRow.updated_at.desc())
+        )
+        chosen: dict[UUID, tuple[str | None, datetime | None]] = {}
+        row: AssetDefinitionItemRow
+        for row in self._session.scalars(statement):
+            asset_id: UUID | None = row.asset_id
+            if asset_id is None:
+                continue
+            current: tuple[str | None, datetime | None] | None = chosen.get(asset_id)
+            if current is not None and current[0] is not None:
+                continue
+            if current is not None and row.schedule is None:
+                continue
+            next_run: datetime | None = (
+                None if row.next_run_at is None else _aware(row.next_run_at)
+            )
+            chosen[asset_id] = (row.schedule, next_run)
+        return chosen
 
-def _build_source() -> Select[tuple[UUID, datetime, str]]:
+
+def _build_source() -> SelectBase:
     """Asset builds plus table builds, both keyed by asset id."""
-    asset_jobs: Select[tuple[UUID, datetime, str]] = select(
+    asset_jobs = select(
         CatalogJobRow.subject_id.label("asset_id"),
         CatalogJobRow.created_at.label("built_at"),
         CatalogJobRow.status.label("status"),
@@ -489,12 +538,13 @@ def _build_source() -> Select[tuple[UUID, datetime, str]]:
         CatalogJobRow.kind == CatalogJobKind.ASSET.value,
         CatalogJobRow.lane == "",
     )
-    table_jobs: Select[tuple[UUID, datetime, str]] = (
+    table_jobs = (
         select(
             CatalogTableRow.asset_id.label("asset_id"),
             CatalogJobRow.created_at.label("built_at"),
             CatalogJobRow.status.label("status"),
         )
+        .select_from(CatalogJobRow)
         .join(CatalogTableRow, CatalogTableRow.id == CatalogJobRow.subject_id)
         .where(
             CatalogJobRow.kind == CatalogJobKind.KNOWLEDGE.value,
@@ -547,14 +597,14 @@ def _freshness_score(
     refresh_mode: ColumnElement[str | None],
     dialect: str,
 ) -> ColumnElement[int]:
-    age: ColumnElement[float] = case(
+    age = case(
         (last_built.is_(None), None),
         else_=_age_seconds(last_built, dialect),
     )
-    interval: ColumnElement[int] = func.coalesce(interval_seconds, _DEFAULT_INTERVAL)
-    elapsed: ColumnElement[float] = age / interval * 100
-    raw: ColumnElement[float] = 100 - elapsed
-    clamped: ColumnElement[int] = case(
+    interval = func.coalesce(interval_seconds, _DEFAULT_INTERVAL)
+    elapsed = age / interval * 100
+    raw = 100 - elapsed
+    clamped = case(
         (raw < 0, 0),
         (raw > 100, 100),
         else_=raw,
@@ -571,8 +621,21 @@ def _age_seconds(
     dialect: str,
 ) -> ColumnElement[float]:
     if dialect == "postgresql":
-        return func.extract("epoch", func.now() - last_built)
+        epoch: ColumnElement[int] = func.extract("epoch", func.now() - last_built)
+        return cast(epoch, Float())
     return (func.julianday("now") - func.julianday(last_built)) * 86400.0
+
+
+def _order_page(
+    statement: Select[AssetRow],
+    column: SQLCoreOperations[object],
+    *,
+    descending: bool,
+) -> Select[AssetRow]:
+    """Sort one page, with id as a stable tie break."""
+    if descending:
+        return statement.order_by(column.desc(), AssetRow.id.desc())
+    return statement.order_by(column.asc(), AssetRow.id.asc())
 
 
 def _context_state_expr() -> ColumnElement[str]:
@@ -613,6 +676,20 @@ def _subtitle(properties: dict[str, object]) -> str | None:
     if isinstance(dag_id, str) and dag_id != "":
         return dag_id
     return None
+
+
+def _keep_latest(
+    found: dict[UUID, datetime],
+    asset_id: UUID | None,
+    built_at: datetime | None,
+) -> None:
+    """Keep the newer of an asset build and a table build."""
+    if asset_id is None or built_at is None:
+        return
+    stamp: datetime = _aware(built_at)
+    current: datetime | None = found.get(asset_id)
+    if current is None or stamp > current:
+        found[asset_id] = stamp
 
 
 def _aware(value: datetime) -> datetime:

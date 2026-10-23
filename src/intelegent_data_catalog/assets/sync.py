@@ -12,7 +12,6 @@ from intelegent_data_catalog.persistence.constants import SHARED_WORKSPACE_ID
 from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus
 from intelegent_data_catalog.persistence.models import (
     AirflowDagRow,
-    AssetMembershipRow,
     AssetRow,
     CatalogTableRow,
     WorkspaceNodeRow,
@@ -35,14 +34,8 @@ class AssetSync:
             return None
         return AssetSync(session)
 
-    def ensure_table(
-        self,
-        row: CatalogTableRow,
-        scope_id: UUID | None,
-        *,
-        replace_scope: bool = False,
-    ) -> AssetRow:
-        """Create or refresh the table asset and its scope membership."""
+    def ensure_table(self, row: CatalogTableRow) -> AssetRow:
+        """Create or refresh the table asset. Membership is not added here."""
         asset: AssetRow | None = self._existing(row.asset_id)
         now: datetime = utc_now()
         known: set[str] = {item.value for item in AssetStatus}
@@ -76,10 +69,6 @@ class AssetSync:
             asset.properties = properties
             asset.last_synced_at = row.last_synced_at
             asset.updated_at = now
-        if scope_id is not None and replace_scope:
-            self._replace_scope(asset.id, scope_id)
-        elif scope_id is not None:
-            self._repository.attach(asset.id, scope_id=scope_id, space_id=None)
         self._session.flush()
         return asset
 
@@ -123,16 +112,6 @@ class AssetSync:
             asset.updated_at = utc_now()
         self._session.flush()
         return asset
-
-    def mark_missing(self, asset_id: UUID | None) -> None:
-        """Mark an asset missing when its source disappears."""
-        if asset_id is None:
-            return
-        asset: AssetRow | None = self._repository.get(asset_id)
-        if asset is None:
-            return
-        asset.status = AssetStatus.MISSING.value
-        asset.updated_at = utc_now()
 
     def ensure_file(self, row: WorkspaceNodeRow) -> AssetRow | None:
         """Create or refresh the file or notebook asset. Folders are ignored."""
@@ -220,14 +199,6 @@ class AssetSync:
         if asset_id is None:
             return None
         return self._repository.get(asset_id)
-
-    def _replace_scope(self, asset_id: UUID, scope_id: UUID) -> None:
-        memberships: list[AssetMembershipRow] = self._repository.memberships(asset_id)
-        item: AssetMembershipRow
-        for item in memberships:
-            if item.scope_id is not None and item.scope_id != scope_id:
-                self._repository.detach(item)
-        self._repository.attach(asset_id, scope_id=scope_id, space_id=None)
 
     def _delete_linked(self, asset_id: UUID | None) -> None:
         if asset_id is None:

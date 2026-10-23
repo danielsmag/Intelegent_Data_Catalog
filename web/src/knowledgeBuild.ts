@@ -255,6 +255,10 @@ const assetBuilds: BuildFollower<AssetBuildJob> = createFollower(
   (job: AssetBuildJob): string => `Build asset context for ${job.asset_name}`,
 )
 
+export function onAssetBuildFinished(handler: FinishedHandler<AssetBuildJob>): () => void {
+  return assetBuilds.onFinished(handler)
+}
+
 export async function requestAssetBuild(assetId: string): Promise<AssetBuildJob> {
   const job: AssetBuildJob = await startAssetBuild(assetId)
   assetBuilds.follow(job)

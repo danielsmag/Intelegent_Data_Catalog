@@ -5,6 +5,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,7 @@ from intelegent_data_catalog.assets.definitions.resolver import (
     SourceResolver,
     UnresolvedSource,
 )
+from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.assets.repository import AssetRepository
 from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.exceptions import CatalogError
@@ -30,6 +32,7 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
+    DefinitionRunStatus,
     SpaceIsolationMode,
 )
 from intelegent_data_catalog.persistence.models import (
@@ -49,14 +52,6 @@ from intelegent_data_catalog.services.support import apply_user_context
 _MAX_ERROR: int = 8000
 
 
-class _Target:
-    """Scope or space a declaration attaches to."""
-
-    def __init__(self, scope_id: UUID | None, space_id: UUID | None) -> None:
-        self.scope_id: UUID | None = scope_id
-        self.space_id: UUID | None = space_id
-
-
 class AssetDefinitionApplier:
     """Writes catalog rows for one file. The scanner commits. Retries commit per item."""
 
@@ -68,6 +63,17 @@ class AssetDefinitionApplier:
         self._assets: AssetRepository = AssetRepository(session)
         self._resolver: SourceResolver = SourceResolver(session)
         self._sync: AssetSync = AssetSync(session)
+        self._pending: list[OperatorWorkload] = []
+
+    def take_workloads(self) -> list[OperatorWorkload]:
+        """Return operator runs collected since the last take, then clear them."""
+        found: list[OperatorWorkload] = list(self._pending)
+        self._pending.clear()
+        return found
+
+    def drop_workloads(self) -> None:
+        """Forget operator runs collected for a file that failed."""
+        self._pending.clear()
 
     def apply_file(self, file_row: AssetDefinitionFileRow, spec: DefinitionSpec) -> None:
         """Upsert declarations and retire ones the file no longer contains."""
@@ -97,11 +103,13 @@ class AssetDefinitionApplier:
         item: AssetDefinitionItemRow
         for item in self._repo.unresolved():
             item_id: UUID = item.id
+            kept: int = len(self._pending)
             try:
                 status: DefinitionItemStatus = self._retry(item)
                 self._session.commit()
             except CatalogError, ValidationError, SQLAlchemyError:
                 self._logger.exception("asset definition retry failed: %s", item_id)
+                self._pending = self._pending[:kept]
                 self._session.rollback()
                 self._mark_retry_error(item_id)
                 self._session.commit()
@@ -221,8 +229,10 @@ class AssetDefinitionApplier:
         spec: AssetSpec,
         prior: AssetDefinitionItemRow | None,
     ) -> DefinitionItemStatus:
-        target: _Target | str = self._target(spec)
-        if isinstance(target, str):
+        resolved: ResolvedSource | UnresolvedSource | RejectedSource = self._resolver.resolve(
+            spec.source,
+        )
+        if isinstance(resolved, UnresolvedSource):
             if prior is not None:
                 self._detach_claim(prior)
             self._record(
@@ -231,34 +241,8 @@ class AssetDefinitionApplier:
                 spec.key,
                 spec,
                 DefinitionItemStatus.UNRESOLVED,
-                target,
-                prior,
-            )
-            return DefinitionItemStatus.UNRESOLVED
-        resolved: ResolvedSource | UnresolvedSource | RejectedSource = self._resolver.resolve(
-            spec.source,
-        )
-        if isinstance(resolved, UnresolvedSource):
-            kept_asset: UUID | None = None
-            if prior is not None:
-                same_place: bool = (
-                    prior.scope_id == target.scope_id and prior.space_id == target.space_id
-                )
-                if same_place:
-                    kept_asset = prior.asset_id
-                else:
-                    self._detach_claim(prior)
-            self._record(
-                file_row,
-                DefinitionKind.ASSET,
-                spec.key,
-                spec,
-                DefinitionItemStatus.UNRESOLVED,
                 resolved.reason,
                 prior,
-                space_id=target.space_id,
-                scope_id=target.scope_id,
-                asset_id=kept_asset,
             )
             return DefinitionItemStatus.UNRESOLVED
         if isinstance(resolved, RejectedSource):
@@ -276,16 +260,11 @@ class AssetDefinitionApplier:
             return DefinitionItemStatus.ERROR
         asset: AssetRow = self._ensure_asset(resolved)
         self._overlay(asset, spec, file_row.key)
-        same_target: bool = (
-            prior is not None
-            and prior.asset_id == asset.id
-            and prior.scope_id == target.scope_id
-            and prior.space_id == target.space_id
-        )
-        if prior is not None and not same_target:
+        if prior is not None and (prior.scope_id is not None or prior.space_id is not None):
             self._detach_claim(prior)
-        self._assets.attach(asset.id, scope_id=target.scope_id, space_id=target.space_id)
-        self._record(
+        recorded: AssetDefinitionItemRow
+        changed: bool
+        recorded, changed = self._record(
             file_row,
             DefinitionKind.ASSET,
             spec.key,
@@ -293,35 +272,42 @@ class AssetDefinitionApplier:
             DefinitionItemStatus.APPLIED,
             None,
             prior,
-            space_id=target.space_id,
-            scope_id=target.scope_id,
             asset_id=asset.id,
         )
+        if changed and spec.operator is not None:
+            self._queue(file_row, recorded, asset, spec)
         return DefinitionItemStatus.APPLIED
 
-    def _target(self, spec: AssetSpec) -> _Target | str:
-        if spec.scope is not None:
-            space_slug: str
-            scope_slug: str
-            space_slug, _separator, scope_slug = spec.scope.partition("/")
-            space: SpaceRow | None = self._registry.find_space_by_slug(space_slug)
-            if space is None:
-                return f"space not found: {space_slug}"
-            scope: ScopeRow | None = self._registry.find_scope_by_slug(space.id, scope_slug)
-            if scope is None:
-                return f"scope not found: {spec.scope}"
-            return _Target(scope.id, None)
-        if spec.space is None:
-            return "asset needs a scope or a space"
-        space_row: SpaceRow | None = self._registry.find_space_by_slug(spec.space)
-        if space_row is None:
-            return f"space not found: {spec.space}"
-        return _Target(None, space_row.id)
+    def _queue(
+        self,
+        file_row: AssetDefinitionFileRow,
+        item: AssetDefinitionItemRow,
+        asset: AssetRow,
+        spec: AssetSpec,
+    ) -> None:
+        if spec.operator is None:
+            return
+        item.run_status = DefinitionRunStatus.QUEUED.value
+        item.run_error = None
+        item.schedule = spec.schedule
+        item.next_run_at = None
+        item.updated_at = utc_now()
+        self._session.flush()
+        self._pending.append(
+            OperatorWorkload(
+                item_id=item.id,
+                asset_id=asset.id,
+                asset_name=asset.name,
+                file_key=file_row.key,
+                item_key=spec.key,
+                operator=spec.operator,
+            ),
+        )
 
     def _ensure_asset(self, resolved: ResolvedSource) -> AssetRow:
         match resolved:
             case CatalogTableRow():
-                return self._sync.ensure_table(resolved, None)
+                return self._sync.ensure_table(resolved)
             case AirflowDagRow():
                 return self._sync.ensure_dag(resolved)
             case WorkspaceNodeRow():
@@ -381,9 +367,31 @@ class AssetDefinitionApplier:
             row.updated_at = utc_now()
 
     def _retire_item(self, item: AssetDefinitionItemRow) -> None:
+        asset_id: UUID | None = item.asset_id if item.kind == DefinitionKind.ASSET.value else None
         if item.kind == DefinitionKind.ASSET.value:
             self._detach_claim(item)
         self._repo.delete_item(item)
+        if asset_id is not None:
+            self._delete_asset_if_undeclared(asset_id)
+
+    def drop_undeclared_assets(self) -> int:
+        """Delete assets no applied asset script still names. Spaces and scopes stay."""
+        declared: set[UUID] = self._repo.applied_asset_ids()
+        removed: int = 0
+        asset: AssetRow
+        for asset in list(self._session.scalars(select(AssetRow))):
+            if asset.id in declared:
+                continue
+            self._assets.delete(asset)
+            removed += 1
+        return removed
+
+    def _delete_asset_if_undeclared(self, asset_id: UUID) -> None:
+        if asset_id in self._repo.applied_asset_ids():
+            return
+        asset: AssetRow | None = self._session.get(AssetRow, asset_id)
+        if asset is not None:
+            self._assets.delete(asset)
 
     def _detach_claim(self, item: AssetDefinitionItemRow) -> None:
         if item.asset_id is None or item.status != DefinitionItemStatus.APPLIED.value:
@@ -413,7 +421,7 @@ class AssetDefinitionApplier:
         space_id: UUID | None = None,
         scope_id: UUID | None = None,
         asset_id: UUID | None = None,
-    ) -> None:
+    ) -> tuple[AssetDefinitionItemRow, bool]:
         digest: str = fingerprint(spec)
         payload: dict[str, object] = declaration_payload(spec)
         message: str | None = _clip_error(error)
@@ -426,7 +434,7 @@ class AssetDefinitionApplier:
             scope_id,
             asset_id,
         ):
-            return
+            return prior, False
         now: datetime = utc_now()
         if prior is None:
             created: AssetDefinitionItemRow = AssetDefinitionItemRow(
@@ -446,7 +454,7 @@ class AssetDefinitionApplier:
             )
             self._session.add(created)
             self._session.flush()
-            return
+            return created, True
         prior.kind = kind.value
         prior.item_key = item_key
         prior.declaration = payload
@@ -458,6 +466,7 @@ class AssetDefinitionApplier:
         prior.error = message
         prior.updated_at = now
         self._session.flush()
+        return prior, True
 
     def _mark_retry_error(self, item_id: UUID) -> None:
         row: AssetDefinitionItemRow | None = self._session.get(AssetDefinitionItemRow, item_id)

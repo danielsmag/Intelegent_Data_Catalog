@@ -5,9 +5,11 @@ from intelegent_data_catalog.assets.dsl.operators import (
     AirflowOperator,
     IcebergTableOperator,
     Operator,
+    OperatorContext,
     PageOperator,
     PostgresTableOperator,
     TableOperator,
+    operator_from_ref,
 )
 
 __all__ = [
@@ -15,9 +17,11 @@ __all__ = [
     "Asset",
     "IcebergTableOperator",
     "Operator",
+    "OperatorContext",
     "PageOperator",
     "PostgresTableOperator",
     "Scope",
     "Space",
     "TableOperator",
+    "operator_from_ref",
 ]

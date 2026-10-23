@@ -1,5 +1,5 @@
 import { type ReactElement } from "react"
-import { AssetsExplorer } from "./AssetsExplorer"
+import { AssetDefinitionFiles } from "./AssetDefinitionFiles"
 import { PanelChevron } from "./icons"
 import { ResizeHandle } from "./ResizeHandle"
 
@@ -30,7 +30,7 @@ export function AssetsSidebar(props: { collapsed: boolean; onToggleCollapsed: ()
       </div>
       {props.collapsed ? null : (
         <div className="assets-sidebar-body">
-          <AssetsExplorer />
+          <AssetDefinitionFiles />
         </div>
       )}
       <ResizeHandle pane="sidebar" edge="end" label="Resize sidebar" />

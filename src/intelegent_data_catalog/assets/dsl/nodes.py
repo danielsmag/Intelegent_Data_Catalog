@@ -8,6 +8,7 @@ from intelegent_data_catalog.assets.definitions.models import AssetSpec, ScopeSp
 from intelegent_data_catalog.assets.dsl.collector import current_collector
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
 from intelegent_data_catalog.assets.dsl.operators import Operator
+from intelegent_data_catalog.assets.execution.cron import parse_schedule
 from intelegent_data_catalog.persistence.enums import AssetStatus
 from intelegent_data_catalog.registry.identifiers import require_slug
 
@@ -72,32 +73,34 @@ class Scope:
 
 
 class Asset:
-    """Declare one asset and the operator that names its source."""
+    """Declare one asset and the operator that names its source and builds its context.
+
+    The asset is not placed in a space or scope. ``key`` is the stable id.
+    ``schedule`` is a five-field cron; omit it to run once when the asset is first applied.
+    ``context`` is a manual override. Without it, the operator writes the context.
+    """
 
     def __init__(
         self,
         key: str,
         operator: Operator,
         *,
-        scope: str | _UnsetType | None = _UNSET,
-        space: str | _UnsetType | None = _UNSET,
         name: str | _UnsetType | None = _UNSET,
         description: str | _UnsetType | None = _UNSET,
         context: str | _UnsetType | None = _UNSET,
         status: AssetStatus | _UnsetType | None = _UNSET,
         properties: dict[str, JsonValue] | _UnsetType = _UNSET,
+        schedule: str | _UnsetType | None = _UNSET,
     ) -> None:
-        scope_value: str | None
-        space_value: str | None
-        scope_value, space_value = _target(scope, space)
         status_value: AssetStatus | None = _status(status)
         property_value: dict[str, JsonValue] = _properties(properties)
+        schedule_value: str | None = _schedule(schedule)
         try:
             spec: AssetSpec = AssetSpec(
                 key=_asset_key(key),
                 source=operator.to_source(),
-                scope=scope_value,
-                space=space_value,
+                operator=operator.to_ref(),
+                schedule=schedule_value,
                 name=_optional_text(name, "name", required=True),
                 description=_optional_text(description, "description", required=False),
                 context=_optional_text(context, "context", required=False),
@@ -118,30 +121,12 @@ class Asset:
         current_collector().add_asset(spec)
 
 
-def _target(
-    scope: str | _UnsetType | None,
-    space: str | _UnsetType | None,
-) -> tuple[str | None, str | None]:
-    scope_set: bool = not isinstance(scope, _UnsetType)
-    space_set: bool = not isinstance(space, _UnsetType)
-    if scope_set == space_set:
-        raise AssetDefinitionError("asset needs exactly one of scope or space")
-    if scope_set:
-        if not isinstance(scope, str):
-            raise AssetDefinitionError("scope cannot be null")
-        return _scope_ref(scope), None
-    if not isinstance(space, str):
-        raise AssetDefinitionError("space cannot be null")
-    return None, _slug(space, "space")
-
-
-def _scope_ref(value: str) -> str:
-    space_slug: str
-    scope_slug: str
-    space_slug, separator, scope_slug = value.partition("/")
-    if separator != "/" or space_slug == "" or scope_slug == "" or "/" in scope_slug:
-        raise AssetDefinitionError("scope must be space-slug/scope-slug")
-    return f"{_slug(space_slug, 'scope')}/{_slug(scope_slug, 'scope')}"
+def _schedule(value: str | _UnsetType | None) -> str | None:
+    if isinstance(value, _UnsetType) or value is None:
+        return None
+    if not isinstance(value, str):
+        raise AssetDefinitionError("schedule must be a cron string")
+    return parse_schedule(value)
 
 
 def _slug(value: str, field: str) -> str:

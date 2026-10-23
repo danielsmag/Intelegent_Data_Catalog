@@ -16,6 +16,7 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
+    DefinitionRunStatus,
 )
 from intelegent_data_catalog.persistence.models import (
     AssetDefinitionFileRow,
@@ -40,6 +41,14 @@ class AssetDefinitionService:
         """Return scanned files. ``folder`` limits the kind."""
         kind: DefinitionKind | None = None if folder is None else _FOLDERS[folder]
         return [_file_read(row) for row in self._repository.list_files(kind)]
+
+    def file_ids_by_key(self, keys: list[str]) -> dict[str, UUID]:
+        """Return the scan row id for each definition file key."""
+        return self._repository.file_ids_by_key(keys)
+
+    def asset_ids_by_key(self, keys: list[str]) -> dict[str, list[UUID]]:
+        """Return catalog assets each definition file key currently includes."""
+        return self._repository.asset_ids_by_key(keys)
 
     def read(self, file_id: UUID) -> AssetDefinitionFileDetail:
         """Return one file and its declarations."""
@@ -84,4 +93,9 @@ def _item_read(row: AssetDefinitionItemRow) -> AssetDefinitionItemRead:
         space_id=row.space_id,
         scope_id=row.scope_id,
         asset_id=row.asset_id,
+        run_status=None if row.run_status is None else DefinitionRunStatus(row.run_status),
+        run_error=row.run_error,
+        ran_at=row.ran_at,
+        schedule=row.schedule,
+        next_run_at=row.next_run_at,
     )

@@ -1,0 +1,40 @@
+Installation
+============
+
+The package requires Python 3.15. `uv <https://docs.astral.sh/uv/>`_ installs
+it and the dev tools:
+
+.. code-block:: bash
+
+   uv sync --group dev
+
+Serve the catalog API:
+
+.. code-block:: bash
+
+   uv run intelegent-data-catalog-api
+
+The process binds ``[api] host`` and ``[api] port``. The file defaults are
+``127.0.0.1`` and ``8090``. ``GET /api/v1/health`` reports that the process is
+up.
+
+A host process leaves ``[auth] enabled`` false, so the API uses the dev
+principal and does not check bearer tokens. Compose turns auth on. See
+:doc:`configuration` and :doc:`/howto/sign-in`.
+
+Build this manual with the ``docs`` group:
+
+.. code-block:: bash
+
+   uv sync --group docs
+   uv run sphinx-build -W -b html docs docs/_build/html
+
+Open ``docs/_build/html/index.html``.
+
+Checks:
+
+.. code-block:: bash
+
+   uv run pytest
+   uv run ruff check .
+   uv run mypy

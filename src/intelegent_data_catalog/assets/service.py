@@ -4,13 +4,13 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
-from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.assets.base import Asset, AssetAgent, AssetAgentProvider
+from intelegent_data_catalog.assets.execution.models import AssetRunRead, AssetRunTaskDetail
+from intelegent_data_catalog.assets.execution.runs import AssetRunReader
 from intelegent_data_catalog.assets.models import (
     AssetContextOptions,
-    AssetCreate,
     AssetListItem,
     AssetMembershipRead,
     AssetPage,
@@ -22,29 +22,24 @@ from intelegent_data_catalog.assets.models import (
 )
 from intelegent_data_catalog.assets.registry import AssetRegistry
 from intelegent_data_catalog.assets.repository import AssetRepository
-from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
     LlmUnavailableError,
-    ValidationAppError,
 )
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import ContextOrigin
 from intelegent_data_catalog.persistence.models import (
-    AirflowDagRow,
     AssetMembershipRow,
     AssetRow,
-    CatalogTableRow,
     ScopeRow,
     SpaceRow,
-    WorkspaceNodeRow,
 )
 from intelegent_data_catalog.registry.reads import dump_model
 
 
 class AssetService:
-    """Creates, lists, and attaches assets. The caller owns the session."""
+    """Lists and attaches assets. Operators create them. The caller owns the session."""
 
     def __init__(
         self,
@@ -55,8 +50,8 @@ class AssetService:
         self._session: Session = session
         self._access: AccessContext = access
         self._repository: AssetRepository = AssetRepository(session)
-        self._sync: AssetSync = AssetSync(session)
         self._registry: AssetRegistry = AssetRegistry(session, agents or _UnavailableAgents())
+        self._runs: AssetRunReader = AssetRunReader(session)
 
     def search(self, query: AssetQuery) -> AssetPage:
         """Return one page of assets the caller can see."""
@@ -70,44 +65,16 @@ class AssetService:
         row: AssetRow = self._require(asset_id)
         return self._read(row)
 
-    def create(self, body: AssetCreate) -> AssetRead:
-        """Link an existing table, DAG, or file and optionally attach it."""
-        self._require_workspace(body.workspace_id)
-        sources: int = len([item for item in (body.table, body.dag, body.node) if item is not None])
-        if sources != 1:
-            raise ValidationAppError("provide one of table, dag, or node", field="source")
-        row: AssetRow
-        if body.table is not None:
-            table: CatalogTableRow | None = self._session.get(CatalogTableRow, body.table.table_id)
-            if table is None:
-                raise EntityNotFoundError("catalog table", str(body.table.table_id))
-            scope_id: UUID | None = body.table.scope_id or body.scope_id or table.scope_id
-            row = self._sync.ensure_table(table, scope_id)
-        elif body.dag is not None:
-            dag: AirflowDagRow | None = self._session.scalar(
-                _dag_statement(body.dag.instance_id, body.dag.dag_id),
-            )
-            if dag is None:
-                raise EntityNotFoundError("airflow dag", body.dag.dag_id)
-            row = self._sync.ensure_dag(dag)
-        else:
-            node_id: UUID = body.node.node_id if body.node is not None else body.workspace_id
-            node: WorkspaceNodeRow | None = self._session.get(WorkspaceNodeRow, node_id)
-            if node is None or node.workspace_id != body.workspace_id:
-                raise EntityNotFoundError("workspace file", str(node_id))
-            self._require_node(node)
-            created: AssetRow | None = self._sync.ensure_file(node)
-            if created is None:
-                raise ValidationAppError("folders are not assets", field="node")
-            row = created
-        if body.scope_id is not None:
-            self._require_scope(body.scope_id)
-            self._repository.attach(row.id, scope_id=body.scope_id, space_id=None)
-        if body.space_id is not None:
-            self._require_space(body.space_id)
-            self._repository.attach(row.id, scope_id=None, space_id=body.space_id)
-        self._session.commit()
-        return self._read(row)
+    def list_runs(self, asset_id: UUID, limit: int) -> list[AssetRunRead]:
+        """Return the newest operator runs for one visible asset."""
+        self._require(asset_id)
+        bounded: int = min(max(limit, 1), 25)
+        return self._runs.list_for_asset(asset_id, bounded)
+
+    def get_run_task(self, asset_id: UUID, run_id: UUID, task_id: str) -> AssetRunTaskDetail:
+        """Return one task log for a visible asset."""
+        self._require(asset_id)
+        return self._runs.get_task(asset_id, run_id, task_id)
 
     def update(self, asset_id: UUID, patch: AssetUpdate) -> AssetRead:
         """Patch name, description, context, or status."""
@@ -289,14 +256,6 @@ class AssetService:
             raise EntityNotFoundError("space", str(space_id))
         return row
 
-    def _require_node(self, node: WorkspaceNodeRow) -> None:
-        if not self._access.is_member(node.workspace_id):
-            raise EntityNotFoundError("workspace file", str(node.id))
-        hidden: bool = node.owner_user_id is not None and node.owner_user_id != self._access.user_id
-        if hidden and not self._access.principal.is_admin:
-            raise EntityNotFoundError("workspace file", str(node.id))
-
-
 class _UnavailableAgents(AssetAgentProvider):
     """Placeholder used when a request only reads assets."""
 
@@ -308,14 +267,6 @@ class _UnavailableAgents(AssetAgentProvider):
 
     def for_file(self, asset_id: UUID, notebook: bool) -> AssetAgent:
         raise LlmUnavailableError("language model is not configured")
-
-
-def _dag_statement(instance_id: UUID, dag_id: str) -> Select[tuple[AirflowDagRow]]:
-    statement: Select[tuple[AirflowDagRow]] = select(AirflowDagRow).where(
-        AirflowDagRow.instance_id == instance_id,
-        AirflowDagRow.dag_id == dag_id,
-    )
-    return statement
 
 
 def _properties(raw: dict[str, object]) -> dict[str, JsonValue]:

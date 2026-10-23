@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react"
 import { useParams } from "react-router-dom"
 import { detailString, fetchAsset, type AssetRecord } from "./assetsApi"
+import { AssetRuns } from "./AssetRuns"
 import { ContextEditor } from "./ContextEditor"
 import { useTabParam } from "./useTabParam"
 import { useEntityConfig, type RefreshMode } from "./refreshSettings"
@@ -8,7 +9,7 @@ import { requestAssetBuild } from "./knowledgeBuild"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { WorkbenchLink } from "./editorSlots"
 
-const TABS = ["overview", "source", "config"] as const
+const TABS = ["overview", "source", "runs", "config"] as const
 type AssetTab = (typeof TABS)[number]
 
 const OPTION_FIELDS = [
@@ -98,6 +99,7 @@ export function AssetPage(): ReactElement {
           <pre>{JSON.stringify(asset.detail, null, 2)}</pre>
         )
       ) : null}
+      {tab === "runs" ? <AssetRuns assetId={assetId} /> : null}
       {tab === "config" ? (
         <div>
           <label>

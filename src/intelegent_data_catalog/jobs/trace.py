@@ -12,6 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, ValidationError
 from redis import Redis
 
+from intelegent_data_catalog.assets.execution.runs import publish_run_event
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import load_settings
 
@@ -197,28 +198,28 @@ def close_build_trace(
 
 def publish_build_step(agent: str, step: TraceStep, body: str) -> None:
     """Store one step when a build subject is bound. A sink error does not fail the build."""
-    subject: BuildTraceSubject | None = _subject.get()
-    sink: BuildTraceSink | None = _sink.get()
-    if subject is None or sink is None:
-        return
     title: str
     detail: str
     title, detail = step_copy(step, body)
-    event: BuildTraceWrite = BuildTraceWrite(
-        at=datetime.now(UTC),
-        kind=subject.kind,
-        subject_name=subject.subject_name,
-        subject_id=subject.subject_id,
-        job_id=subject.job_id,
-        agent=agent,
-        step=step,
-        title=title,
-        detail=detail,
-    )
-    try:
-        sink.append(event)
-    except Exception:
-        _LOGGER.warning("build trace publish failed", exc_info=True)
+    subject: BuildTraceSubject | None = _subject.get()
+    sink: BuildTraceSink | None = _sink.get()
+    if subject is not None and sink is not None:
+        event: BuildTraceWrite = BuildTraceWrite(
+            at=datetime.now(UTC),
+            kind=subject.kind,
+            subject_name=subject.subject_name,
+            subject_id=subject.subject_id,
+            job_id=subject.job_id,
+            agent=agent,
+            step=step,
+            title=title,
+            detail=detail,
+        )
+        try:
+            sink.append(event)
+        except Exception:
+            _LOGGER.warning("build trace publish failed", exc_info=True)
+    publish_run_event(step, title, detail)
 
 
 def kind_from_agent(agent: str) -> TraceKind:

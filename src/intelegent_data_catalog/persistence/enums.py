@@ -236,6 +236,34 @@ class DefinitionItemStatus(StrEnum):
     REMOVED = "REMOVED"
 
 
+class DefinitionRunStatus(StrEnum):
+    """State of the operator run recorded on one definition item."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class OperatorRunTrigger(StrEnum):
+    """Why an asset operator run started."""
+
+    APPLY = "apply"
+    SCHEDULE = "schedule"
+    MANUAL = "manual"
+
+
+class OperatorTaskState(StrEnum):
+    """State of one task inside an asset operator run."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    UPSTREAM_FAILED = "upstream_failed"
+
+
 class CapabilitySupport(StrEnum):
     """Whether a source binding claims a metadata feature.
 

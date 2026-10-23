@@ -42,6 +42,48 @@ class AssetDefinitionRepository:
             statement = statement.where(AssetDefinitionFileRow.folder_kind == folder.value)
         return list(self._session.scalars(statement))
 
+    def file_ids_by_key(self, keys: list[str]) -> dict[str, UUID]:
+        """Return the scan row id for each file key that has been scanned."""
+        found: dict[str, UUID] = {}
+        if len(keys) == 0:
+            return found
+        statement = select(AssetDefinitionFileRow.key, AssetDefinitionFileRow.id).where(
+            AssetDefinitionFileRow.key.in_(keys),
+        )
+        for record in self._session.execute(statement):
+            key: str = record[0]
+            file_id: UUID = record[1]
+            found[key] = file_id
+        return found
+
+    def asset_ids_by_key(self, keys: list[str]) -> dict[str, list[UUID]]:
+        """Return catalog asset ids declared by each file key, in item key order."""
+        found: dict[str, list[UUID]] = {key: [] for key in keys}
+        seen: dict[str, set[UUID]] = {key: set() for key in keys}
+        if len(keys) == 0:
+            return found
+        statement = (
+            select(AssetDefinitionFileRow.key, AssetDefinitionItemRow.asset_id)
+            .join(
+                AssetDefinitionItemRow,
+                AssetDefinitionItemRow.file_id == AssetDefinitionFileRow.id,
+            )
+            .where(AssetDefinitionFileRow.key.in_(keys))
+            .where(AssetDefinitionItemRow.kind == DefinitionKind.ASSET.value)
+            .where(AssetDefinitionItemRow.asset_id.is_not(None))
+            .order_by(AssetDefinitionFileRow.key, AssetDefinitionItemRow.item_key)
+        )
+        for record in self._session.execute(statement):
+            key: str = record[0]
+            asset_id: UUID | None = record[1]
+            bucket: list[UUID] | None = found.get(key)
+            used: set[UUID] | None = seen.get(key)
+            if asset_id is None or bucket is None or used is None or asset_id in used:
+                continue
+            used.add(asset_id)
+            bucket.append(asset_id)
+        return found
+
     def items_for(self, file_id: UUID) -> list[AssetDefinitionItemRow]:
         """Return the declarations of one file in key order."""
         statement = (
@@ -59,6 +101,20 @@ class AssetDefinitionRepository:
         rows: list[AssetDefinitionItemRow] = list(self._session.scalars(statement))
         rows.sort(key=_item_sort)
         return rows
+
+    def applied_asset_ids(self) -> set[UUID]:
+        """Return assets an applied asset declaration still names."""
+        statement = select(AssetDefinitionItemRow.asset_id).where(
+            AssetDefinitionItemRow.kind == DefinitionKind.ASSET.value,
+            AssetDefinitionItemRow.status == DefinitionItemStatus.APPLIED.value,
+            AssetDefinitionItemRow.asset_id.is_not(None),
+        )
+        found: set[UUID] = set()
+        asset_id: UUID | None
+        for asset_id in self._session.scalars(statement):
+            if asset_id is not None:
+                found.add(asset_id)
+        return found
 
     def other_applied_claim(self, item: AssetDefinitionItemRow) -> bool:
         """True when another applied item still holds this asset membership."""

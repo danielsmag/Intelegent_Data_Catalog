@@ -8,15 +8,24 @@ from intelegent_data_catalog.registry.identifiers import require_slug
 
 
 class AirflowOperator(Operator):
-    """Link one synced Airflow DAG."""
+    """Link one synced Airflow DAG. The ``include_*`` fields are its DAG build flags."""
 
     instance: str = Field(min_length=1, max_length=255)
     dag_id: str = Field(min_length=1, max_length=250)
+    include_source: bool = True
+    include_previous: bool = True
 
     @model_validator(mode="after")
     def _instance_slug(self) -> AirflowOperator:
         require_slug(self.instance)
         return self
+
+    def context_flags(self) -> dict[str, bool]:
+        """DAG build flags."""
+        return {
+            "include_source": self.include_source,
+            "include_previous": self.include_previous,
+        }
 
     def to_source(self) -> AirflowSourceRef:
         """Return the stored source reference."""

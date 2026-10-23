@@ -463,7 +463,9 @@ class AuthSettings(BaseModel):
 class AssetDefinitionsSettings(BaseModel):
     """S3 prefix of Python files that declare spaces, scopes, and assets.
 
-    Beat polls the prefix only when ``enabled`` is true. Manual scans still run.
+    Beat polls the prefix every ``poll_interval_seconds`` when ``enabled`` is true.
+    Each pass keeps only assets named by a file under ``assets_folder``. A script
+    that disappeared is removed on that pass, the same way Airflow drops a deleted DAG file.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -481,6 +483,7 @@ class AssetDefinitionsSettings(BaseModel):
     poll_interval_seconds: float = Field(default=10.0, gt=0)
     exec_timeout_seconds: float = Field(default=30.0, gt=0)
     max_file_bytes: int = Field(default=1024 * 1024, ge=1)
+    executor: Literal["celery", "local"] = "celery"
 
     @model_validator(mode="after")
     def _normalize_prefix_and_folders(self) -> AssetDefinitionsSettings:

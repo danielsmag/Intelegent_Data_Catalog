@@ -16,6 +16,8 @@ from intelegent_data_catalog.assets.definitions.models import DefinitionSpec, Sc
 from intelegent_data_catalog.assets.definitions.repository import AssetDefinitionRepository
 from intelegent_data_catalog.assets.dsl.collect import collect_definitions
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionImportError
+from intelegent_data_catalog.assets.execution.executor import OperatorExecutor
+from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
 from intelegent_data_catalog.persistence.enums import DefinitionFileStatus, DefinitionKind
 from intelegent_data_catalog.persistence.models import AssetDefinitionFileRow
@@ -33,11 +35,13 @@ class AssetDefinitionScanner:
         store: ObjectStore,
         settings: AssetDefinitionsSettings,
         logger: logging.Logger,
+        executor: OperatorExecutor,
     ) -> None:
         self._session: Session = session
         self._store: ObjectStore = store
         self._settings: AssetDefinitionsSettings = settings
         self._logger: logging.Logger = logger
+        self._executor: OperatorExecutor = executor
         self._layout: DefinitionLayout = DefinitionLayout(settings)
         self._repo: AssetDefinitionRepository = AssetDefinitionRepository(session)
         self._applier: AssetDefinitionApplier = AssetDefinitionApplier(session, logger)
@@ -65,7 +69,10 @@ class AssetDefinitionScanner:
                 errors += 1
         removed: int = self._remove_absent(seen_keys, now)
         retried: int = self._applier.retry_unresolved()
+        dropped: int = self._applier.drop_undeclared_assets()
+        retried_work: list[OperatorWorkload] = self._applier.take_workloads()
         self._session.commit()
+        self._submit(retried_work)
         result: ScanResult = ScanResult(
             seen=len(listed),
             parsed=parsed,
@@ -74,12 +81,13 @@ class AssetDefinitionScanner:
             retried=retried,
         )
         self._logger.info(
-            "asset definition scan seen=%s parsed=%s removed=%s errors=%s retried=%s",
+            "asset definition scan seen=%s parsed=%s removed=%s errors=%s retried=%s dropped=%s",
             result.seen,
             result.parsed,
             result.removed,
             result.errors,
             result.retried,
+            dropped,
         )
         return result
 
@@ -124,17 +132,29 @@ class AssetDefinitionScanner:
             row.parsed_at = now
             row.item_count = len(self._repo.items_for(row.id))
             row.updated_at = now
+            workloads: list[OperatorWorkload] = self._applier.take_workloads()
             self._session.commit()
+            self._submit(workloads)
             return "parsed"
         except AssetDefinitionImportError as err:
+            self._applier.drop_workloads()
             self._session.rollback()
             self._write_error(obj, location.kind, _import_message(err), now)
             return "error"
         except Exception:
             self._logger.exception("asset definition file failed: %s", obj.key)
+            self._applier.drop_workloads()
             self._session.rollback()
             self._write_error(obj, location.kind, "definition file failed", now)
             return "error"
+
+    def _submit(self, workloads: list[OperatorWorkload]) -> None:
+        workload: OperatorWorkload
+        for workload in workloads:
+            try:
+                self._executor.submit(workload)
+            except Exception:
+                self._logger.exception("asset operator submit failed: %s", workload.item_key)
 
     def _remove_absent(self, seen: set[str], now: datetime) -> int:
         removed: int = 0

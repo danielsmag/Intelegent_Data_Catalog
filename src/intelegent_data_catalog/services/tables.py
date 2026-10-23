@@ -76,9 +76,6 @@ class TableService:
             last_synced_at=None,
         )
         stored: CatalogTableRow = self._repo.add_table(row)
-        sync: AssetSync | None = AssetSync.for_row(stored)
-        if sync is not None:
-            sync.ensure_table(stored, scope_id)
         self._repo.commit()
         return table_read(stored)
 
@@ -126,9 +123,6 @@ class TableService:
             self._scope(scope_id)
             row.scope_id = scope_id
         row.updated_at = utc_now()
-        sync: AssetSync | None = AssetSync.for_row(row)
-        if sync is not None:
-            sync.ensure_table(row, row.scope_id, replace_scope="scope_id" in changes)
         self._repo.commit()
         return table_read(row)
 

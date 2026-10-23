@@ -125,6 +125,18 @@ export function titleFromPath(path: string): string {
   if (head === "assets") {
     return parts[1] === undefined ? "Assets" : "Asset"
   }
+  if (head === "asset-definitions") {
+    if (parts[1] === "text") {
+      const encodedKey: string | undefined = parts[2]
+      if (encodedKey === undefined) {
+        return "Definition"
+      }
+      const objectName: string | undefined = decodeURIComponent(encodedKey).split("/").pop()
+      return objectName === undefined || objectName === "" ? "Definition" : objectName
+    }
+    const fileName: string | undefined = parts[2]
+    return fileName === undefined ? "Definition" : decodeURIComponent(fileName)
+  }
   if (head === "workspace" && parts[1] === "assets") {
     return "Assets"
   }

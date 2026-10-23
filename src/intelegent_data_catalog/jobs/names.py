@@ -5,3 +5,4 @@ SYNC_TRINO_BINDING: str = "intelegent_data_catalog.jobs.tasks.sync_trino_binding
 SYNC_AIRFLOW_INSTANCE: str = "intelegent_data_catalog.jobs.tasks.sync_airflow_instance"
 DISPATCH_DUE_SYNCS: str = "intelegent_data_catalog.jobs.tasks.dispatch_due_syncs"
 SCAN_ASSET_DEFINITIONS: str = "intelegent_data_catalog.jobs.tasks.scan_asset_definitions"
+RUN_ASSET_OPERATOR: str = "intelegent_data_catalog.jobs.tasks.run_asset_operator"

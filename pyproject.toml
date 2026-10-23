@@ -8,6 +8,7 @@ dependencies = [
     "alembic>=1.20.0",
     "boto3>=1.43.114",
     "celery[redis]>=5.6.3",
+    "croniter>=6.2.4",
     "dependency-injector>=4.49.1",
     "fastapi>=0.141.1",
     "flower>=2.2.0",
@@ -47,6 +48,16 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.8",
 ]
+docs = [
+    "pydata-sphinx-theme>=0.23.0",
+    "pyyaml>=6.0.3",
+    "setuptools>=70,<82",
+    "six>=1.17.0",
+    "sphinx>=9.2.0",
+    "sphinx-copybutton>=0.5.2",
+    "sphinx-design>=0.7.0",
+    "sphinxcontrib-redoc>=1.6.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -75,7 +86,7 @@ explicit_package_bases = true
 packages = ["intelegent_data_catalog"]
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*", "boto3", "boto3.*"]
+module = ["celery", "celery.*", "boto3", "boto3.*", "croniter", "croniter.*"]
 ignore_missing_imports = true
 
 [tool.pyright]

@@ -3,6 +3,8 @@ import {
   fillTab,
   moveTab,
   openAt,
+  openInFocusedGroup,
+  openInGroup,
   openPathInGroupPreferBlank,
   splitOffTab,
   splitWithPath,
@@ -18,7 +20,7 @@ export type DropTarget =
 export type DragSource =
   | { kind: "tab"; fromGroupId: string; tabId: string }
   | { kind: "path"; path: string }
-  | { kind: "asset"; assetIds: string[]; path: string }
+  | { kind: "asset"; assetIds: string[]; path: string; openAll: boolean }
 
 type DropHandler = (assetIds: string[]) => void
 
@@ -141,7 +143,7 @@ function applyDrop(source: DragSource, target: DropTarget): void {
       }
       return
     }
-    applyPathDrop({ kind: "path", path: source.path }, target)
+    openIncludedAssets(source, target)
     return
   }
   if (source.kind === "tab") {
@@ -155,6 +157,36 @@ function applyDrop(source: DragSource, target: DropTarget): void {
     return
   }
   applyPathDrop(source, target)
+}
+
+function openIncludedAssets(
+  source: { assetIds: string[]; path: string; openAll: boolean },
+  target: DropTarget,
+): void {
+  const paths: string[] = source.openAll
+    ? source.assetIds.map((id: string) => `/assets/${id}`)
+    : [source.path]
+  const first: string | undefined = paths[0]
+  if (first === undefined) {
+    return
+  }
+  applyPathDrop({ kind: "path", path: first }, target)
+  const rest: string[] = paths.slice(1)
+  if (target.kind === "insert") {
+    rest.forEach((path: string, offset: number) => {
+      openAt(target.groupId, path, target.index + offset + 1)
+    })
+    return
+  }
+  for (const path of rest) {
+    if (target.kind === "edge") {
+      openInFocusedGroup(path)
+      continue
+    }
+    if (target.kind === "group") {
+      openInGroup(target.groupId, path, "push")
+    }
+  }
 }
 
 function applyPathDrop(source: { kind: "path"; path: string }, target: DropTarget): void {
@@ -245,7 +277,7 @@ export function watchTabDrag(event: { button: number; pointerId: number; clientX
 
 export function watchAssetDrag(
   event: { button: number; pointerId: number; clientX: number; clientY: number },
-  source: { assetIds: string[]; title: string },
+  source: { assetIds: string[]; title: string; openAll?: boolean },
 ): void {
   const first: string | undefined = source.assetIds[0]
   if (first === undefined) {
@@ -254,7 +286,12 @@ export function watchAssetDrag(
   const extra: string = source.assetIds.length > 1 ? ` +${source.assetIds.length - 1}` : ""
   watchDrag(
     event,
-    { kind: "asset", assetIds: source.assetIds, path: `/assets/${first}` },
+    {
+      kind: "asset",
+      assetIds: source.assetIds,
+      path: `/assets/${first}`,
+      openAll: source.openAll === true,
+    },
     `${source.title}${extra}`,
   )
 }

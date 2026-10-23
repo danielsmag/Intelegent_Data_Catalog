@@ -72,45 +72,6 @@ class AssetTargetRef(BaseModel):
     name: str
 
 
-class TableSource(BaseModel):
-    """Create a table asset from an existing catalog table."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    table_id: UUID
-    scope_id: UUID | None = None
-
-
-class DagSource(BaseModel):
-    """Create a DAG asset from a synced Airflow DAG."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    instance_id: UUID
-    dag_id: str = Field(min_length=1, max_length=250)
-
-
-class NodeSource(BaseModel):
-    """Create a file or notebook asset from a workspace node."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    node_id: UUID
-
-
-class AssetCreate(BaseModel):
-    """Register an existing table, DAG, or workspace file as an asset and optionally attach it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    workspace_id: UUID
-    table: TableSource | None = None
-    dag: DagSource | None = None
-    node: NodeSource | None = None
-    scope_id: UUID | None = None
-    space_id: UUID | None = None
-
-
 class AssetUpdate(BaseModel):
     """User edits stored on the asset row."""
 
@@ -167,6 +128,9 @@ class AssetListItem(BaseModel):
     freshness_score: int
     build_running: bool
     refresh_mode: AssetRefreshMode
+    interval_seconds: int
+    schedule: str | None = None
+    next_run_at: datetime | None = None
     updated_at: datetime
 
 

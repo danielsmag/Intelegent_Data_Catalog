@@ -11,10 +11,10 @@ from intelegent_data_catalog.api.dependencies import (
     EntityConfigurationDep,
     PlatformDep,
 )
+from intelegent_data_catalog.assets.execution.models import AssetRunRead, AssetRunTaskDetail
 from intelegent_data_catalog.assets.models import (
     AssetAnalysisContext,
     AssetContextOptions,
-    AssetCreate,
     AssetIdsWrite,
     AssetPage,
     AssetQuery,
@@ -89,16 +89,34 @@ def search_assets(
     )
 
 
-@router.post("/assets", response_model=AssetRead, status_code=201)
-def create_asset(body: AssetCreate, service: AssetServiceDep) -> AssetRead:
-    """Link a table, DAG, or workspace file as an asset."""
-    return service.create(body)
-
-
 @router.post("/assets/bulk-membership", response_model=BulkMembershipResult)
 def bulk_membership(body: BulkMembershipWrite, service: AssetServiceDep) -> BulkMembershipResult:
     """Attach or detach many assets."""
     return service.bulk(body)
+
+
+@router.get("/assets/{asset_id}/runs", response_model=list[AssetRunRead])
+def list_asset_runs(
+    asset_id: UUID,
+    service: AssetServiceDep,
+    limit: Annotated[int, Query(ge=1, le=25)] = 25,
+) -> list[AssetRunRead]:
+    """Return the newest operator runs for one asset."""
+    return service.list_runs(asset_id, limit)
+
+
+@router.get(
+    "/assets/{asset_id}/runs/{run_id}/tasks/{task_id}",
+    response_model=AssetRunTaskDetail,
+)
+def read_asset_run_task(
+    asset_id: UUID,
+    run_id: UUID,
+    task_id: str,
+    service: AssetServiceDep,
+) -> AssetRunTaskDetail:
+    """Return one task's state, log, and trace events."""
+    return service.get_run_task(asset_id, run_id, task_id)
 
 
 @router.get("/assets/{asset_id}", response_model=AssetRead)

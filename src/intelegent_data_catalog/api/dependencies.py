@@ -12,6 +12,7 @@ from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.api.visibility import SpaceResolver
+from intelegent_data_catalog.assets.definitions.listing import AssetDefinitionListing
 from intelegent_data_catalog.assets.definitions.service import AssetDefinitionService
 from intelegent_data_catalog.assets.service import AssetService
 from intelegent_data_catalog.assets.triggers import AssetChangeTrigger
@@ -431,6 +432,20 @@ def get_asset_definition_service(
 
 
 AssetDefinitionServiceDep = Annotated[AssetDefinitionService, Depends(get_asset_definition_service)]
+
+
+def get_asset_definition_listing(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> AssetDefinitionListing:
+    """List definition objects from the definition object store."""
+    listing: AssetDefinitionListing = AssetDefinitionListing(
+        container.asset_definition_store(),
+        container.settings().asset_definitions,
+    )
+    return listing
+
+
+AssetDefinitionListingDep = Annotated[AssetDefinitionListing, Depends(get_asset_definition_listing)]
 
 
 def get_notebook_kernels(

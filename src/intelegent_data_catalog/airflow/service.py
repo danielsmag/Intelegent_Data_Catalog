@@ -58,7 +58,6 @@ from intelegent_data_catalog.airflow.schemas import (
     AirflowTableDagRead,
 )
 from intelegent_data_catalog.assets.repository import AssetRepository
-from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.core.settings import AirflowSettings
 from intelegent_data_catalog.exceptions import (
     AirflowUnavailableError,
@@ -466,9 +465,6 @@ class AirflowService:
         instance: AirflowInstanceRow,
         dag: AirflowDagRow,
     ) -> AirflowAttachmentRead:
-        sync: AssetSync | None = AssetSync.for_row(dag)
-        if sync is not None:
-            sync.ensure_dag(dag)
         if dag.asset_id is None:
             raise EntityNotFoundError("asset", str(dag.id))
         repository: AssetRepository = AssetRepository(self._repo.session)
@@ -613,10 +609,7 @@ class AirflowService:
                     dag_errors += 1
                     notes.append(_clip(f"{dag.dag_id}: {error}"))
         for write in writes:
-            stored_dag: AirflowDagRow = self._repo.upsert_dag(row.id, write)
-            sync: AssetSync | None = AssetSync.for_row(stored_dag)
-            if sync is not None:
-                sync.ensure_dag(stored_dag)
+            self._repo.upsert_dag(row.id, write)
         removed: int = self._repo.delete_missing_dags(row.id, {item.dag_id for item in writes})
         candidates: list[MappingCandidate] = match_dag_tables(
             [DagView(item.dag_id, item.description, item.source_code) for item in writes],

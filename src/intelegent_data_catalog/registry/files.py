@@ -16,7 +16,7 @@ from intelegent_data_catalog.exceptions import (
 )
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import WorkspaceNodeKind
-from intelegent_data_catalog.persistence.models import AssetRow, WorkspaceNodeRow
+from intelegent_data_catalog.persistence.models import WorkspaceNodeRow
 from intelegent_data_catalog.registry.schemas import (
     FolderCreate,
     NodeUpdate,
@@ -281,13 +281,8 @@ class WorkspaceFileService:
         return self._read(row)
 
     def _touch_file(self, row: WorkspaceNodeRow) -> UUID | None:
-        sync: AssetSync | None = AssetSync.for_row(row)
-        if sync is None:
-            return None
-        asset: AssetRow | None = sync.ensure_file(row)
-        if asset is None:
-            return None
-        return asset.id
+        """Return the asset an operator already linked. Saving a file does not create one."""
+        return row.asset_id
 
     def _notify_change(self, asset_id: UUID | None) -> None:
         if asset_id is None or self._changes is None:

@@ -9,9 +9,7 @@ import {
   type ReactElement,
   type RefObject,
 } from "react"
-import { createNodeAsset } from "./assetsApi"
 import { errorMessage } from "./api"
-import { fetchHierarchy, type HierarchySpace } from "./registryApi"
 import { openInFocusedGroup } from "./editorLayout"
 import { Chevron, FileIcon, FolderIcon, MoreIcon, PanelChevron, PersonIcon } from "./icons"
 import { ResizeHandle } from "./ResizeHandle"
@@ -77,8 +75,6 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
   const [selected, setSelected] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
-  const [scopeTarget, setScopeTarget] = useState<WorkspaceNode | null>(null)
-  const [scopeChoices, setScopeChoices] = useState<Array<{ id: string; label: string }>>([])
   const fileRef: RefObject<HTMLInputElement | null> = useRef<HTMLInputElement>(null)
   const uploadParentId: RefObject<string | null> = useRef<string | null>(null)
 
@@ -284,24 +280,6 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
         },
       })
     }
-    if (node.kind === "FILE") {
-      items.push({
-        label: "Add to scope...",
-        onSelect: () => {
-          closeMenu()
-          setScopeTarget(node)
-          void fetchHierarchy(new AbortController().signal).then((spaces: HierarchySpace[]) => {
-            const choices: Array<{ id: string; label: string }> = []
-            for (const space of spaces) {
-              for (const scope of space.scopes) {
-                choices.push({ id: scope.id, label: `${space.name} / ${scope.name}` })
-              }
-            }
-            setScopeChoices(choices)
-          })
-        },
-      })
-    }
     if (canChange(node)) {
       items.push({
         label: "Rename",
@@ -386,35 +364,6 @@ export function WorkspaceTree(props: { collapsed: boolean; onToggleCollapsed: ()
       {props.collapsed ? null : (
         <>
           {error !== null ? <p className="tree-status error-text">{error}</p> : null}
-          {scopeTarget !== null ? (
-            <label className="tree-status">
-              Add {scopeTarget.name} to
-              <select
-                defaultValue=""
-                onChange={(event) => {
-                  const scopeId: string = event.target.value
-                  const workspace: string | null = getActiveWorkspaceId()
-                  if (scopeId === "" || workspace === null) {
-                    return
-                  }
-                  void createNodeAsset(workspace, scopeTarget.id, scopeId, null)
-                    .then(() => {
-                      setScopeTarget(null)
-                    })
-                    .catch((err: unknown) => {
-                      setError(errorMessage(err))
-                    })
-                }}
-              >
-                <option value="">Choose a scope</option>
-                {scopeChoices.map((choice) => (
-                  <option key={choice.id} value={choice.id}>
-                    {choice.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
           {workspaceId === null ? <p className="tree-status">No workspace selected.</p> : null}
           <input ref={fileRef} type="file" hidden onChange={(event) => void run(() => onUpload(event))} />
           <div className="tree" role="tree">

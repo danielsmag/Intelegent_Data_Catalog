@@ -145,6 +145,7 @@ assets_folder = "assets"
 poll_interval_seconds = 10
 exec_timeout_seconds = 30
 max_file_bytes = 1048576
+executor = "celery"
 
 [notebook]
 enabled = false

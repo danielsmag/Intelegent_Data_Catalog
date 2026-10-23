@@ -1,4 +1,4 @@
-"""Asset HTTP API: search, membership, configuration, and file promotion."""
+"""Asset HTTP API: search, membership, and configuration."""
 
 import asyncio
 from pathlib import Path
@@ -14,82 +14,27 @@ from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 
 
-def test_table_becomes_an_asset_and_can_be_searched_and_detached(tmp_path: Path) -> None:
-    """Creating a catalog table stores an asset, a scope membership, and a refresh mode."""
+def test_table_and_manual_create_do_not_add_an_asset(tmp_path: Path) -> None:
+    """A catalog table stays a table. Only an operator declaration creates an asset."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
     try:
         scope_id: str
-        table_id: str
-        scope_id, table_id = _table(app)
+        scope_id, _table_id = _table(app)
         listed: httpx.Response = _send(app, "GET", f"/api/v1/scopes/{scope_id}/assets")
         assert listed.status_code == 200
-        rows: list[object] = listed.json()
-        assert isinstance(rows, list)
-        assert len(rows) == 1
-        asset: dict[str, object] = rows[0]  # type: ignore[assignment]
-        assert isinstance(asset, dict)
-        assert asset["kind"] == "TABLE"
-        asset_id: str = str(asset["id"])
+        assert listed.json() == []
         found: httpx.Response = _send(app, "GET", "/api/v1/assets?q=orders&sort=name&order=asc")
         assert found.status_code == 200
         body: dict[str, object] = found.json()
-        assert body["total"] == 1
-        config: httpx.Response = _send(app, "PUT", f"/api/v1/assets/{asset_id}/configuration", {
-            "interval_seconds": 60,
-            "enabled": True,
-            "model": "gpt-4.1",
-            "effort": "low",
-            "refresh_mode": "MANUAL",
-            "options": {
-                "include_graph": True,
-                "include_lineage": True,
-                "include_data_profile": False,
-            },
-        })
-        assert config.status_code == 200
-        assert config.json()["refresh_mode"] == "MANUAL"
-        detached: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/assets/bulk-membership",
-            {
-                "asset_ids": [asset_id],
-                "target_kind": "scope",
-                "target_id": scope_id,
-                "action": "detach",
-            },
-        )
-        assert detached.status_code == 200
-        assert detached.json()["changed"] == 1
-        again: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/assets/bulk-membership",
-            {
-                "asset_ids": [asset_id],
-                "target_kind": "scope",
-                "target_id": scope_id,
-                "action": "detach",
-            },
-        )
-        assert again.json()["unchanged"] == 1
-        attached: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/scopes/{scope_id}/assets",
-            {"asset_ids": [asset_id]},
-        )
-        assert attached.status_code == 200
-        assert attached.json()["changed"] == 1
-        del table_id
+        assert body["total"] == 0
     finally:
         database.dispose()
 
 
-def test_workspace_file_is_a_file_asset(tmp_path: Path) -> None:
-    """Saving a workspace file creates a FILE asset in that workspace."""
+def test_workspace_file_is_not_an_asset(tmp_path: Path) -> None:
+    """Saving a workspace file does not create a FILE asset."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
@@ -119,11 +64,7 @@ def test_workspace_file_is_a_file_asset(tmp_path: Path) -> None:
         payload: dict[str, object] = found.json()
         items: object = payload["items"]
         assert isinstance(items, list)
-        assert len(items) == 1
-        first: object = items[0]
-        assert isinstance(first, dict)
-        assert first["kind"] == "FILE"
-        assert first["name"] == "notes.md"
+        assert items == []
     finally:
         database.dispose()
 

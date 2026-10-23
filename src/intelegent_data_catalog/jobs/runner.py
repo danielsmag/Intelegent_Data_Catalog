@@ -10,9 +10,16 @@ from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.assets.definitions.models import ScanResult
 from intelegent_data_catalog.assets.definitions.scanner import AssetDefinitionScanner
+from intelegent_data_catalog.assets.execution.executor import (
+    CeleryOperatorExecutor,
+    LocalOperatorExecutor,
+    OperatorExecutor,
+)
+from intelegent_data_catalog.assets.execution.runtime import OperatorRunner
+from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.assets.models import AssetContextOptions
 from intelegent_data_catalog.core.logger import LOGGER_NAME
-from intelegent_data_catalog.core.settings import CelerySettings
+from intelegent_data_catalog.core.settings import AppSettings, CelerySettings
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR, CancelSignal, RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog import (
@@ -131,7 +138,7 @@ def _finish(container: AppContainer, store: CatalogJobStore, row: CatalogJobRow)
     subject_id: UUID = row.subject_id
     options: dict[str, object] = row.options
     try:
-        _execute(container, kind, subject_id, options)
+        _execute(container, kind, subject_id, options, job_id)
     except CatalogError as err:
         message: str = str(err)
         store.complete(job_id, "failed", message)
@@ -165,6 +172,25 @@ def execute_trino_sync(source_binding_id: UUID) -> None:
         session.close()
 
 
+def execute_asset_operator(payload: str) -> None:
+    """Run one serialized asset operator."""
+    workload: OperatorWorkload = OperatorWorkload.model_validate_json(payload)
+    run_operator_workload(workload)
+
+
+def run_operator_workload(workload: OperatorWorkload) -> None:
+    """Run one operator workload on the process container."""
+    container: AppContainer = job_container()
+    OperatorRunner(container, container.logger().getChild("asset_operator")).run(workload)
+
+
+def build_operator_executor(settings: AppSettings) -> OperatorExecutor:
+    """Return the executor named by ``asset_definitions.executor``."""
+    if settings.asset_definitions.executor == "local":
+        return LocalOperatorExecutor(run_operator_workload)
+    return CeleryOperatorExecutor()
+
+
 def execute_asset_definition_scan() -> ScanResult:
     """Scan the asset-definition prefix on a fresh session."""
     container: AppContainer = job_container()
@@ -176,6 +202,7 @@ def execute_asset_definition_scan() -> ScanResult:
             container.asset_definition_store(),
             container.settings().asset_definitions,
             container.logger().getChild("asset_definitions"),
+            build_operator_executor(container.settings()),
         )
         return scanner.scan(utc_now())
     except Exception:
@@ -210,6 +237,7 @@ def _execute(
     kind: str,
     subject_id: UUID,
     options: dict[str, object],
+    job_id: UUID | None = None,
 ) -> None:
     match kind:
         case CatalogJobKind.KNOWLEDGE.value:
@@ -241,6 +269,7 @@ def _execute(
             CatalogAssetBuild(container).run(
                 subject_id,
                 AssetContextOptions.model_validate(options),
+                catalog_job_id=job_id,
             )
         case _:
             raise CatalogError(f"unknown catalog job kind: {kind}")

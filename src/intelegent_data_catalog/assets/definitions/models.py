@@ -4,13 +4,14 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from intelegent_data_catalog.persistence.enums import (
     AssetStatus,
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
+    DefinitionRunStatus,
 )
 
 DefinitionFolder = Literal["spaces", "scopes", "assets"]
@@ -52,6 +53,18 @@ SourceRef = Annotated[
 ]
 
 
+class OperatorRef(BaseModel):
+    """Operator class name and fields as the definition file wrote them.
+
+    An executor rebuilds the operator from this and calls ``execute``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str = Field(min_length=1, max_length=255)
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class SpaceSpec(BaseModel):
     """One space declaration. ``set_fields`` lists arguments the file passed."""
 
@@ -78,14 +91,19 @@ class ScopeSpec(BaseModel):
 
 
 class AssetSpec(BaseModel):
-    """One asset declaration. Exactly one of ``scope`` or ``space`` is set."""
+    """One asset declaration. The asset is not attached to a space or scope.
+
+    ``operator`` is absent only on items stored before operators ran. ``schedule``
+    is a five-field cron, or null when the operator runs once on first apply.
+    ``key`` identifies the declaration. ``name`` is an optional display overlay.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     key: str
     source: SourceRef
-    scope: str | None = None
-    space: str | None = None
+    operator: OperatorRef | None = None
+    schedule: str | None = None
     name: str | None = None
     description: str | None = None
     context: str | None = None
@@ -93,11 +111,14 @@ class AssetSpec(BaseModel):
     properties: dict[str, JsonValue] = Field(default_factory=dict)
     set_fields: list[str] = Field(default_factory=list)
 
-    @model_validator(mode="after")
-    def _one_target(self) -> AssetSpec:
-        if (self.scope is None) == (self.space is None):
-            raise ValueError("asset needs exactly one of scope or space")
-        return self
+    @field_validator("schedule")
+    @classmethod
+    def _cron(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from intelegent_data_catalog.assets.execution.cron import parse_schedule
+
+        return parse_schedule(value)
 
 
 class DefinitionSpec(BaseModel):
@@ -140,15 +161,30 @@ class AssetDefinitionItemRead(BaseModel):
     space_id: UUID | None
     scope_id: UUID | None
     asset_id: UUID | None
+    run_status: DefinitionRunStatus | None = None
+    run_error: str | None = None
+    ran_at: datetime | None = None
+    schedule: str | None = None
+    next_run_at: datetime | None = None
 
 
 class AssetDefinitionFileDetail(BaseModel):
-    """A definition file plus the objects it declared."""
+    """A definition file, its script, and the objects it declared."""
 
     model_config = ConfigDict(extra="forbid")
 
     file: AssetDefinitionFileRead
+    source: str = ""
     items: list[AssetDefinitionItemRead]
+
+
+class AssetDefinitionTextRead(BaseModel):
+    """Script text of one object in the definition store."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    source: str
 
 
 class AssetDefinitionScanQueued(BaseModel):
@@ -157,6 +193,19 @@ class AssetDefinitionScanQueued(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     queued: bool
+
+
+class AssetDefinitionObjectRead(BaseModel):
+    """One object that exists under a definition folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    path: str
+    size_bytes: int
+    last_modified: datetime | None
+    file_id: UUID | None = None
+    asset_ids: list[UUID] = Field(default_factory=list)
 
 
 class ScanResult(BaseModel):

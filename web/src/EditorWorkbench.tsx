@@ -41,6 +41,7 @@ import {
 import { AppSideDock } from "./ConfigRail"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
 import { HierarchyTree } from "./HierarchyTree"
+import { AssetDefinitionPage } from "./AssetDefinitionPage"
 import { AssetPage } from "./AssetPage"
 import { AssetsSidebar } from "./AssetsSidebar"
 import { AssetsTablePage } from "./AssetsTablePage"
@@ -425,6 +426,8 @@ function EditorRoutes(): ReactElement {
       <Route path="/workspace/nodes/:nodeId" element={<WorkspaceFileRoute />} />
       <Route path="/workspace/assets" element={<Navigate to="/assets" replace />} />
       <Route path="/scopes/:scopeId" element={<ScopePage />} />
+      <Route path="/asset-definitions/text/:objectKey" element={<AssetDefinitionPage />} />
+      <Route path="/asset-definitions/:fileId/:fileName?" element={<AssetDefinitionPage />} />
       <Route path="/assets" element={<AssetsTablePage />} />
       <Route path="/assets/:assetId" element={<AssetPage />} />
       <Route path="/registry/tables/:tableId" element={<TableAssetRedirect />} />

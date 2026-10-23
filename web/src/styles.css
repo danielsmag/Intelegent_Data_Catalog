@@ -3638,8 +3638,6 @@ html.editor-dragging * {
 }
 
 .assets-toolbar,
-.assets-explorer__chips,
-.assets-explorer__owner,
 .assets-bulk {
   display: flex;
   flex-wrap: wrap;
@@ -3647,16 +3645,14 @@ html.editor-dragging * {
   align-items: center;
 }
 
-.filter-chip.is-on,
-.assets-explorer__owner button.is-on {
+.filter-chip.is-on {
   outline: 1px solid var(--accent, #7aa2f7);
 }
 
 .filter-chip,
 .rank-select,
 .assets-toolbar input,
-.assets-toolbar select,
-.assets-explorer input {
+.assets-toolbar select {
   background: transparent;
   color: inherit;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
@@ -3778,22 +3774,24 @@ html.editor-dragging * {
   margin: 8px 0 0;
 }
 
-.assets-explorer ul {
-  list-style: none;
-  padding: 0;
-  margin: 8px 0;
+.asset-files .tree-row {
+  min-height: 26px;
+  padding-right: 4px;
 }
 
-.assets-explorer li button {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  width: 100%;
-  background: none;
-  color: inherit;
-  border: 0;
-  text-align: left;
-  padding: 4px 0;
+.asset-files .tree-row--draggable {
+  cursor: grab;
+}
+
+.asset-files .tree-label {
+  min-width: 0;
+  flex: 1;
+}
+
+.asset-files__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .freshness-dot {
@@ -3863,12 +3861,12 @@ html.editor-dragging * {
 }
 
 .asset-board__table {
-  min-width: 860px;
+  min-width: 980px;
 }
 
 .asset-row {
   display: grid;
-  grid-template-columns: 28px minmax(200px, 1.6fr) 110px minmax(160px, 1fr) minmax(150px, 0.9fr) 88px 92px;
+  grid-template-columns: 28px minmax(200px, 1.6fr) minmax(148px, 0.9fr) minmax(160px, 1fr) minmax(150px, 0.9fr) 88px 92px;
   gap: 12px;
   align-items: center;
   padding: 12px 8px;
@@ -3929,6 +3927,19 @@ html.editor-dragging * {
   font-size: 12px;
 }
 
+.asset-row__refresh {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.asset-row__when {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .asset-state {
   display: inline-block;
   width: 12px;
@@ -3979,4 +3990,151 @@ html.editor-dragging * {
 
 .asset-spark--stale {
   color: #a34b4b;
+}
+
+.run-board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.run-graph {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.run-node,
+.run-cell,
+.run-column {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.run-node.state-success,
+.run-cell.state-success {
+  background: rgba(46, 230, 200, 0.18);
+  color: #9cf3e6;
+}
+
+.run-node.state-failed,
+.run-cell.state-failed {
+  background: rgba(255, 107, 107, 0.18);
+  color: #ffb4b4;
+}
+
+.run-node.state-running,
+.run-cell.state-running {
+  background: rgba(64, 148, 232, 0.2);
+  color: var(--key);
+}
+
+.run-node.state-queued,
+.run-cell.state-queued {
+  background: rgba(255, 196, 80, 0.16);
+  color: #ffe3a3;
+}
+
+.run-node.state-skipped,
+.run-cell.state-skipped,
+.run-node.state-none,
+.run-cell.state-none {
+  background: var(--hover);
+  color: var(--muted);
+}
+
+.run-node {
+  min-width: 140px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.run-node small,
+.run-column small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.run-node.is-selected,
+.run-cell.is-selected,
+.run-column.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.run-arrow {
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.run-grid-wrap {
+  overflow-x: auto;
+}
+
+.run-grid {
+  border-collapse: separate;
+  border-spacing: 6px;
+}
+
+.run-grid th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.run-column,
+.run-cell {
+  min-width: 92px;
+  min-height: 36px;
+  padding: 6px 8px;
+}
+
+.run-cell {
+  width: 100%;
+}
+
+.run-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--popup);
+}
+
+.run-log {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.run-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-events li {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.state-skipped,
+.state-none {
+  background: var(--hover);
+  color: var(--muted);
 }

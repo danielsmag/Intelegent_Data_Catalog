@@ -41,9 +41,12 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
+    DefinitionRunStatus,
     EngineConnectionStatus,
     EngineType,
     MetadataOrigin,
+    OperatorRunTrigger,
+    OperatorTaskState,
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
@@ -1385,8 +1388,20 @@ class AssetDefinitionItemRow(Base):
             tuple(item.value for item in DefinitionItemStatus),
             "ck_asset_definition_items_status",
         ),
+        CheckConstraint(
+            "run_status IS NULL OR run_status IN ("
+            + ", ".join(f"'{item.value}'" for item in DefinitionRunStatus)
+            + ")",
+            name="ck_asset_definition_items_run_status",
+        ),
         Index("ix_asset_definition_items_status", "status"),
         Index("ix_asset_definition_items_asset", "asset_id"),
+        Index(
+            "ix_asset_definition_items_next_run",
+            "next_run_at",
+            sqlite_where=text("next_run_at IS NOT NULL"),
+            postgresql_where=text("next_run_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -1416,5 +1431,85 @@ class AssetDefinitionItemRow(Base):
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    run_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ran_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    schedule: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AssetOperatorRunRow(Base):
+    """One execution of an asset operator or a manual asset context build."""
+
+    __tablename__: str = "asset_operator_runs"
+    __table_args__: tuple[CheckConstraint | Index, ...] = (
+        _enum_check(
+            "status",
+            tuple(item.value for item in DefinitionRunStatus),
+            "ck_asset_operator_runs_status",
+        ),
+        _enum_check(
+            "trigger",
+            tuple(item.value for item in OperatorRunTrigger),
+            "ck_asset_operator_runs_trigger",
+        ),
+        CheckConstraint("try_number >= 1", name="ck_asset_operator_runs_try"),
+        Index("ix_asset_operator_runs_asset", "asset_id", "queued_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("asset_definition_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    catalog_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("catalog_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False)
+    try_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    operator_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    operator_params: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AssetOperatorRunTaskRow(Base):
+    """One step of an asset operator run. ``build_context`` then ``describe``."""
+
+    __tablename__: str = "asset_operator_run_tasks"
+    __table_args__: tuple[CheckConstraint | UniqueConstraint | Index, ...] = (
+        UniqueConstraint("run_id", "task_id", name="uq_asset_operator_run_tasks_run_task"),
+        _enum_check(
+            "state",
+            tuple(item.value for item in OperatorTaskState),
+            "ck_asset_operator_run_tasks_state",
+        ),
+        Index("ix_asset_operator_run_tasks_run", "run_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("asset_operator_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    task_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    log: Mapped[str] = mapped_column(Text, nullable=False)
+    events: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
