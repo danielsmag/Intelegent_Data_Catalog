@@ -10,13 +10,24 @@ import httpx
 import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
-from intelegent_data_catalog.assets.definitions.models import DefinitionSpec, PageSourceRef
+from intelegent_data_catalog.assets.definitions.models import (
+    DefinitionSpec,
+    PageSourceRef,
+    TableSourceRef,
+)
 from intelegent_data_catalog.assets.definitions.scanner import AssetDefinitionScanner
-from intelegent_data_catalog.assets.dsl import Asset, Space
+from intelegent_data_catalog.assets.dsl import (
+    Asset,
+    IcebergTableOperator,
+    PostgresTableOperator,
+    Space,
+    TableOperator,
+)
 from intelegent_data_catalog.assets.dsl.collect import collect_definitions
 from intelegent_data_catalog.assets.dsl.errors import (
     AssetDefinitionError,
@@ -68,10 +79,10 @@ _SCOPE: str = (
     'Scope("finance", space="analytics", description="Finance data")\n'
 )
 _ORDERS: str = (
-    "from intelegent_data_catalog.assets.dsl import Asset, TableOperator\n"
+    "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
     "Asset(\n"
     '    "orders",\n'
-    '    TableOperator(source_key="iceberg.sales.orders", data_source="lakehouse"),\n'
+    '    IcebergTableOperator(source_key="iceberg.sales.orders", data_source="lakehouse"),\n'
     '    scope="analytics/finance",\n'
     '    name="Orders",\n'
     '    context="Fact table of orders.",\n'
@@ -80,7 +91,7 @@ _ORDERS: str = (
 _TWO_TABLES: str = (
     _ORDERS + "Asset(\n"
     '    "returns",\n'
-    '    TableOperator(source_key="iceberg.sales.returns", data_source="lakehouse"),\n'
+    '    IcebergTableOperator(source_key="iceberg.sales.returns", data_source="lakehouse"),\n'
     '    scope="analytics/finance",\n'
     ")\n"
 )
@@ -113,6 +124,28 @@ def test_collect_each_kind() -> None:
     assert assets.assets[0].scope == "analytics/finance"
 
 
+def test_iceberg_and_postgres_operators_share_table_fields() -> None:
+    """Concrete table operators build a table source. The base stays abstract."""
+    iceberg: IcebergTableOperator = IcebergTableOperator(
+        source_key="iceberg.sales.orders",
+        data_source="lakehouse",
+    )
+    postgres: PostgresTableOperator = PostgresTableOperator(
+        source_key="app.public.customers",
+        data_source="app",
+    )
+    iceberg_source: TableSourceRef = iceberg.to_source()
+    postgres_source: TableSourceRef = postgres.to_source()
+    assert iceberg_source.source_key == "iceberg.sales.orders"
+    assert iceberg_source.data_source == "lakehouse"
+    assert postgres_source.source_key == "app.public.customers"
+    assert postgres_source.data_source == "app"
+    with pytest.raises(TypeError):
+        TableOperator(source_key="iceberg.sales.orders")
+    with pytest.raises(ValidationError, match="data_source cannot be blank"):
+        IcebergTableOperator(source_key="iceberg.sales.orders", data_source=" ")
+
+
 def test_page_operator_defaults_workspace_to_shared() -> None:
     """PageOperator without a workspace names the shared workspace."""
     source: str = (
@@ -137,15 +170,15 @@ def test_wrong_kind_duplicate_target_and_syntax_fail_the_file() -> None:
     with pytest.raises(AssetDefinitionImportError, match="duplicate key"):
         collect_definitions(duplicated, "space_dup.py", DefinitionKind.SPACE, timeout_seconds=5)
     both: str = (
-        "from intelegent_data_catalog.assets.dsl import Asset, TableOperator\n"
-        'Asset("orders", TableOperator(source_key="a.b.c"), '
+        "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
+        'Asset("orders", IcebergTableOperator(source_key="a.b.c"), '
         'scope="analytics/finance", space="analytics")\n'
     )
     with pytest.raises(AssetDefinitionImportError, match="exactly one"):
         collect_definitions(both, "asset_both.py", DefinitionKind.ASSET, timeout_seconds=5)
     neither: str = (
-        "from intelegent_data_catalog.assets.dsl import Asset, TableOperator\n"
-        'Asset("orders", TableOperator(source_key="a.b.c"))\n'
+        "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
+        'Asset("orders", IcebergTableOperator(source_key="a.b.c"))\n'
     )
     with pytest.raises(AssetDefinitionImportError, match="exactly one"):
         collect_definitions(neither, "asset_neither.py", DefinitionKind.ASSET, timeout_seconds=5)
@@ -494,10 +527,9 @@ def test_api_lists_files_and_queues_a_scan(tmp_path: Path) -> None:
         database.dispose()
 
 
-def _table_operator() -> object:
-    from intelegent_data_catalog.assets.dsl import TableOperator
-
-    return TableOperator(source_key="iceberg.sales.orders")
+def _table_operator() -> IcebergTableOperator:
+    operator: IcebergTableOperator = IcebergTableOperator(source_key="iceberg.sales.orders")
+    return operator
 
 
 def _open(

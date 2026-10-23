@@ -140,6 +140,16 @@ export function TableIcon(): ReactElement {
   )
 }
 
+export function AssetIcon(): ReactElement {
+  return (
+    <Icon>
+      <rect x="2.2" y="2" width="11.6" height="3.1" rx="0.7" fill="none" stroke="currentColor" strokeWidth="1" />
+      <rect x="2.2" y="6.45" width="11.6" height="3.1" rx="0.7" fill="none" stroke="currentColor" strokeWidth="1" />
+      <rect x="2.2" y="10.9" width="11.6" height="3.1" rx="0.7" fill="none" stroke="currentColor" strokeWidth="1" />
+    </Icon>
+  )
+}
+
 export function IcebergIcon(): ReactElement {
   return (
     <svg viewBox="0 0 32 32" width="16" height="16" aria-hidden="true">

@@ -7,11 +7,7 @@ from pydantic import JsonValue, ValidationError
 from intelegent_data_catalog.assets.definitions.models import AssetSpec, ScopeSpec, SpaceSpec
 from intelegent_data_catalog.assets.dsl.collector import current_collector
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
-from intelegent_data_catalog.assets.dsl.operators import (
-    AirflowOperator,
-    PageOperator,
-    TableOperator,
-)
+from intelegent_data_catalog.assets.dsl.operators import Operator
 from intelegent_data_catalog.persistence.enums import AssetStatus
 from intelegent_data_catalog.registry.identifiers import require_slug
 
@@ -24,7 +20,6 @@ class _UnsetType:
 
 
 _UNSET: _UnsetType = _UnsetType()
-Operator = TableOperator | AirflowOperator | PageOperator
 
 
 class Space:

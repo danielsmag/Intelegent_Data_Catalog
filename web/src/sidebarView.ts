@@ -1,6 +1,14 @@
 import { useSyncExternalStore } from "react"
 
-export type SidebarView = "spaces" | "catalog" | "airflow" | "search" | "sources" | "query" | "workspace"
+export type SidebarView =
+  | "spaces"
+  | "catalog"
+  | "airflow"
+  | "search"
+  | "sources"
+  | "query"
+  | "workspace"
+  | "assets"
 
 type PendingSql = {
   sql: string
@@ -23,7 +31,8 @@ function isSidebarView(value: string | null): value is SidebarView {
     value === "search" ||
     value === "sources" ||
     value === "query" ||
-    value === "workspace"
+    value === "workspace" ||
+    value === "assets"
   )
 }
 

@@ -42,7 +42,9 @@ import { AppSideDock } from "./ConfigRail"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
 import { HierarchyTree } from "./HierarchyTree"
 import { AssetPage } from "./AssetPage"
+import { AssetsSidebar } from "./AssetsSidebar"
 import { AssetsTablePage } from "./AssetsTablePage"
+import { setAssetsSidebarOpen, useAssetsSidebarOpen } from "./assetsSidebarStore"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { WorkspaceSidebar } from "./WorkspaceSidebarPanel"
 import { fetchCatalogTable } from "./registryApi"
@@ -112,6 +114,7 @@ function SecondSidebar(): ReactElement {
   const spacesOpen: boolean = useSpacesSidebarOpen()
   const airflowOpen: boolean = useAirflowSidebarOpen()
   const workspaceOpen: boolean = useWorkspaceSidebarOpen()
+  const assetsOpen: boolean = useAssetsSidebarOpen()
   if (view === "spaces") {
     return (
       <HierarchyTree
@@ -142,6 +145,16 @@ function SecondSidebar(): ReactElement {
         collapsed={!workspaceOpen}
         onToggleCollapsed={() => {
           setWorkspaceSidebarOpen(!workspaceOpen)
+        }}
+      />
+    )
+  }
+  if (view === "assets") {
+    return (
+      <AssetsSidebar
+        collapsed={!assetsOpen}
+        onToggleCollapsed={() => {
+          setAssetsSidebarOpen(!assetsOpen)
         }}
       />
     )
@@ -410,8 +423,9 @@ function EditorRoutes(): ReactElement {
       <Route path="/workspaces" element={<WorkspacesPage />} />
       <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
       <Route path="/workspace/nodes/:nodeId" element={<WorkspaceFileRoute />} />
-      <Route path="/workspace/assets" element={<AssetsTablePage />} />
+      <Route path="/workspace/assets" element={<Navigate to="/assets" replace />} />
       <Route path="/scopes/:scopeId" element={<ScopePage />} />
+      <Route path="/assets" element={<AssetsTablePage />} />
       <Route path="/assets/:assetId" element={<AssetPage />} />
       <Route path="/registry/tables/:tableId" element={<TableAssetRedirect />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />

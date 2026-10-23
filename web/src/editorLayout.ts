@@ -123,7 +123,7 @@ export function titleFromPath(path: string): string {
     return "Sources"
   }
   if (head === "assets") {
-    return "Asset"
+    return parts[1] === undefined ? "Assets" : "Asset"
   }
   if (head === "workspace" && parts[1] === "assets") {
     return "Assets"

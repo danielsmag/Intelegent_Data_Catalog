@@ -2,6 +2,7 @@ import type { ReactElement } from "react"
 import { signOut, useAuthState } from "./auth"
 import {
   AirflowIcon,
+  AssetIcon,
   BrandMark,
   CatalogIcon,
   GearIcon,
@@ -13,6 +14,7 @@ import {
 } from "./icons"
 import { openInFocusedGroup } from "./editorLayout"
 import { setSidebarView, useSidebarView, type SidebarView } from "./sidebarView"
+import { setAssetsSidebarOpen } from "./assetsSidebarStore"
 import { setSpacesSidebarOpen } from "./spacesSidebar"
 import { setWorkspaceSidebarOpen } from "./workspaceSidebar"
 import { useMe } from "./workspaceApi"
@@ -28,6 +30,7 @@ export function ActivityBar(): ReactElement {
   const current: SidebarView = useSidebarView()
   const items: Item[] = [
     { view: "workspace", label: "Workspace", icon: <TableIcon /> },
+    { view: "assets", label: "Assets", icon: <AssetIcon /> },
     { view: "spaces", label: "Spaces", icon: <SpaceIcon /> },
     { view: "catalog", label: "Catalog", icon: <CatalogIcon /> },
     { view: "airflow", label: "Airflow", icon: <AirflowIcon /> },
@@ -56,6 +59,10 @@ export function ActivityBar(): ReactElement {
               }
               if (item.view === "workspace") {
                 setWorkspaceSidebarOpen(true)
+              }
+              if (item.view === "assets") {
+                setAssetsSidebarOpen(true)
+                openInFocusedGroup("/assets")
               }
             }}
           >

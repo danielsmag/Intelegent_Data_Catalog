@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactElement } from "react"
 import { searchAssets, type AssetKind, type AssetListItem } from "./assetsApi"
 import { watchAssetDrag } from "./editorDrag"
 import { openInFocusedGroup } from "./editorLayout"
+import { setSidebarView } from "./sidebarView"
 import { getActiveWorkspaceId, useActiveWorkspaceId } from "./workspaceStore"
 
 const KINDS: readonly AssetKind[] = ["TABLE", "AIRFLOW_DAG", "NOTEBOOK", "FILE"]
@@ -94,7 +95,8 @@ export function AssetsExplorer(): ReactElement {
         type="button"
         className="assets-explorer__open"
         onClick={() => {
-          openInFocusedGroup("/workspace/assets")
+          setSidebarView("assets")
+          openInFocusedGroup("/assets")
         }}
       >
         Open assets table
