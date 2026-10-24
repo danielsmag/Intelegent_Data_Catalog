@@ -14,6 +14,7 @@ from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
+    AssetStatus,
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
@@ -45,17 +46,21 @@ class AssetOperatorSchedule:
 
         A queued or running item stays untouched so a later tick can try again.
         """
-        statement = select(AssetDefinitionItemRow).where(
-            AssetDefinitionItemRow.kind == DefinitionKind.ASSET.value,
-            AssetDefinitionItemRow.status == DefinitionItemStatus.APPLIED.value,
-            AssetDefinitionItemRow.schedule.is_not(None),
-            AssetDefinitionItemRow.next_run_at.is_not(None),
-            AssetDefinitionItemRow.next_run_at <= now,
-            AssetDefinitionItemRow.run_status.in_(_FINISHED),
-            AssetDefinitionItemRow.asset_id.is_not(None),
+        statement = (
+            select(AssetDefinitionItemRow)
+            .join(AssetRow, AssetRow.id == AssetDefinitionItemRow.asset_id)
+            .where(
+                AssetDefinitionItemRow.kind == DefinitionKind.ASSET.value,
+                AssetDefinitionItemRow.status == DefinitionItemStatus.APPLIED.value,
+                AssetDefinitionItemRow.schedule.is_not(None),
+                AssetDefinitionItemRow.next_run_at.is_not(None),
+                AssetDefinitionItemRow.next_run_at <= now,
+                AssetDefinitionItemRow.run_status.in_(_FINISHED),
+                AssetRow.status == AssetStatus.ACTIVE.value,
+            )
         )
         if self._session.get_bind().dialect.name == "postgresql":
-            statement = statement.with_for_update(skip_locked=True)
+            statement = statement.with_for_update(of=AssetDefinitionItemRow, skip_locked=True)
         rows: list[AssetDefinitionItemRow] = list(self._session.scalars(statement))
         queued: list[OperatorWorkload] = []
         item: AssetDefinitionItemRow

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.exceptions import TrinoUnavailableError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
+    AssetStatus,
     BindingRole,
     BindingState,
     CapabilitySupport,
@@ -22,6 +23,7 @@ from intelegent_data_catalog.persistence.enums import (
 )
 from intelegent_data_catalog.persistence.models import (
     AssetEngineBindingRow,
+    AssetRow,
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
@@ -256,6 +258,7 @@ class MetadataSyncService:
         else:
             if existing.status == TableStatus.MISSING.value:
                 existing.status = TableStatus.ACTIVE.value
+                self._align_asset(existing, AssetStatus.ACTIVE.value)
             existing.table_type = observed.table_type.value
             existing.physical_catalog = observed.catalog
             existing.physical_namespace = observed.namespace
@@ -527,6 +530,17 @@ class MetadataSyncService:
                 continue
             table.status = TableStatus.MISSING.value
             table.updated_at = utc_now()
+            self._align_asset(table, AssetStatus.MISSING.value)
+
+    def _align_asset(self, table: CatalogTableRow, status: str) -> None:
+        """Copy discovery status onto the asset. A user off switch stays off."""
+        if table.asset_id is None:
+            return
+        asset: AssetRow | None = self._session.get(AssetRow, table.asset_id)
+        if asset is None or asset.status == AssetStatus.DEPRECATED.value:
+            return
+        asset.status = status
+        asset.updated_at = utc_now()
 
     def _require_binding(self, source_binding_id: UUID) -> SourceEngineBindingRow:
         binding: SourceEngineBindingRow | None = self._repo.get_source_binding(source_binding_id)

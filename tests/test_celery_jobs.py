@@ -22,9 +22,10 @@ from intelegent_data_catalog.jobs.schedules import SyncScheduleService
 from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
-from intelegent_data_catalog.persistence.enums import SyncRunStatus
+from intelegent_data_catalog.persistence.enums import AssetStatus, SyncRunStatus
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import (
+    AssetRow,
     CatalogJobRow,
     CatalogTableRow,
     EntityConfigurationRow,
@@ -411,6 +412,51 @@ def test_due_table_configuration_queues_the_linked_asset(tmp_path: Path) -> None
         assert waiting == 0
     finally:
         database.dispose()
+
+
+def test_disabled_asset_skips_context_rebuild(tmp_path: Path) -> None:
+    """A deprecated asset does not get a scheduled context rebuild."""
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        table_id: str = _catalog_table(app)
+        saved: httpx.Response = _send(
+            app,
+            "PUT",
+            f"/api/v1/tables/{table_id}/configuration",
+            {
+                "interval_seconds": 600,
+                "enabled": True,
+                "options": {
+                    "include_graph": True,
+                    "include_lineage": False,
+                    "include_data_profile": False,
+                },
+            },
+        )
+        assert saved.status_code == 200
+        asset_id: UUID = _link_table_asset(database, UUID(table_id))
+        _set_asset_status(database, asset_id, AssetStatus.DEPRECATED.value)
+        _age_catalog_table_configuration(database, UUID(table_id))
+        publisher: _RecordingBuilds = _RecordingBuilds()
+        jobs: CatalogJobs = CatalogJobs(database, publisher)
+        claimed: int = _claim_context(database, jobs)
+        assert claimed == 0
+        assert publisher.job_ids == []
+    finally:
+        database.dispose()
+
+
+def _set_asset_status(database: CatalogDatabase, asset_id: UUID, status: str) -> None:
+    session: Session = database.session()
+    try:
+        asset: AssetRow | None = session.get(AssetRow, asset_id)
+        assert asset is not None
+        asset.status = status
+        session.commit()
+    finally:
+        session.close()
 
 
 def _link_table_asset(database: CatalogDatabase, table_id: UUID) -> UUID:

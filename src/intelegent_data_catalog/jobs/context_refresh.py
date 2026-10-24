@@ -28,7 +28,7 @@ from intelegent_data_catalog.knowledge.models import (
     SpaceContextOptions,
     TableContextOptions,
 )
-from intelegent_data_catalog.persistence.enums import RefreshSubjectKind
+from intelegent_data_catalog.persistence.enums import AssetStatus, RefreshSubjectKind, TableStatus
 from intelegent_data_catalog.persistence.models import (
     AssetRow,
     CatalogTableRow,
@@ -96,7 +96,7 @@ class ContextRefreshService:
         asset_id: UUID | None = row.asset_id
         if asset_id is not None:
             asset: AssetRow | None = self._session.get(AssetRow, asset_id)
-            if asset is None:
+            if asset is None or asset.status != AssetStatus.ACTIVE.value:
                 return None
             flags: dict[str, bool] = option_values(RefreshSubjectKind.ASSET, options, asset.kind)
             return _QueuedRebuild(
@@ -110,11 +110,11 @@ class ContextRefreshService:
         table_id: UUID | None = row.catalog_table_id
         if table_id is not None:
             table: CatalogTableRow | None = self._session.get(CatalogTableRow, table_id)
-            if table is None:
+            if table is None or table.status != TableStatus.ACTIVE.value:
                 return None
             if table.asset_id is not None:
                 linked: AssetRow | None = self._session.get(AssetRow, table.asset_id)
-                if linked is None:
+                if linked is None or linked.status != AssetStatus.ACTIVE.value:
                     return None
                 asset_flags: dict[str, bool] = option_values(
                     RefreshSubjectKind.ASSET,

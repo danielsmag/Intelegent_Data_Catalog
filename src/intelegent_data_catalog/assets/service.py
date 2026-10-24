@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.assets.base import Asset, AssetAgent, AssetAgentProvider
@@ -28,10 +29,11 @@ from intelegent_data_catalog.exceptions import (
     LlmUnavailableError,
 )
 from intelegent_data_catalog.persistence.clock import utc_now
-from intelegent_data_catalog.persistence.enums import ContextOrigin
+from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus, ContextOrigin
 from intelegent_data_catalog.persistence.models import (
     AssetMembershipRow,
     AssetRow,
+    CatalogTableRow,
     ScopeRow,
     SpaceRow,
 )
@@ -92,9 +94,22 @@ class AssetService:
             row.context_origin = None if text is None else ContextOrigin.USER.value
         if "status" in changes and patch.status is not None:
             row.status = patch.status.value
+            self._mirror_table_status(row, patch.status)
         row.updated_at = utc_now()
         self._session.commit()
         return self._read(row)
+
+    def _mirror_table_status(self, row: AssetRow, status: AssetStatus) -> None:
+        """Keep a table asset and its catalog row on the same on/off state."""
+        if row.kind != AssetKind.TABLE.value:
+            return
+        table: CatalogTableRow | None = self._session.scalar(
+            select(CatalogTableRow).where(CatalogTableRow.asset_id == row.id),
+        )
+        if table is None:
+            return
+        table.status = status.value
+        table.updated_at = utc_now()
 
     def delete(self, asset_id: UUID) -> None:
         """Delete the asset. The source table, DAG, or file stays."""

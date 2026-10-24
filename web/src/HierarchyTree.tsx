@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode, type RefObject } from "react"
 import { errorMessage, isAbortError } from "./api"
+import { updateAssetStatus, type AssetStatus } from "./assetsApi"
 import { openInFocusedGroup, parseRouteIds, pathnameOf, searchOf, useFocusedPath, useTreeReveal, type RouteIds } from "./editorLayout"
 import { WorkbenchLink } from "./editorSlots"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
@@ -130,6 +131,8 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
   const [renaming, setRenaming] = useState<RenameTarget | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
   const [pendingDrop, setPendingDrop] = useState<string | null>(null)
+  const [statusOverride, setStatusOverride] = useState<Record<string, string>>({})
+  const [switchingId, setSwitchingId] = useState<string | null>(null)
   const [revealTick, setRevealTick] = useState<number>(0)
   const treeRef: RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null)
   const revealedPath: RefObject<string | null> = useRef<string | null>(null)
@@ -160,6 +163,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
     void fetchHierarchy(controller.signal)
       .then((loaded: HierarchySpace[]) => {
         setSpaces(loaded)
+        setStatusOverride({})
       })
       .catch((err: unknown) => {
         if (isAbortError(err)) {
@@ -232,6 +236,27 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
       }
       return next
     })
+  }
+
+  function switchTable(tableId: string, assetId: string, status: string): void {
+    const next: AssetStatus = status === "ACTIVE" ? "DEPRECATED" : "ACTIVE"
+    setSwitchingId(tableId)
+    setStatusOverride((current: Record<string, string>) => ({ ...current, [tableId]: next }))
+    void updateAssetStatus(assetId, next)
+      .then(() => {
+        bumpCatalogRevision()
+      })
+      .catch((err: unknown) => {
+        setStatusOverride((current: Record<string, string>) => {
+          const cleared: Record<string, string> = { ...current }
+          delete cleared[tableId]
+          return cleared
+        })
+        setError(errorMessage(err))
+      })
+      .finally(() => {
+        setSwitchingId((busy: string | null) => (busy === tableId ? null : busy))
+      })
   }
 
   function closed(key: string): boolean {
@@ -607,16 +632,24 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                               >
                                 {scope.tables.map((table: HierarchyTable) => {
                                   const tableSelected: boolean = selectedTable === table.id
+                                  const shownStatus: string = statusOverride[table.id] ?? table.status
+                                  const assetId: string | null = table.assetId
                                   return (
                                     <WorkbenchLink
                                       key={table.id}
-                                      to={table.assetId !== null ? `/assets/${table.assetId}` : `/registry/tables/${table.id}`}
+                                      to={assetId !== null ? `/assets/${assetId}` : `/registry/tables/${table.id}`}
                                       className="tree-row depth-node figure-table"
                                       role="treeitem"
                                       aria-current={tableSelected ? "page" : undefined}
                                     >
                                       <span className="chevron-spacer" />
-                                      <Availability status={table.status} />
+                                      <Availability
+                                        status={shownStatus}
+                                        disabled={switchingId === table.id || assetId === null}
+                                        onToggle={assetId === null ? undefined : () => {
+                                          switchTable(table.id, assetId, shownStatus)
+                                        }}
+                                      />
                                       <IcebergIcon />
                                       <span className="tree-label">{table.name}</span>
                                     </WorkbenchLink>
@@ -937,11 +970,29 @@ function filterSpaces(spaces: HierarchySpace[], query: string): HierarchySpace[]
   return matched
 }
 
-function Availability(props: { status: string }): ReactElement {
+function Availability(props: {
+  status: string
+  disabled: boolean
+  onToggle?: () => void
+}): ReactElement {
   const active: boolean = props.status === "ACTIVE"
   const tone: string = active ? "active" : "disabled"
   const label: string = active ? "Active" : "Disabled"
-  return <span className={`asset-availability asset-availability--${tone}`}>{label}</span>
+  return (
+    <button
+      type="button"
+      className={`asset-availability asset-availability--${tone}`}
+      aria-pressed={active}
+      disabled={props.disabled || props.onToggle === undefined}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        props.onToggle?.()
+      }}
+    >
+      {label}
+    </button>
+  )
 }
 
 function filterAirflow(nodes: HierarchyAirflow[], needle: string): HierarchyAirflow[] {

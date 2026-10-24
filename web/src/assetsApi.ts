@@ -205,6 +205,18 @@ export async function searchAssets(query: AssetQuery, signal?: AbortSignal): Pro
   return (await response.json()) as AssetPage
 }
 
+export async function updateAssetStatus(assetId: string, status: AssetStatus): Promise<AssetRecord> {
+  const response: Response = await apiFetch(`/api/v1/assets/${assetId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as AssetRecord
+}
+
 export async function fetchAsset(assetId: string, signal?: AbortSignal): Promise<AssetRecord> {
   const response: Response = await apiFetch(`/api/v1/assets/${assetId}`, { signal })
   if (!response.ok) {

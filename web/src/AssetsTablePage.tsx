@@ -4,6 +4,7 @@ import { isAbortError } from "./api"
 import {
   bulkMembership,
   searchAssets,
+  updateAssetStatus,
   type AssetKind,
   type AssetListItem,
   type AssetPage,
@@ -64,6 +65,7 @@ export function AssetsTablePage(): ReactElement {
   const activeKind: "all" | AssetKind = kinds.length === 1 ? (kinds[0] ?? "all") : "all"
   const chosenRank = RANKS.find((item) => item.id === rank) ?? RANKS[2]
   const now: number = useClock(FRESHNESS_TICK_MS)
+  const [switchingId, setSwitchingId] = useState<string | null>(null)
   const buildingIds: MutableRefObject<Set<string>> = useRef<Set<string>>(new Set())
   const reloadRef: MutableRefObject<() => void> = useRef<() => void>(() => {})
   useEditorTitle("Assets")
@@ -160,6 +162,19 @@ export function AssetsTablePage(): ReactElement {
   }, [])
   const rows: AssetListItem[] = page?.items ?? []
   const total: number = page?.total ?? 0
+  function toggleAvailability(assetId: string, current: AssetStatus): void {
+    const next: AssetStatus = current === "ACTIVE" ? "DEPRECATED" : "ACTIVE"
+    setSwitchingId(assetId)
+    setPage((loaded: AssetPage | null) => replaceStatus(loaded, assetId, next))
+    void updateAssetStatus(assetId, next)
+      .catch((err: unknown) => {
+        setPage((loaded: AssetPage | null) => replaceStatus(loaded, assetId, current))
+        showPageAlert(err instanceof Error ? err.message : "Could not change status", "error", "Assets")
+      })
+      .finally(() => {
+        setSwitchingId((busy: string | null) => (busy === assetId ? null : busy))
+      })
+  }
   function startBuilds(ids: readonly string[]): void {
     const pending: Set<string> = buildingIds.current
     for (const id of ids) {
@@ -403,6 +418,10 @@ export function AssetsTablePage(): ReactElement {
             onBuild={() => {
               startBuilds([row.id])
             }}
+            switching={switchingId === row.id}
+            onToggle={() => {
+              toggleAvailability(row.id, row.status)
+            }}
             onDragStart={(event: ReactPointerEvent<HTMLButtonElement>) => {
               const ids: string[] = selected.has(row.id) && selected.size > 1 ? [...selected] : [row.id]
               watchAssetDrag(event, { assetIds: ids, title: row.name })
@@ -534,6 +553,8 @@ function AssetRow(props: {
   onOpen: () => void
   onBuild: () => void
   onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  switching: boolean
+  onToggle: () => void
 }): ReactElement {
   const row: AssetListItem = props.row
   const score: number = liveFreshness(row, props.now)
@@ -551,7 +572,9 @@ function AssetRow(props: {
         />
       </span>
       <span className="asset-row__identity" role="cell">
-        {row.kind === "TABLE" ? <Availability status={row.status} /> : null}
+        {row.kind === "TABLE" ? (
+          <Availability status={row.status} disabled={props.switching} onToggle={props.onToggle} />
+        ) : null}
         <button
           type="button"
           className="asset-row__name"
@@ -600,11 +623,34 @@ function AssetRow(props: {
   )
 }
 
-function Availability(props: { status: string }): ReactElement {
+function Availability(props: { status: string; disabled: boolean; onToggle: () => void }): ReactElement {
   const active: boolean = props.status === "ACTIVE"
   const tone: string = active ? "active" : "disabled"
   const label: string = active ? "Active" : "Disabled"
-  return <span className={`asset-availability asset-availability--${tone}`}>{label}</span>
+  return (
+    <button
+      type="button"
+      className={`asset-availability asset-availability--${tone}`}
+      aria-pressed={active}
+      disabled={props.disabled}
+      onClick={(event) => {
+        event.stopPropagation()
+        props.onToggle()
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function replaceStatus(page: AssetPage | null, assetId: string, status: AssetStatus): AssetPage | null {
+  if (page === null) {
+    return null
+  }
+  return {
+    ...page,
+    items: page.items.map((item: AssetListItem) => (item.id === assetId ? { ...item, status } : item)),
+  }
 }
 
 function StateMark(props: { row: AssetListItem }): ReactElement {
@@ -650,7 +696,21 @@ function formatWhen(value: string | null): string {
   if (value === null || value === "") {
     return "—"
   }
-  return value.slice(0, 19).replace("T", " ")
+  const parsed: Date = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value.slice(0, 19).replace("T", " ")
+  }
+  return localStamp(parsed)
+}
+
+function localStamp(value: Date): string {
+  const year: string = String(value.getFullYear())
+  const month: string = pad2(String(value.getMonth() + 1))
+  const day: string = pad2(String(value.getDate()))
+  const hour: string = pad2(String(value.getHours()))
+  const minute: string = pad2(String(value.getMinutes()))
+  const second: string = pad2(String(value.getSeconds()))
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
 }
 
 const WEEKDAYS: readonly string[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

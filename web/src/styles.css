@@ -3986,12 +3986,20 @@ html.editor-dragging * {
   height: 16px;
   margin-right: 6px;
   padding: 0 6px;
+  border: 0;
   border-radius: 999px;
+  font: inherit;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   line-height: 1;
+  cursor: pointer;
+}
+
+.asset-availability:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .asset-availability--active {

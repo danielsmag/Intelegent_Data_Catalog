@@ -968,6 +968,15 @@ def test_claim_due_submits_past_and_skips_future(tmp_path: Path) -> None:
         executor.workloads.clear()
         assert AssetOperatorSchedule(session, executor).claim_due(datetime.now(UTC)) == 0
         assert executor.workloads == []
+        asset: AssetRow | None = session.get(AssetRow, item.asset_id)
+        assert asset is not None
+        asset.status = AssetStatus.DEPRECATED.value
+        item.run_status = DefinitionRunStatus.SUCCEEDED.value
+        item.next_run_at = datetime.now(UTC) - timedelta(hours=1)
+        session.commit()
+        executor.workloads.clear()
+        assert AssetOperatorSchedule(session, executor).claim_due(datetime.now(UTC)) == 0
+        assert executor.workloads == []
     finally:
         session.close()
         database.dispose()
