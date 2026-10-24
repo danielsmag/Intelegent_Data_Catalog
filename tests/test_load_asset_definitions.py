@@ -1,30 +1,9 @@
-"""Definition upload keys and store settings. No MinIO connection."""
-
-from pathlib import Path
+"""Definition store settings. No MinIO connection."""
 
 from pydantic import SecretStr
-from scripts.load_asset_definitions import AssetDefinitionUploader
 
-from intelegent_data_catalog.core.settings import (
-    AppSettings,
-    ObjectStoreSettings,
-    load_settings,
-    resolve_project_root,
-)
+from intelegent_data_catalog.core.settings import ObjectStoreSettings
 from intelegent_data_catalog.storage.object_store import definition_store_settings
-
-
-def test_example_files_keep_their_folder_layout() -> None:
-    """Example files land under spaces/, scopes/, and assets/."""
-    settings: AppSettings = load_settings()
-    source: Path = resolve_project_root() / "examples" / "asset-definitions"
-    uploader: AssetDefinitionUploader = AssetDefinitionUploader(settings, source)
-    keys: list[str] = [key for key, _path in uploader.object_keys()]
-    assert keys == [
-        "asset-definitions/assets/sales/asset_orders.py",
-        "asset-definitions/scopes/analytics/scope_finance.py",
-        "asset-definitions/spaces/space_analytics.py",
-    ]
 
 
 def test_definition_endpoint_overrides_the_workspace_store() -> None:

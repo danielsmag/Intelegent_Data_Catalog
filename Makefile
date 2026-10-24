@@ -1,4 +1,4 @@
-.PHONY: help build up down rebuild logs test lint typecheck load-assets docs docs-up
+.PHONY: help build up down rebuild logs test lint typecheck docs docs-up
 
 COMPOSE ?= docker compose
 
@@ -12,7 +12,6 @@ help:
 		'test        uv run pytest' \
 		'lint        uv run ruff check .' \
 		'typecheck   uv run mypy' \
-		'load-assets copy examples/asset-definitions to S3' \
 		'docs        build the Sphinx HTML manual' \
 		'docs-up     serve the manual at http://localhost:8000'
 
@@ -39,9 +38,6 @@ lint:
 
 typecheck:
 	uv run mypy
-
-load-assets:
-	uv run python scripts/load_asset_definitions.py
 
 docs:
 	uv sync --group docs

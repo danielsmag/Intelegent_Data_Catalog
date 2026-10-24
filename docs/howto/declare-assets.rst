@@ -5,36 +5,48 @@ Put one Python file in each definition folder. The scanner executes the file
 and applies what it constructs. Upload the object under the configured
 prefix (default ``asset-definitions/``) in the definition bucket.
 
+The commerce team's declarations are the ``lumen-sales`` project next to this
+repository. Those files belong under the prefix in the definition bucket. The
+catalog reads that prefix from object storage. The snippets below are those
+files.
+
 Space
 -----
 
-.. literalinclude:: ../../examples/asset-definitions/spaces/space_analytics.py
+.. literalinclude:: ../../../lumen-sales/spaces/space_sales.py
    :language: python
-   :caption: examples/asset-definitions/spaces/space_analytics.py
+   :caption: lumen-sales/spaces/space_sales.py
 
-Object key: ``asset-definitions/spaces/space_analytics.py``.
+Object key: ``asset-definitions/spaces/space_sales.py``.
 
 Scope
 -----
 
-.. literalinclude:: ../../examples/asset-definitions/scopes/analytics/scope_finance.py
+.. literalinclude:: ../../../lumen-sales/scopes/sales/scope_sales.py
    :language: python
-   :caption: examples/asset-definitions/scopes/analytics/scope_finance.py
+   :caption: lumen-sales/scopes/sales/scope_sales.py
 
-Object key: ``asset-definitions/scopes/analytics/scope_finance.py``. The
-parent space slug is ``analytics``. Create the space file first. A scope
+Object key: ``asset-definitions/scopes/sales/scope_sales.py``. The
+parent space slug is ``sales``. Create the space file first. A scope
 whose space is still missing stays unresolved and is retried on a later scan.
 
 Asset
 -----
 
-.. literalinclude:: ../../examples/asset-definitions/assets/sales/asset_orders.py
+.. literalinclude:: ../../../lumen-sales/assets/sales/asset_customer_spend.py
    :language: python
-   :caption: examples/asset-definitions/assets/sales/asset_orders.py
+   :caption: lumen-sales/assets/sales/asset_customer_spend.py
 
-Object key: ``asset-definitions/assets/sales/asset_orders.py``. ``orders`` is
-the stable key. The cron runs the operator at 02:00. Omit ``schedule`` to run
-once when the file is applied.
+Object key: ``asset-definitions/assets/sales/asset_customer_spend.py``.
+``customer_spend`` is the stable key. The cron runs the operator at 02:00.
+``context`` is analyst text, so a later run keeps it.
+
+``lumen-sales/assets/sales/asset_customers.py`` names
+``polaris.sales.customers`` and runs at 01:00.
+``lumen-sales/assets/sales/asset_orders.py`` names
+``polaris.sales.orders`` and runs at 01:30.
+
+Omit ``schedule`` to run once when the file is applied.
 
 Scan
 ----

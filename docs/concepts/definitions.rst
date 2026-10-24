@@ -52,6 +52,7 @@ stored description stays as it is. Pass ``description=None`` and the stored
 description is cleared. A new space with no ``name`` uses the slug as its
 label.
 
-Examples live under ``examples/asset-definitions/``. Upload them under the
-prefix. The Assets view lists the objects the scanner can see. See
-:doc:`/howto/declare-assets`.
+The Lumen sales declarations are the ``lumen-sales`` project next to this
+repository. They belong under the prefix in the definition bucket. The catalog
+reads that prefix from object storage. The Assets view lists the objects the
+scanner can see. See :doc:`/howto/declare-assets`.
