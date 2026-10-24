@@ -2,7 +2,7 @@
 
 Python 3.15 application for an intelligent data catalog.
 
-The manual is in `docs/`. Build it, then open `docs/_build/html/index.html`.
+The manual is in `docs/`. GitHub Pages publishes it at <https://danielsmag.github.io/Intelegent_Data_Catalog/>. Build it locally, then open `docs/_build/html/index.html`.
 
 ```bash
 uv sync --group docs

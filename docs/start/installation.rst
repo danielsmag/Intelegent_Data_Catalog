@@ -29,7 +29,8 @@ Build this manual with the ``docs`` group:
    uv sync --group docs
    uv run sphinx-build -W -b html docs docs/_build/html
 
-Open ``docs/_build/html/index.html``.
+Open ``docs/_build/html/index.html``. GitHub Pages publishes the same
+build at https://danielsmag.github.io/Intelegent_Data_Catalog/.
 
 Checks:
 

@@ -117,6 +117,7 @@ exclude_patterns: list[str] = ["_build"]
 html_theme: str = "pydata_sphinx_theme"
 html_static_path: list[str] = ["_static"]
 html_title: str = "Intelegent Data Catalog"
+html_baseurl: str = "https://danielsmag.github.io/Intelegent_Data_Catalog/"
 html_css_files: list[str] = ["catalog.css"]
 html_context: dict[str, str] = {"default_mode": "dark"}
 html_theme_options: dict[str, object] = {
