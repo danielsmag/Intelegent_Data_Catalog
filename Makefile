@@ -1,4 +1,4 @@
-.PHONY: help build up down rebuild logs test lint typecheck load-assets docs
+.PHONY: help build up down rebuild logs test lint typecheck load-assets docs docs-up
 
 COMPOSE ?= docker compose
 
@@ -13,7 +13,8 @@ help:
 		'lint        uv run ruff check .' \
 		'typecheck   uv run mypy' \
 		'load-assets copy examples/asset-definitions to S3' \
-		'docs        build the Sphinx HTML manual'
+		'docs        build the Sphinx HTML manual' \
+		'docs-up     serve the manual at http://localhost:8000'
 
 build:
 	$(COMPOSE) build
@@ -45,3 +46,6 @@ load-assets:
 docs:
 	uv sync --group docs
 	uv run sphinx-build -W -b html docs docs/_build/html
+
+docs-up:
+	$(COMPOSE) up -d --build catalog-docs

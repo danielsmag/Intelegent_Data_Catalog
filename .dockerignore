@@ -11,3 +11,4 @@ logs
 **/*.py[oc]
 web/node_modules
 web/dist
+docs/_build

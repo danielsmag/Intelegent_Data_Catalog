@@ -3,7 +3,7 @@ Compose
 
 ``docker compose up -d`` starts the local stack: Neo4j, Apache Polaris, the
 Polaris console, Marquez, OpenObserve, Keycloak, the catalog API, the catalog
-UI, MinIO, and Celery Flower. The first start pulls images, builds the catalog
+UI, the manual, MinIO, and Celery Flower. The first start pulls images, builds the catalog
 API and UI, builds the Polaris console, and downloads Spark's Maven packages.
 ``spark-lineage`` exits after it loads the sample tables and Marquez has the
 ``customer_spend`` job.
@@ -44,6 +44,8 @@ API and UI, builds the Polaris console, and downloads Spark's Maven packages.
      - http://localhost:8090
    * - Catalog UI
      - http://localhost:5173
+   * - Manual
+     - http://localhost:8000
    * - Keycloak
      - http://localhost:8180
    * - Celery Flower

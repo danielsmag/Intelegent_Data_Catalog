@@ -29,8 +29,15 @@ Build this manual with the ``docs`` group:
    uv sync --group docs
    uv run sphinx-build -W -b html docs docs/_build/html
 
-Open ``docs/_build/html/index.html``. GitHub Pages publishes the same
-build at https://danielsmag.github.io/Intelegent_Data_Catalog/.
+Open ``docs/_build/html/index.html``. Compose serves the same build:
+
+.. code-block:: bash
+
+   docker compose up -d --build catalog-docs
+
+Open http://localhost:8000. ``CATALOG_DOCS_PORT`` changes the host port.
+The service does not start the rest of the stack. The image build reads
+``../lumen-sales`` so the declare-assets snippets resolve.
 
 Checks:
 

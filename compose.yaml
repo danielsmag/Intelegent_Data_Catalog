@@ -467,6 +467,18 @@ services:
     ports:
       - "${CATALOG_UI_PORT:-5173}:80"
 
+  catalog-docs:
+    build:
+      context: .
+      dockerfile: docker/docs/Dockerfile
+      additional_contexts:
+        lumen-sales: ../lumen-sales
+    image: intelegent-data-catalog-docs:local
+    container_name: intelegent-data-catalog-docs
+    restart: unless-stopped
+    ports:
+      - "${CATALOG_DOCS_PORT:-8000}:80"
+
   polaris-console:
     image: intelegent-data-catalog-polaris-console:3edb60fc
     build:
