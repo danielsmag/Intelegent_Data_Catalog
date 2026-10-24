@@ -148,6 +148,80 @@ def test_collect_each_kind() -> None:
     assert assets.assets[0].schedule == "0 2 * * *"
     assert assets.assets[0].operator is not None
     assert assets.assets[0].operator.type == "IcebergTableOperator"
+    assert assets.assets[0].tags == []
+    assert "tags" not in assets.assets[0].set_fields
+
+
+def test_asset_accepts_keyword_fields_and_tags() -> None:
+    """Tags are optional labels. Blanks and repeats are dropped. Order stays."""
+    source: str = (
+        "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
+        "asset = Asset(\n"
+        '    key="customer_spend",\n'
+        '    description="Spend and order count per customer, built from customers and orders.",\n'
+        '    context="Grain is one row per customer.",\n'
+        "    operator=IcebergTableOperator(\n"
+        '        source_key="polaris.sales.customer_spend",\n'
+        '        data_source="Polaris",\n'
+        "        include_lineage=True,\n"
+        "    ),\n"
+        '    properties={"owner": "commerce-analytics", "tier": "gold"},\n'
+        '    tags=[" gold ", "customer", "gold"],\n'
+        '    schedule="0 2 * * *",\n'
+        ")\n"
+    )
+    spec: DefinitionSpec = collect_definitions(
+        source,
+        "asset_customer_spend.py",
+        DefinitionKind.ASSET,
+        timeout_seconds=5,
+    )
+    assert spec.assets[0].key == "customer_spend"
+    assert spec.assets[0].name is None
+    assert "name" not in spec.assets[0].set_fields
+    assert spec.assets[0].tags == ["gold", "customer"]
+    assert "tags" in spec.assets[0].set_fields
+    assert spec.assets[0].properties == {"owner": "commerce-analytics", "tier": "gold"}
+
+
+def test_bad_tags_fail_the_file() -> None:
+    """A tag that is not a short label fails the definition file."""
+    source: str = (
+        "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
+        'Asset("orders", IcebergTableOperator(source_key="a.b.c"), tags=["ok", "bad/tag"])\n'
+    )
+    with pytest.raises(AssetDefinitionImportError, match="each tag"):
+        collect_definitions(source, "asset_tags.py", DefinitionKind.ASSET, timeout_seconds=5)
+
+
+def test_scan_stores_declared_tags(tmp_path: Path) -> None:
+    """A tags argument is stored on the asset and returned with the row."""
+    database: CatalogDatabase
+    session: Session
+    store: MemoryObjectStore
+    scanner: AssetDefinitionScanner
+    database, session, store, scanner, _executor = _open(tmp_path)
+    try:
+        _table(session, "iceberg.sales.orders")
+        source: str = (
+            "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
+            "Asset(\n"
+            '    key="order_mart",\n'
+            '    operator=IcebergTableOperator(source_key="iceberg.sales.orders", '
+            'data_source="lakehouse"),\n'
+            '    tags=["gold", "orders"],\n'
+            ")\n"
+        )
+        _put(store, "assets/asset_orders.py", source)
+        scanner.scan(datetime.now(UTC))
+        asset: AssetRow | None = session.scalar(
+            select(AssetRow).where(AssetRow.name == "order_mart"),
+        )
+        assert asset is not None
+        assert asset.properties["tags"] == ["gold", "orders"]
+    finally:
+        session.close()
+        database.dispose()
 
 
 def test_iceberg_and_postgres_operators_share_table_fields() -> None:

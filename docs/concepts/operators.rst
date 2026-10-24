@@ -20,7 +20,7 @@ are in :doc:`/reference/dsl`.
 
    from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator
 
-   Asset(
+   asset = Asset(
        key="orders",
        operator=IcebergTableOperator(
            source_key="polaris.sales.orders",
@@ -51,7 +51,7 @@ the table you mean. The stored operator name is that class.
 
    from intelegent_data_catalog.assets.dsl import Asset, PostgresTableOperator
 
-   Asset(
+   asset = Asset(
        key="customers",
        operator=PostgresTableOperator(
            source_key="app.public.customers",
@@ -93,7 +93,7 @@ missing instance or DAG stays unresolved. See :doc:`/howto/airflow`.
 
    from intelegent_data_catalog.assets.dsl import AirflowOperator, Asset
 
-   Asset(
+   asset = Asset(
        key="orders-dag",
        operator=AirflowOperator(
            instance="warehouse",
@@ -136,7 +136,7 @@ becomes a ``NOTEBOOK`` asset. Any other file becomes a ``FILE`` asset.
 
    from intelegent_data_catalog.assets.dsl import Asset, PageOperator
 
-   Asset(
+   asset = Asset(
        key="orders-notebook",
        operator=PageOperator(
            path="Shared/notebooks/orders.ipynb",

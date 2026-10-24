@@ -99,6 +99,7 @@ class AssetRead(BaseModel):
     owner_user_id: UUID | None
     status: AssetStatus
     properties: dict[str, JsonValue]
+    tags: list[str] = Field(default_factory=list)
     memberships: list[AssetMembershipRead]
     detail: dict[str, JsonValue]
     created_at: datetime

@@ -219,6 +219,7 @@ class AssetService:
             owner_user_id=row.owner_user_id,
             status=asset.status,
             properties=_properties(row.properties),
+            tags=_tags(row.properties),
             memberships=memberships,
             detail=payload,
             created_at=_aware(row.created_at),
@@ -267,6 +268,18 @@ class _UnavailableAgents(AssetAgentProvider):
 
     def for_file(self, asset_id: UUID, notebook: bool) -> AssetAgent:
         raise LlmUnavailableError("language model is not configured")
+
+
+def _tags(raw: dict[str, object]) -> list[str]:
+    stored: object = raw.get("tags")
+    if not isinstance(stored, list):
+        return []
+    names: list[str] = []
+    item: object
+    for item in stored:
+        if isinstance(item, str) and item != "":
+            names.append(item)
+    return names
 
 
 def _properties(raw: dict[str, object]) -> dict[str, JsonValue]:

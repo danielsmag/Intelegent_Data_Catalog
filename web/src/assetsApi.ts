@@ -38,6 +38,7 @@ export type AssetRecord = {
   owner_user_id: string | null
   status: AssetStatus
   properties: Record<string, unknown>
+  tags: string[]
   memberships: AssetMembership[]
   detail: Record<string, unknown>
   created_at: string

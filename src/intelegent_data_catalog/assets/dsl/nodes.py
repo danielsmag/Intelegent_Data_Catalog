@@ -13,7 +13,9 @@ from intelegent_data_catalog.persistence.enums import AssetStatus
 from intelegent_data_catalog.registry.identifiers import require_slug
 
 _KEY: re.Pattern[str] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$")
+_TAG: re.Pattern[str] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
 _NAME_LIMIT: int = 255
+_TAG_LIMIT: int = 32
 
 
 class _UnsetType:
@@ -75,9 +77,11 @@ class Scope:
 class Asset:
     """Declare one asset and the operator that names its source and builds its context.
 
-    The asset is not placed in a space or scope. ``key`` is the stable id.
+    Assign the object to ``asset``. The asset is not placed in a space or scope.
+    ``key`` is the stable id and the visible name. There is no separate name argument.
     ``schedule`` is a five-field cron; omit it to run once when the asset is first applied.
     ``context`` is a manual override. Without it, the operator writes the context.
+    ``tags`` is a list of labels. Omit it and the stored tags stay. Pass ``[]`` to clear them.
     """
 
     def __init__(
@@ -85,15 +89,16 @@ class Asset:
         key: str,
         operator: Operator,
         *,
-        name: str | _UnsetType | None = _UNSET,
         description: str | _UnsetType | None = _UNSET,
         context: str | _UnsetType | None = _UNSET,
         status: AssetStatus | _UnsetType | None = _UNSET,
         properties: dict[str, JsonValue] | _UnsetType = _UNSET,
+        tags: list[str] | _UnsetType | None = _UNSET,
         schedule: str | _UnsetType | None = _UNSET,
     ) -> None:
         status_value: AssetStatus | None = _status(status)
         property_value: dict[str, JsonValue] = _properties(properties)
+        tag_value: list[str] = _tags(tags)
         schedule_value: str | None = _schedule(schedule)
         try:
             spec: AssetSpec = AssetSpec(
@@ -101,18 +106,18 @@ class Asset:
                 source=operator.to_source(),
                 operator=operator.to_ref(),
                 schedule=schedule_value,
-                name=_optional_text(name, "name", required=True),
                 description=_optional_text(description, "description", required=False),
                 context=_optional_text(context, "context", required=False),
                 status=status_value,
                 properties=property_value,
+                tags=tag_value,
                 set_fields=_set_fields(
                     (
-                        ("name", name),
                         ("description", description),
                         ("context", context),
                         ("status", status),
                         ("properties", properties),
+                        ("tags", tags),
                     ),
                 ),
             )
@@ -175,6 +180,32 @@ def _properties(value: dict[str, JsonValue] | _UnsetType) -> dict[str, JsonValue
     if isinstance(value, _UnsetType):
         return {}
     return dict(value)
+
+
+def _tags(value: list[str] | _UnsetType | None) -> list[str]:
+    if isinstance(value, _UnsetType) or value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise AssetDefinitionError("tags must be a list of strings")
+    found: list[str] = []
+    seen: set[str] = set()
+    item: object
+    for item in value:
+        if not isinstance(item, str):
+            raise AssetDefinitionError("tags must be a list of strings")
+        cleaned: str = item.strip()
+        if _TAG.fullmatch(cleaned) is None:
+            raise AssetDefinitionError(
+                "each tag must start with a letter or digit and use letters, digits, "
+                "spaces, '_', '-' or '.'",
+            )
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        found.append(cleaned)
+    if len(found) > _TAG_LIMIT:
+        raise AssetDefinitionError(f"tags cannot list more than {_TAG_LIMIT} values")
+    return found
 
 
 def _set_fields(pairs: tuple[tuple[str, object], ...]) -> list[str]:

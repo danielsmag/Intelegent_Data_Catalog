@@ -95,7 +95,10 @@ class AssetSpec(BaseModel):
 
     ``operator`` is absent only on items stored before operators ran. ``schedule``
     is a five-field cron, or null when the operator runs once on first apply.
-    ``key`` identifies the declaration. ``name`` is an optional display overlay.
+    ``key`` identifies the declaration and is the visible name. ``name`` stays
+    on stored items from older files and is ignored.
+    ``tags`` lists labels the file passed. An empty list with ``tags`` absent from
+    ``set_fields`` means the file did not mention tags.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -109,6 +112,7 @@ class AssetSpec(BaseModel):
     context: str | None = None
     status: AssetStatus | None = None
     properties: dict[str, JsonValue] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
     set_fields: list[str] = Field(default_factory=list)
 
     @field_validator("schedule")

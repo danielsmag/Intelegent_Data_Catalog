@@ -14,13 +14,13 @@ operator, and :doc:`execution` for when a run is queued.
 Declaration
 -----------
 
-Construct :class:`~intelegent_data_catalog.assets.dsl.Asset` in a file
-under ``assets/``. The constructor registers the declaration with that file.
-It does not read the catalog.
+Write ``asset = Asset(...)`` in a file under ``assets/``. The constructor
+registers the declaration with that file. It does not read the catalog.
 
-``key`` is the stable id of the declaration. It must start with a letter or
+``key`` is the stable id and the visible name. It must start with a letter or
 digit and may then use letters, digits, ``_``, and ``-``, up to 255
-characters. The same key in a later scan updates that declaration.
+characters. The same key in a later scan updates that declaration. There is
+no separate name argument.
 
 ``operator`` names the source and the flags used when the asset runs. The
 other arguments are optional overlays. Omit one and the stored value stays
@@ -32,8 +32,6 @@ as it is. Pass ``None`` for ``description`` or ``context`` to clear it.
 
    * - Argument
      - Effect
-   * - ``name``
-     - Display name. A new asset otherwise uses the source name.
    * - ``description``
      - Short description stored on the asset.
    * - ``context``
@@ -42,6 +40,8 @@ as it is. Pass ``None`` for ``description`` or ``context`` to clear it.
      - ``ACTIVE``, ``MISSING``, or ``DEPRECATED``.
    * - ``properties``
      - Extra JSON stored under ``properties.declared``.
+   * - ``tags``
+     - Labels stored on ``properties.tags`` and returned as ``tags``. Omit the argument and the stored labels stay. ``[]`` clears them. Each tag starts with a letter or digit and may use letters, digits, spaces, ``_``, ``-``, and ``.``, up to 64 characters. At most 32 tags. Repeated labels are kept once.
    * - ``schedule``
      - Five-field cron, such as ``0 2 * * *``. Omit it to run once per change.
 
@@ -83,7 +83,7 @@ The lookup does not read ``table_format``.
 From file to row
 ----------------
 
-#. The scanner executes the file and collects each ``Asset(...)``.
+#. The scanner executes the file and collects each ``asset = Asset(...)``.
 #. The applier asks the resolver for the source the operator named.
 #. A missing table, data source, Airflow instance, DAG, workspace, or file
    stays ``UNRESOLVED``. A later scan tries again. Removing the declaration

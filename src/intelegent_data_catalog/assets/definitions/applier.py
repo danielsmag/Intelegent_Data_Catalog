@@ -317,8 +317,7 @@ class AssetDefinitionApplier:
                 return created
 
     def _overlay(self, asset: AssetRow, spec: AssetSpec, file_key: str) -> None:
-        if "name" in spec.set_fields and spec.name is not None:
-            asset.name = _clip(spec.name)
+        asset.name = _clip(spec.key)
         if "description" in spec.set_fields:
             asset.description = spec.description
         if "context" in spec.set_fields:
@@ -329,6 +328,8 @@ class AssetDefinitionApplier:
         properties["definition"] = {"file": file_key, "key": spec.key}
         if "properties" in spec.set_fields:
             properties["declared"] = dict(spec.properties)
+        if "tags" in spec.set_fields:
+            properties["tags"] = list(spec.tags)
         asset.properties = properties
         asset.updated_at = utc_now()
 
