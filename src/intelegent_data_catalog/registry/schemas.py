@@ -1,5 +1,7 @@
 """HTTP and service models for the application catalog."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal

@@ -1,6 +1,6 @@
 # Intelegent Data Catalog
 
-Python 3.15 application for an intelligent data catalog.
+Python 3.13 or newer application for an intelligent data catalog.
 
 The manual is in `docs/`. Compose serves it at <http://localhost:8000>. Build it locally, then open `docs/_build/html/index.html`.
 

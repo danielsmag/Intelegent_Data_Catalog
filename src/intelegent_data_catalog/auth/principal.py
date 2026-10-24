@@ -1,5 +1,7 @@
 """Authenticated caller taken from an OIDC token or the dev settings."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from intelegent_data_catalog.core.settings import AuthSettings

@@ -1,5 +1,7 @@
 """Application settings loaded from settings.toml and the environment."""
 
+from __future__ import annotations
+
 import os
 import tomllib
 from dataclasses import dataclass

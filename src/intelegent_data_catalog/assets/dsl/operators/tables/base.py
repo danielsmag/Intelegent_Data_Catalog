@@ -1,5 +1,7 @@
 """Shared fields for catalog-table operators."""
 
+from __future__ import annotations
+
 from pydantic import Field, model_validator
 
 from intelegent_data_catalog.assets.definitions.models import TableSourceRef

@@ -1,5 +1,7 @@
 """Live steps for a context build. Redis holds a short ring; the API reads it."""
 
+from __future__ import annotations
+
 import json
 import logging
 from collections.abc import Iterator
@@ -324,6 +326,6 @@ def _parse_events(raw: object) -> list[BuildTraceEvent]:
             continue
         try:
             parsed.append(BuildTraceEvent.model_validate_json(item))
-        except ValidationError, json.JSONDecodeError:
+        except (ValidationError, json.JSONDecodeError):
             continue
     return parsed

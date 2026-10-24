@@ -1,7 +1,7 @@
 Intelegent Data Catalog
 ========================
 
-Python 3.15 application for an intelligent data catalog. This manual covers
+Python 3.13 or newer application for an intelligent data catalog. This manual covers
 install and Compose, the catalog model, asset definitions, the UI, the asset
 DSL, and the HTTP API.
 

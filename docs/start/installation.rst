@@ -1,7 +1,7 @@
 Installation
 ============
 
-The package requires Python 3.15. `uv <https://docs.astral.sh/uv/>`_ installs
+The package requires Python 3.13 or newer. `uv <https://docs.astral.sh/uv/>`_ installs
 it and the dev tools:
 
 .. code-block:: bash

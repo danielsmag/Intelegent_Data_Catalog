@@ -1,5 +1,7 @@
 """Ask a running catalog job to stop, including one whose worker is already gone."""
 
+from __future__ import annotations
+
 import logging
 from typing import Protocol, cast
 from uuid import UUID

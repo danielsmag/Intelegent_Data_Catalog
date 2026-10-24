@@ -1,5 +1,7 @@
 """Keep an asset row next to its catalog table, DAG, or workspace file."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from uuid import UUID, uuid4
 

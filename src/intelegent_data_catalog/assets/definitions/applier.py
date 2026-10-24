@@ -107,7 +107,7 @@ class AssetDefinitionApplier:
             try:
                 status: DefinitionItemStatus = self._retry(item)
                 self._session.commit()
-            except CatalogError, ValidationError, SQLAlchemyError:
+            except (CatalogError, ValidationError, SQLAlchemyError):
                 self._logger.exception("asset definition retry failed: %s", item_id)
                 self._pending = self._pending[:kept]
                 self._session.rollback()

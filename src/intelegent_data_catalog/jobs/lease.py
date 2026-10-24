@@ -1,5 +1,7 @@
 """Redis lease that proves a worker still owns a running catalog job."""
 
+from __future__ import annotations
+
 import logging
 import os
 import threading

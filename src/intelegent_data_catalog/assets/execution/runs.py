@@ -1,5 +1,7 @@
 """Persist and read asset operator runs on a session the operator cannot roll back."""
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
