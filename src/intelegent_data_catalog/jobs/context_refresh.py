@@ -112,6 +112,23 @@ class ContextRefreshService:
             table: CatalogTableRow | None = self._session.get(CatalogTableRow, table_id)
             if table is None:
                 return None
+            if table.asset_id is not None:
+                linked: AssetRow | None = self._session.get(AssetRow, table.asset_id)
+                if linked is None:
+                    return None
+                asset_flags: dict[str, bool] = option_values(
+                    RefreshSubjectKind.ASSET,
+                    options,
+                    linked.kind,
+                )
+                return _QueuedRebuild(
+                    RefreshSubjectKind.ASSET,
+                    linked.id,
+                    linked.name,
+                    dict(asset_flags),
+                    parse_model_id(row.model),
+                    parse_effort(row.effort),
+                )
             return _QueuedRebuild(
                 RefreshSubjectKind.TABLE,
                 table.id,

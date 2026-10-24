@@ -67,7 +67,7 @@ from intelegent_data_catalog.registry.annotations import (
     TagRead,
     TagWrite,
 )
-from intelegent_data_catalog.registry.schemas import ColumnRead, SyncRunRead
+from intelegent_data_catalog.registry.schemas import CatalogTableRead, ColumnRead, SyncRunRead
 
 router: APIRouter = APIRouter()
 
@@ -249,9 +249,12 @@ def build_knowledge_context(
     """Start a context build and return before the model finishes.
 
     When Neo4j is configured, the background build asks the model for a column subgraph.
-    PostgreSQL catalog rows stay unchanged.
+    PostgreSQL catalog rows stay unchanged. A table that has an asset is built there.
     """
-    table_name: str = platform.tables.get_table(table_id).name
+    table: CatalogTableRead = platform.tables.get_table(table_id)
+    if table.asset_id is not None:
+        raise ConflictError(f"table context is built on asset {table.asset_id}")
+    table_name: str = table.name
     selected: KnowledgeContextRequest = body if body is not None else KnowledgeContextRequest()
     options: TableContextOptions = TableContextOptions(
         include_data_profile=selected.include_data_profile,

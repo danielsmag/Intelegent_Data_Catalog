@@ -2,19 +2,21 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.assets.base import Asset, AssetAgent
 from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
-from intelegent_data_catalog.exceptions import EntityNotFoundError
+from intelegent_data_catalog.exceptions import EntityNotFoundError, PersistenceUnavailableError
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
-from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind
 from intelegent_data_catalog.persistence.models import CatalogTableRow
+from intelegent_data_catalog.registry.reads import dump_model
+
+_JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 
 _TABLE_OPTIONS: dict[str, bool] = {
     "include_graph": True,
@@ -47,7 +49,7 @@ class TableAssetAgentAdapter(AssetAgent):
         return self._agent.get_metadata()
 
     def build_context(self, options: AssetContextOptions) -> AssetAnalysisContext:
-        """Build the table snapshot and keep the typed table store in step."""
+        """Build the table snapshot and store it on the asset."""
         flags: dict[str, bool] = options.flags
         built: TableAnalysisContext = self._agent.build_context(
             TableContextOptions(
@@ -58,7 +60,6 @@ class TableAssetAgentAdapter(AssetAgent):
                 effort=options.effort,
             ),
         )
-        KnowledgeContextStore(self._session).save(built)
         table: CatalogTableRow | None = self._session.get(CatalogTableRow, self._table_id)
         asset_id: UUID | None = None if table is None else table.asset_id
         if asset_id is None:
@@ -69,7 +70,7 @@ class TableAssetAgentAdapter(AssetAgent):
             kind=AssetKind.TABLE,
             summary=summary,
             built_at=utc_now(),
-            payload={"table_id": str(self._table_id), "columns": len(built.columns)},
+            payload=_analysis_payload(built),
         )
 
     def describe(self) -> str:
@@ -105,3 +106,13 @@ class TableAsset(Asset):
         if table is None:
             raise EntityNotFoundError("catalog table", str(self.id))
         return table
+
+
+def _analysis_payload(built: TableAnalysisContext) -> dict[str, JsonValue]:
+    """JSON object stored on the asset for one table snapshot."""
+    raw: dict[str, object] = dump_model(built)
+    try:
+        payload: dict[str, JsonValue] = _JSON_OBJECT.validate_python(raw)
+    except ValidationError as err:
+        raise PersistenceUnavailableError("stored catalog JSON is invalid") from err
+    return payload

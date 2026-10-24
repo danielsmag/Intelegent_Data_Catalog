@@ -7,10 +7,20 @@ import { useTabParam } from "./useTabParam"
 import { useEntityConfig, type RefreshMode } from "./refreshSettings"
 import { requestAssetBuild } from "./knowledgeBuild"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
-import { WorkbenchLink } from "./editorSlots"
+import { TableAssetView, type TableAssetTab } from "./TableDetail"
 
-const TABS = ["overview", "source", "runs", "config"] as const
-type AssetTab = (typeof TABS)[number]
+const OTHER_TABS = ["overview", "source", "runs", "config"] as const
+const TABLE_TABS = [
+  "overview",
+  "columns",
+  "relationships",
+  "lineage",
+  "graph",
+  "source",
+  "runs",
+  "config",
+] as const
+type AssetTab = (typeof TABLE_TABS)[number]
 
 const OPTION_FIELDS = [
   { key: "include_graph", label: "Include graph", defaultValue: true },
@@ -22,9 +32,17 @@ const OPTION_FIELDS = [
   { key: "include_table_links", label: "Link mentioned tables", defaultValue: true },
 ]
 
+const TABLE_VIEW_TABS: readonly TableAssetTab[] = [
+  "overview",
+  "columns",
+  "relationships",
+  "lineage",
+  "graph",
+  "source",
+]
+
 export function AssetPage(): ReactElement {
   const assetId: string = useParams().assetId ?? ""
-  const [tab, selectTab] = useTabParam<AssetTab>(TABS, "overview")
   const [asset, setAsset] = useState<AssetRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const config = useEntityConfig("asset", assetId, OPTION_FIELDS)
@@ -46,8 +64,12 @@ export function AssetPage(): ReactElement {
   }, [assetId])
   const nodeId: string | null = asset === null ? null : detailString(asset.detail, "node_id")
   const tableId: string | null = asset === null ? null : detailString(asset.detail, "table_id")
+  const isTable: boolean = asset?.kind === "TABLE" && tableId !== null
+  const allowed: readonly AssetTab[] = isTable ? TABLE_TABS : OTHER_TABS
+  const [tab, selectTab] = useTabParam<AssetTab>(allowed, "overview")
+  const tableTab: TableAssetTab | null = isTable && isTableViewTab(tab) ? tab : null
   return (
-    <section className="page-grid">
+    <section className={tab === "graph" ? "page-grid section-fill" : "page-grid"}>
       <header className="page-intro">
         <p className="eyebrow">{asset?.kind ?? "Asset"}</p>
         <h1>{asset?.name ?? "Asset"}</h1>
@@ -55,7 +77,7 @@ export function AssetPage(): ReactElement {
       </header>
       {error !== null ? <p className="error-text">{error}</p> : null}
       <div className="tab-row">
-        {TABS.map((name: AssetTab) => (
+        {allowed.map((name: AssetTab) => (
           <button key={name} type="button" className={tab === name ? "is-on" : ""} onClick={() => { selectTab(name) }}>
             {name}
           </button>
@@ -69,7 +91,17 @@ export function AssetPage(): ReactElement {
           Build context
         </button>
       </div>
-      {tab === "overview" && asset !== null ? (
+      {tableTab !== null && asset !== null && tableId !== null ? (
+        <TableAssetView
+          asset={asset}
+          tableId={tableId}
+          tab={tableTab}
+          onAssetChanged={() => {
+            void fetchAsset(asset.id).then(setAsset)
+          }}
+        />
+      ) : null}
+      {tab === "overview" && asset !== null && !isTable ? (
         <>
           <ContextEditor
             kind="asset"
@@ -88,13 +120,9 @@ export function AssetPage(): ReactElement {
           </ul>
         </>
       ) : null}
-      {tab === "source" && asset !== null ? (
+      {tab === "source" && asset !== null && !isTable ? (
         nodeId !== null ? (
           <WorkspaceFilePage nodeId={nodeId} />
-        ) : tableId !== null ? (
-          <p>
-            <WorkbenchLink to={`/registry/tables/${tableId}`}>Open table detail</WorkbenchLink>
-          </p>
         ) : (
           <pre>{JSON.stringify(asset.detail, null, 2)}</pre>
         )
@@ -122,4 +150,9 @@ export function AssetPage(): ReactElement {
       ) : null}
     </section>
   )
+}
+
+function isTableViewTab(tab: AssetTab): tab is TableAssetTab {
+  const names: readonly string[] = TABLE_VIEW_TABS
+  return names.includes(tab)
 }

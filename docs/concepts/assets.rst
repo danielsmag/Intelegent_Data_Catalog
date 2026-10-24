@@ -101,9 +101,10 @@ What a run writes
 The executor rebuilds the operator from the stored class name and fields,
 then calls ``execute``. ``execute`` does two steps.
 
-``build_context`` loads a knowledge snapshot for that asset kind. The
-operator's ``include_*`` fields are the flags. Saved model and effort on the
-asset still apply. See :doc:`operators` for what each flag includes.
+``build_context`` loads a knowledge snapshot for that asset kind. A table
+asset stores the full table snapshot on the asset. The operator's
+``include_*`` fields are the flags. Saved model and effort on the asset still
+apply. See :doc:`operators` for what each flag includes.
 
 ``describe`` asks the model for business context and stores it with origin
 ``LLM``. Two cases skip that write:

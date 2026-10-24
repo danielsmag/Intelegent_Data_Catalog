@@ -3,18 +3,29 @@
 import asyncio
 import time
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
+from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
+from intelegent_data_catalog.assets.models import AssetAnalysisContext
+from intelegent_data_catalog.assets.store import AssetKnowledgeStore
+from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.bootstrap import create_app
+from intelegent_data_catalog.knowledge.context.catalog import PostgresCatalogContextProvider
+from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableCatalogContext
+from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
+from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.persistence.enums import AssetKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
+from intelegent_data_catalog.persistence.models import CatalogTableRow
+from intelegent_data_catalog.registry.repository import RegistryRepository
 
 
 def test_build_context_returns_catalog_graph_and_lineage(tmp_path: Path) -> None:
@@ -122,6 +133,47 @@ def test_built_context_is_saved_and_readable(tmp_path: Path) -> None:
         replaced: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
         assert replaced.status_code == 200
         assert _object(replaced)["lineage"] is None
+    finally:
+        database.dispose()
+
+
+def test_asset_backed_table_stores_the_snapshot_on_the_asset(tmp_path: Path) -> None:
+    """A linked table refuses the table build. Reads prefer the asset snapshot."""
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        table_id: str = _table(app)
+        asset_id: str = _attach_asset(database, table_id)
+        _save_table_snapshot(database, table_id, "table row")
+        _save_asset_snapshot(database, table_id, asset_id, {"table_id": table_id, "columns": 0})
+        held: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert held.status_code == 200
+        assert _nested(_object(held), "table")["description"] == "table row"
+        refused: httpx.Response = _send(
+            app,
+            "POST",
+            f"/api/v1/tables/{table_id}/knowledge-context",
+            {},
+        )
+        assert refused.status_code == 409
+        assert asset_id in _text(_object(refused), "detail")
+        _save_asset_snapshot(database, table_id, asset_id, None)
+        saved: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert saved.status_code == 200
+        assert _nested(_object(saved), "table")["description"] == "asset row"
+        asset_saved: httpx.Response = _send(
+            app,
+            "GET",
+            f"/api/v1/assets/{asset_id}/knowledge-context",
+        )
+        assert asset_saved.status_code == 200
+        payload: object = _object(asset_saved)["payload"]
+        assert isinstance(payload, dict)
+        table: object = payload["table"]
+        assert isinstance(table, dict)
+        assert table["name"] == "Orders"
+        assert table["description"] == "asset row"
     finally:
         database.dispose()
 
@@ -374,6 +426,74 @@ def _wait_for_build(app: FastAPI, job_id: str) -> dict[str, object]:
             return body
         time.sleep(0.05)
     raise AssertionError("knowledge build did not finish")
+
+
+def _attach_asset(database: CatalogDatabase, table_id: str) -> str:
+    session: Session = database.session()
+    try:
+        row: CatalogTableRow | None = session.get(CatalogTableRow, UUID(table_id))
+        assert row is not None
+        asset_id: UUID = AssetSync(session).ensure_table(row).id
+        session.commit()
+        return str(asset_id)
+    finally:
+        session.close()
+
+
+def _save_table_snapshot(database: CatalogDatabase, table_id: str, description: str) -> None:
+    session: Session = database.session()
+    try:
+        KnowledgeContextStore(session).save(_catalog_snapshot(session, table_id, description))
+    finally:
+        session.close()
+
+
+def _save_asset_snapshot(
+    database: CatalogDatabase,
+    table_id: str,
+    asset_id: str,
+    thin: dict[str, object] | None,
+) -> None:
+    session: Session = database.session()
+    try:
+        payload: dict[str, object]
+        summary: str
+        if thin is None:
+            built: TableAnalysisContext = _catalog_snapshot(session, table_id, "asset row")
+            payload = built.model_dump(mode="json")
+            summary = "asset row"
+        else:
+            payload = thin
+            summary = "thin"
+        AssetKnowledgeStore(session).save(
+            AssetAnalysisContext.model_validate(
+                {
+                    "asset_id": asset_id,
+                    "kind": AssetKind.TABLE.value,
+                    "summary": summary,
+                    "built_at": utc_now().isoformat(),
+                    "payload": payload,
+                },
+            ),
+        )
+    finally:
+        session.close()
+
+
+def _catalog_snapshot(session: Session, table_id: str, description: str) -> TableAnalysisContext:
+    catalog: TableCatalogContext = PostgresCatalogContextProvider(
+        RegistryRepository(session),
+    ).get_table_context(UUID(table_id))
+    built: TableAnalysisContext = TableAnalysisContext(
+        table=catalog.table,
+        columns=list(catalog.columns),
+        data_profile=None,
+        existing_relationships=list(catalog.relationships),
+        graph_neighbors=[],
+        lineage=None,
+    )
+    built.table.description = description
+    return built
 
 
 def _wait_for_space_build(app: FastAPI, job_id: str) -> dict[str, object]:

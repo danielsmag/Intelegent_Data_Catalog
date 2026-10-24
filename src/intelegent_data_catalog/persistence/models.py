@@ -245,7 +245,7 @@ class AssetMembershipRow(Base):
 
 
 class AssetKnowledgeContextRow(Base):
-    """Latest built analysis context for one non-table asset."""
+    """Latest built analysis context for one asset. Table assets store the table snapshot."""
 
     __tablename__: str = "asset_knowledge_contexts"
     __table_args__: tuple[UniqueConstraint, ...] = (

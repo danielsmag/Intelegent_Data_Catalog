@@ -350,8 +350,9 @@ def context_rebuild_running(session: Session, row: EntityConfigurationRow) -> bo
 
 
 def _latest_context_job(session: Session, row: EntityConfigurationRow) -> CatalogJobRow | None:
-    kind: CatalogJobKind | None = _context_job_kind(row)
-    subject_id: UUID | None = _configuration_subject_id(row)
+    kind: CatalogJobKind | None
+    subject_id: UUID | None
+    kind, subject_id = _context_target(session, row)
     if kind is None or subject_id is None:
         return None
     statement = (
@@ -367,32 +368,29 @@ def _latest_context_job(session: Session, row: EntityConfigurationRow) -> Catalo
     return session.scalar(statement)
 
 
-def _context_job_kind(row: EntityConfigurationRow) -> CatalogJobKind | None:
+def _context_target(
+    session: Session,
+    row: EntityConfigurationRow,
+) -> tuple[CatalogJobKind | None, UUID | None]:
+    """Job kind and subject this configuration rebuilds. A linked table uses its asset."""
     if row.asset_id is not None:
-        return CatalogJobKind.ASSET
+        return CatalogJobKind.ASSET, row.asset_id
     if row.catalog_table_id is not None:
-        return CatalogJobKind.KNOWLEDGE
+        table: CatalogTableRow | None = session.get(CatalogTableRow, row.catalog_table_id)
+        if table is not None and table.asset_id is not None:
+            return CatalogJobKind.ASSET, table.asset_id
+        return CatalogJobKind.KNOWLEDGE, row.catalog_table_id
     if row.scope_id is not None:
-        return CatalogJobKind.SCOPE
+        return CatalogJobKind.SCOPE, row.scope_id
     if row.space_id is not None:
-        return CatalogJobKind.SPACE
-    return None
+        return CatalogJobKind.SPACE, row.space_id
+    return None, None
 
 
 def _aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
-
-
-def _configuration_subject_id(row: EntityConfigurationRow) -> UUID | None:
-    if row.asset_id is not None:
-        return row.asset_id
-    if row.catalog_table_id is not None:
-        return row.catalog_table_id
-    if row.scope_id is not None:
-        return row.scope_id
-    return row.space_id
 
 
 def _checked_options(

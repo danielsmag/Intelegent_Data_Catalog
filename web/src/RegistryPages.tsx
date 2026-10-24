@@ -34,7 +34,7 @@ import {
   requestSpaceBuild,
 } from "./knowledgeBuild"
 import { EditorRail, WorkbenchLink, useEditorStatus, useEditorTitle } from "./editorSlots"
-import { setPendingQuerySql, setSidebarView } from "./sidebarView"
+import { ColumnTable, GraphList, RelationshipLists, SourceTab } from "./TableDetail"
 import { PanelChevron, PlusIcon } from "./icons"
 import { errorMessage, isAbortError } from "./api"
 import { useDeadlineLabel, useEntityConfig, type EntityConfigController, type OptionField } from "./refreshSettings"
@@ -1394,8 +1394,23 @@ export function RegistryTablePage(): ReactElement {
       })
   }
   const qualified: string = table?.source_key ?? "Table"
+  const linkedAssetId: string | null = table?.asset_id ?? null
   useEditorTitle(table?.display_name ?? table?.name ?? null)
   useEditorStatus("Spaces", qualified)
+  if (linkedAssetId !== null && linkedAssetId !== "") {
+    return (
+      <section>
+        <p className="crumb">
+          <Link to="/spaces">Spaces</Link>
+        </p>
+        <h1>{table?.display_name ?? table?.name ?? "Table"}</h1>
+        <p className="note">Context for this table is on the asset.</p>
+        <p>
+          <WorkbenchLink to={`/assets/${linkedAssetId}`}>Open asset</WorkbenchLink>
+        </p>
+      </section>
+    )
+  }
   return (
     <>
       <EditorRail>
@@ -1592,146 +1607,6 @@ export function DataSourcesPage(): ReactElement {
         </ul>
       </section>
     </>
-  )
-}
-
-function ColumnTable(props: {
-  columns: CatalogColumnRecord[]
-  onContextChanged: () => void
-}): ReactElement {
-  if (props.columns.length === 0) {
-    return <p className="note">No columns.</p>
-  }
-  return (
-    <table className="columns">
-      <thead>
-        <tr>
-          <th>Column</th>
-          <th>Type</th>
-          <th>Nullable</th>
-          <th>PK</th>
-          <th>Context</th>
-        </tr>
-      </thead>
-      <tbody>
-        {props.columns.map((column: CatalogColumnRecord) => (
-          <tr key={column.id}>
-            <td>{column.name}</td>
-            <td className="type">{column.data_type ?? column.discovered_data_type ?? "Unknown"}</td>
-            <td>{column.nullable === null ? "Unknown" : column.nullable ? "Yes" : "No"}</td>
-            <td>{column.is_primary_key === null ? "Unknown" : column.is_primary_key ? "Yes" : "No"}</td>
-            <td>
-              <ContextEditor
-                kind="column"
-                id={column.id}
-                name={column.name}
-                context={column.context}
-                origin={column.context_origin}
-                onChanged={props.onContextChanged}
-                compact
-              />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-function RelationshipLists(props: {
-  relationships: TableRelationships
-  graph: GraphViewRecord | null
-}): ReactElement {
-  return (
-    <div>
-      <h2>Outgoing</h2>
-      <RelationshipItems items={props.relationships.outgoing} empty="No outgoing relationships." />
-      <h2>Incoming</h2>
-      <RelationshipItems items={props.relationships.incoming} empty="No incoming relationships." />
-      <GraphList graph={props.graph} empty="No relationship graph." />
-    </div>
-  )
-}
-
-function RelationshipItems(props: {
-  items: TableRelationships["outgoing"]
-  empty: string
-}): ReactElement {
-  if (props.items.length === 0) {
-    return <p className="note">{props.empty}</p>
-  }
-  return (
-    <ul className="registry-list">
-      {props.items.map((item) => (
-        <li key={item.id}>
-          <span className="badge">{item.origin}</span>
-          <span className="badge">{item.status}</span>
-          {item.column_mappings
-            .map(
-              (mapping) => `${mapping.source_column_name} → ${mapping.target_column_name}`,
-            )
-            .join(", ")}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function GraphList(props: { graph: GraphViewRecord | null; empty: string }): ReactElement {
-  if (props.graph === null || props.graph.edges.length === 0) {
-    return <p className="note">{props.empty}</p>
-  }
-  const labels: Map<string, string> = new Map(
-    props.graph.nodes.map((node) => [node.id, node.resolved ? node.label : `${node.label} (unresolved)`]),
-  )
-  return (
-    <ul className="registry-list">
-      {props.graph.edges.map((edge, index: number) => (
-        <li key={`${edge.source}-${edge.target}-${edge.kind}-${index}`} className={`edge edge-${edge.style}`}>
-          <span>{labels.get(edge.source) ?? edge.source}</span>
-          <span className="comment">{edge.style}</span>
-          <span>{labels.get(edge.target) ?? edge.target}</span>
-        </li>
-      ))}
-      {props.graph.truncated ? <li className="comment">Graph truncated.</li> : null}
-    </ul>
-  )
-}
-
-function SourceTab(props: {
-  table: CatalogTableRecord
-  bindings: AssetBindingRecord[]
-  spark: SparkQueryAvailability | null
-}): ReactElement {
-  const discovery: AssetBindingRecord | undefined = props.bindings.find(
-    (binding: AssetBindingRecord) => binding.role === "DISCOVERY",
-  )
-  const query: AssetBindingRecord | undefined = props.bindings.find(
-    (binding: AssetBindingRecord) => binding.role === "QUERY" && binding.is_selected,
-  )
-  const sql: string | null = props.spark?.sql ?? null
-  return (
-    <div>
-      <p>{`Physical ${props.table.physical_catalog}.${props.table.physical_namespace}.${props.table.physical_table}`}</p>
-      <p>Format {props.table.table_format ?? "Unknown"}</p>
-      <p>Discovery {discovery?.engine_ref_key ?? "Not configured"}</p>
-      <p>Spark {query?.engine_ref_key ?? "Not configured for Spark queries"}</p>
-      <p className="comment">Freshness {props.table.last_synced_at ?? "never synced"}</p>
-      {props.spark?.available && sql !== null ? (
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            setSidebarView("query")
-            setPendingQuerySql(sql)
-          }}
-        >
-          Query in Spark
-        </button>
-      ) : (
-        <p>{props.spark?.message ?? "Not configured for Spark queries"}</p>
-      )}
-    </div>
   )
 }
 

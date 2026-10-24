@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
+from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.context_refresh import ContextRefreshService
@@ -373,6 +374,70 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
         assert len(publisher.job_ids) == 2
     finally:
         database.dispose()
+
+
+def test_due_table_configuration_queues_the_linked_asset(tmp_path: Path) -> None:
+    """A table schedule whose table now has an asset queues that asset."""
+    app: FastAPI
+    database: CatalogDatabase
+    app, database = _app(tmp_path)
+    try:
+        table_id: str = _catalog_table(app)
+        saved: httpx.Response = _send(
+            app,
+            "PUT",
+            f"/api/v1/tables/{table_id}/configuration",
+            {
+                "interval_seconds": 600,
+                "enabled": True,
+                "options": {
+                    "include_graph": True,
+                    "include_lineage": False,
+                    "include_data_profile": False,
+                },
+            },
+        )
+        assert saved.status_code == 200
+        asset_id: UUID = _link_table_asset(database, UUID(table_id))
+        _age_catalog_table_configuration(database, UUID(table_id))
+        publisher: _RecordingBuilds = _RecordingBuilds()
+        jobs: CatalogJobs = CatalogJobs(database, publisher)
+        claimed: int = _claim_context(database, jobs)
+        assert claimed == 1
+        stored: CatalogJobRow = _job(database, publisher.job_ids[0])
+        assert stored.kind == "asset"
+        assert stored.subject_id == asset_id
+        waiting: int = _claim_context(database, jobs)
+        assert waiting == 0
+    finally:
+        database.dispose()
+
+
+def _link_table_asset(database: CatalogDatabase, table_id: UUID) -> UUID:
+    session: Session = database.session()
+    try:
+        table: CatalogTableRow | None = session.get(CatalogTableRow, table_id)
+        assert table is not None
+        asset_id: UUID = AssetSync(session).ensure_table(table).id
+        session.commit()
+        return asset_id
+    finally:
+        session.close()
+
+
+def _age_catalog_table_configuration(database: CatalogDatabase, table_id: UUID) -> None:
+    session: Session = database.session()
+    try:
+        row: EntityConfigurationRow | None = session.scalar(
+            select(EntityConfigurationRow).where(
+                EntityConfigurationRow.catalog_table_id == table_id,
+            ),
+        )
+        assert row is not None
+        row.created_at = utc_now() - timedelta(hours=1)
+        session.commit()
+    finally:
+        session.close()
 
 
 def _claim_context(database: CatalogDatabase, jobs: CatalogJobs) -> int:

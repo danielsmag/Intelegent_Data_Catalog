@@ -25,6 +25,7 @@ from intelegent_data_catalog.persistence.enums import ContextOrigin
 from intelegent_data_catalog.persistence.models import (
     AirflowInstanceKnowledgeContextRow,
     AirflowInstanceRow,
+    AssetKnowledgeContextRow,
     CatalogTableRow,
     ColumnRow,
     ScopeKnowledgeContextRow,
@@ -68,11 +69,36 @@ class KnowledgeContextStore:
         self._commit()
 
     def get(self, table_id: UUID) -> TableAnalysisContext | None:
-        """Return the saved snapshot, or none when this table has never been built."""
+        """Return the asset snapshot when this table has one, otherwise the table row."""
+        stored: TableAnalysisContext | None = self._from_asset(table_id)
+        if stored is not None:
+            return stored
         row: TableKnowledgeContextRow | None = self._by_table(table_id)
         if row is None:
             return None
         return self._decode(row.payload, table_id)
+
+    def _from_asset(self, table_id: UUID) -> TableAnalysisContext | None:
+        """Read a table snapshot nested in the linked asset. A thin payload is absent."""
+        table: CatalogTableRow | None = self._session.get(CatalogTableRow, table_id)
+        if table is None or table.asset_id is None:
+            return None
+        statement: Select[tuple[AssetKnowledgeContextRow]] = select(AssetKnowledgeContextRow).where(
+            AssetKnowledgeContextRow.asset_id == table.asset_id,
+        )
+        saved: AssetKnowledgeContextRow | None = self._session.scalar(statement)
+        if saved is None or not isinstance(saved.payload, dict):
+            return None
+        inner: object = saved.payload.get("payload")
+        if not isinstance(inner, dict):
+            return None
+        try:
+            context: TableAnalysisContext = TableAnalysisContext.model_validate(inner)
+        except ValidationError:
+            return None
+        if context.table.id != table_id:
+            return None
+        return context
 
     def _by_table(self, table_id: UUID) -> TableKnowledgeContextRow | None:
         statement: Select[tuple[TableKnowledgeContextRow]] = select(TableKnowledgeContextRow).where(
