@@ -4,12 +4,12 @@ import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { SubgraphView } from "./SubgraphView"
 import { errorMessage, isAbortError } from "./api"
 import { type AssetRecord } from "./assetsApi"
-import { apiFetch, readDetail } from "./http"
 import { onAssetBuildFinished, onContextGenerationFinished, requestContextGeneration } from "./knowledgeBuild"
 import {
   fetchBindings,
   fetchCatalogColumns,
   fetchCatalogTable,
+  fetchKnowledgeContext,
   fetchKnowledgeGraph,
   fetchLineage,
   fetchRelationshipGraph,
@@ -80,7 +80,7 @@ export function TableAssetView(props: {
       fetchSparkQuery(props.tableId, controller.signal),
       fetchBindings(props.tableId, controller.signal),
       fetchTableTags(props.tableId, controller.signal),
-      fetchAssetTableSnapshot(props.asset.id, controller.signal),
+      fetchKnowledgeContext(props.tableId, controller.signal),
     ])
       .then((loaded) => {
         setTable(loaded[0])
@@ -130,66 +130,127 @@ export function TableAssetView(props: {
     }
   }, [props.asset.id, props.tableId, reloadToken])
   const qualified: string = table?.source_key ?? props.asset.name
+  const relationshipCount: number =
+    (relationships?.incoming.length ?? 0) + (relationships?.outgoing.length ?? 0)
+  const description: string | null = table?.description ?? table?.source_description ?? null
   return (
-    <div>
-      {error !== null ? <p className="error-text">{error}</p> : null}
+    <div className="asset-sheet">
+      {error !== null ? <p className="error-text asset-alert">{error}</p> : null}
       {props.tab === "overview" ? (
-        <div>
-          <ContextEditor
-            kind="asset"
-            id={props.asset.id}
-            name={props.asset.name}
-            context={props.asset.context}
-            origin={props.asset.context_origin}
-            onChanged={props.onAssetChanged}
-          />
-          <button
-            className="button secondary"
-            type="button"
-            disabled={columnsBuilding}
-            onClick={() => {
-              setColumnsBuilding(true)
-              setError(null)
-              void requestContextGeneration("table_columns", props.tableId).catch((err: unknown) => {
-                setColumnsBuilding(false)
-                setError(errorMessage(err))
-              })
-            }}
-          >
-            {columnsBuilding ? "Generating column contexts…" : "Generate all column contexts"}
-          </button>
-          {knowledge !== null ? <KnowledgeContextPanel context={knowledge} /> : (
-            <p className="note">Build context to write a snapshot.</p>
-          )}
-          {table !== null ? (
-            <>
-              <p>{qualified}</p>
-              <p>{table.description ?? table.source_description ?? "No description"}</p>
-              <p>
-                Tags: {tags.length === 0 ? "None" : tags.map((tag: TagRecord) => tag.name).join(", ")}
-              </p>
-              <p className="comment">Last synced {table.last_synced_at ?? "never"}</p>
-            </>
-          ) : null}
-          <ul>
-            {props.asset.memberships.map((membership) => (
-              <li key={membership.id}>{membership.scope_id ?? membership.space_id}</li>
-            ))}
+        <div className="asset-overview">
+          <ul className="asset-stats">
+            <li>
+              <span>Columns</span>
+              <strong>{table === null ? "—" : String(columns.length)}</strong>
+            </li>
+            <li>
+              <span>Relationships</span>
+              <strong>{relationships === null ? "—" : String(relationshipCount)}</strong>
+            </li>
+            <li>
+              <span>Lineage</span>
+              <strong>{lineage === null ? "—" : String(lineage.edges.length)}</strong>
+            </li>
+            <li>
+              <span>Tags</span>
+              <strong>{table === null ? "—" : String(tags.length)}</strong>
+            </li>
           </ul>
+          <div className="asset-overview-grid">
+            <div className="asset-overview-main">
+              {description !== null && description !== "" ? (
+                <section className="asset-card">
+                  <h2>Description</h2>
+                  <p className="asset-prose">{description}</p>
+                </section>
+              ) : null}
+              <section className="asset-card">
+                <ContextEditor
+                  kind="asset"
+                  id={props.asset.id}
+                  name={props.asset.name}
+                  context={props.asset.context}
+                  origin={props.asset.context_origin}
+                  onChanged={props.onAssetChanged}
+                />
+                <div className="asset-card-foot">
+                  <button
+                    className="button secondary"
+                    type="button"
+                    disabled={columnsBuilding}
+                    onClick={() => {
+                      setColumnsBuilding(true)
+                      setError(null)
+                      void requestContextGeneration("table_columns", props.tableId).catch((err: unknown) => {
+                        setColumnsBuilding(false)
+                        setError(errorMessage(err))
+                      })
+                    }}
+                  >
+                    {columnsBuilding ? "Generating column contexts…" : "Generate column contexts"}
+                  </button>
+                </div>
+              </section>
+            </div>
+            <aside className="asset-card asset-properties" aria-label="Table properties">
+              <h2>Properties</h2>
+              <dl className="facts asset-facts">
+                <dt>Qualified name</dt>
+                <dd className="mono">{qualified}</dd>
+                <dt>Physical</dt>
+                <dd className="mono">{physicalName(table)}</dd>
+                <dt>Format</dt>
+                <dd>{shown(table?.table_format)}</dd>
+                <dt>Type</dt>
+                <dd>{shown(table?.table_type)}</dd>
+                <dt>Status</dt>
+                <dd>{shown(table?.status)}</dd>
+                <dt>Last synced</dt>
+                <dd>{formatWhen(table?.last_synced_at ?? null)}</dd>
+              </dl>
+              <h3>Tags</h3>
+              <div className="asset-tags">
+                {tags.length === 0 ? (
+                  <span className="comment">No tags</span>
+                ) : (
+                  tags.map((tag: TagRecord) => (
+                    <span key={tag.id} className="asset-chip">
+                      {tag.name}
+                    </span>
+                  ))
+                )}
+              </div>
+            </aside>
+          </div>
+          {knowledge !== null ? (
+            <KnowledgeContextPanel context={knowledge} />
+          ) : (
+            <section className="asset-empty" aria-label="Built context">
+              <p className="asset-empty-title">No built context</p>
+              <p>Build context to keep a summary of columns, relationships, and lineage.</p>
+            </section>
+          )}
         </div>
       ) : null}
       {props.tab === "columns" ? (
-        <ColumnTable
-          columns={columns}
-          onContextChanged={() => {
-            setReloadToken((current: number) => current + 1)
-          }}
-        />
+        <section className="asset-card asset-table-card">
+          <ColumnTable
+            columns={columns}
+            onContextChanged={() => {
+              setReloadToken((current: number) => current + 1)
+            }}
+          />
+        </section>
       ) : null}
       {props.tab === "relationships" && relationships !== null ? (
         <RelationshipLists relationships={relationships} graph={relationGraph} />
       ) : null}
-      {props.tab === "lineage" ? <GraphList graph={lineage} empty="No lineage recorded." /> : null}
+      {props.tab === "lineage" ? (
+        <section className="asset-card">
+          <h2>Lineage</h2>
+          <GraphList graph={lineage} empty="No lineage recorded." />
+        </section>
+      ) : null}
       {props.tab === "graph" ? (
         <SubgraphView graph={knowledgeGraph} error={graphError} focusTableId={props.tableId} />
       ) : null}
@@ -248,12 +309,19 @@ export function RelationshipLists(props: {
   graph: GraphViewRecord | null
 }): ReactElement {
   return (
-    <div>
-      <h2>Outgoing</h2>
-      <RelationshipItems items={props.relationships.outgoing} empty="No outgoing relationships." />
-      <h2>Incoming</h2>
-      <RelationshipItems items={props.relationships.incoming} empty="No incoming relationships." />
-      <GraphList graph={props.graph} empty="No relationship graph." />
+    <div className="asset-stack">
+      <section className="asset-card">
+        <h2>Outgoing</h2>
+        <RelationshipItems items={props.relationships.outgoing} empty="No outgoing relationships." />
+      </section>
+      <section className="asset-card">
+        <h2>Incoming</h2>
+        <RelationshipItems items={props.relationships.incoming} empty="No incoming relationships." />
+      </section>
+      <section className="asset-card">
+        <h2>Graph</h2>
+        <GraphList graph={props.graph} empty="No relationship graph." />
+      </section>
     </div>
   )
 }
@@ -314,53 +382,74 @@ export function SourceTab(props: {
   )
   const sql: string | null = props.spark?.sql ?? null
   return (
-    <div>
-      <p>{`Physical ${props.table.physical_catalog}.${props.table.physical_namespace}.${props.table.physical_table}`}</p>
-      <p>Format {props.table.table_format ?? "Unknown"}</p>
-      <p>Discovery {discovery?.engine_ref_key ?? "Not configured"}</p>
-      <p>Spark {query?.engine_ref_key ?? "Not configured for Spark queries"}</p>
-      <p className="comment">Freshness {props.table.last_synced_at ?? "never synced"}</p>
-      {props.spark?.available && sql !== null ? (
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            setSidebarView("query")
-            setPendingQuerySql(sql)
-          }}
-        >
-          Query in Spark
-        </button>
-      ) : (
-        <p>{props.spark?.message ?? "Not configured for Spark queries"}</p>
-      )}
-    </div>
+    <section className="asset-card">
+      <h2>Source</h2>
+      <dl className="facts asset-facts">
+        <dt>Qualified name</dt>
+        <dd className="mono">{props.table.source_key}</dd>
+        <dt>Physical</dt>
+        <dd className="mono">{physicalName(props.table)}</dd>
+        <dt>Format</dt>
+        <dd>{shown(props.table.table_format)}</dd>
+        <dt>Type</dt>
+        <dd>{shown(props.table.table_type)}</dd>
+        <dt>Discovery</dt>
+        <dd>{discovery?.engine_ref_key ?? "Not configured"}</dd>
+        <dt>Spark</dt>
+        <dd>{query?.engine_ref_key ?? "Not configured"}</dd>
+        <dt>Last synced</dt>
+        <dd>{formatWhen(props.table.last_synced_at)}</dd>
+      </dl>
+      <div className="asset-card-foot">
+        {props.spark?.available && sql !== null ? (
+          <button
+            type="button"
+            className="button"
+            onClick={() => {
+              setSidebarView("query")
+              setPendingQuerySql(sql)
+            }}
+          >
+            Query in Spark
+          </button>
+        ) : (
+          <p className="comment">{props.spark?.message ?? "Not configured for Spark queries"}</p>
+        )}
+      </div>
+    </section>
   )
 }
 
-async function fetchAssetTableSnapshot(assetId: string, signal: AbortSignal): Promise<KnowledgeContext | null> {
-  const response: Response = await apiFetch(`/api/v1/assets/${assetId}/knowledge-context`, { signal })
-  if (response.status === 404) {
-    return null
+function physicalName(table: CatalogTableRecord | null): string {
+  if (table === null) {
+    return "—"
   }
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  const body: unknown = await response.json()
-  if (typeof body !== "object" || body === null || !("payload" in body)) {
-    return null
-  }
-  return tableSnapshot(body.payload)
+  return `${table.physical_catalog}.${table.physical_namespace}.${table.physical_table}`
 }
 
-function tableSnapshot(value: unknown): KnowledgeContext | null {
-  if (typeof value !== "object" || value === null || !("table" in value) || !("columns" in value)) {
-    return null
+function shown(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") {
+    return "—"
   }
-  const columns: unknown = value.columns
-  const table: unknown = value.table
-  if (typeof table !== "object" || table === null || !Array.isArray(columns)) {
-    return null
-  }
-  return value as KnowledgeContext
+  return value
 }
+
+function formatWhen(value: string | null): string {
+  if (value === null || value === "") {
+    return "Never"
+  }
+  const date: Date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date)
+}
+

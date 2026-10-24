@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactElement } from "react"
 import { useParams } from "react-router-dom"
-import { detailString, fetchAsset, type AssetRecord } from "./assetsApi"
+import { detailString, fetchAsset, type AssetKind, type AssetRecord } from "./assetsApi"
 import { AssetRuns } from "./AssetRuns"
 import { ContextEditor } from "./ContextEditor"
 import { useTabParam } from "./useTabParam"
 import { useEntityConfig, type RefreshMode } from "./refreshSettings"
-import { requestAssetBuild } from "./knowledgeBuild"
+import { onAssetBuildFinished, requestAssetBuild } from "./knowledgeBuild"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { TableAssetView, type TableAssetTab } from "./TableDetail"
 
@@ -21,6 +21,17 @@ const TABLE_TABS = [
   "config",
 ] as const
 type AssetTab = (typeof TABLE_TABS)[number]
+
+const TAB_LABELS: Record<AssetTab, string> = {
+  overview: "Overview",
+  columns: "Columns",
+  relationships: "Relationships",
+  lineage: "Lineage",
+  graph: "Graph",
+  source: "Source",
+  runs: "Runs",
+  config: "Config",
+}
 
 const OPTION_FIELDS = [
   { key: "include_graph", label: "Include graph", defaultValue: true },
@@ -45,7 +56,16 @@ export function AssetPage(): ReactElement {
   const assetId: string = useParams().assetId ?? ""
   const [asset, setAsset] = useState<AssetRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [building, setBuilding] = useState<boolean>(false)
   const config = useEntityConfig("asset", assetId, OPTION_FIELDS)
+  useEffect(() => {
+    return onAssetBuildFinished((job) => {
+      if (job.asset_id !== assetId) {
+        return
+      }
+      setBuilding(false)
+    })
+  }, [assetId])
   useEffect(() => {
     const controller: AbortController = new AbortController()
     void fetchAsset(assetId, controller.signal)
@@ -68,28 +88,73 @@ export function AssetPage(): ReactElement {
   const allowed: readonly AssetTab[] = isTable ? TABLE_TABS : OTHER_TABS
   const [tab, selectTab] = useTabParam<AssetTab>(allowed, "overview")
   const tableTab: TableAssetTab | null = isTable && isTableViewTab(tab) ? tab : null
+  const sourceKey: string | null = asset === null ? null : propertyString(asset.properties, "source_key")
+  const tags: string[] = asset === null ? [] : declaredTags(asset)
+  const visibility: string = asset?.owner_user_id === null ? "Shared" : "Personal"
   return (
-    <section className={tab === "graph" ? "page-grid section-fill" : "page-grid"}>
-      <header className="page-intro">
-        <p className="eyebrow">{asset?.kind ?? "Asset"}</p>
-        <h1>{asset?.name ?? "Asset"}</h1>
-        <p className="note">{asset?.owner_user_id === null ? "Shared" : "Personal"}</p>
+    <section className={tab === "graph" ? "catalog-page section-fill" : "catalog-page"}>
+      <header className="catalog-hero asset-hero">
+        <div className="catalog-hero-top">
+          <div className="catalog-hero-copy">
+            <p className="catalog-kicker">{kindLabel(asset?.kind)}</p>
+            <div className="catalog-title-line">
+              <h1>{asset?.name ?? "Asset"}</h1>
+              <span className="asset-chip">{visibility}</span>
+              {asset !== null ? (
+                <span className={`asset-chip asset-status asset-status-${asset.status.toLowerCase()}`}>
+                  {asset.status}
+                </span>
+              ) : null}
+            </div>
+            {sourceKey !== null ? <p className="asset-qualified">{sourceKey}</p> : null}
+            {asset?.description !== null && asset?.description !== undefined && asset.description !== "" ? (
+              <p className="catalog-lead">{asset.description}</p>
+            ) : null}
+            {tags.length > 0 ? (
+              <div className="asset-tags asset-hero-tags">
+                {tags.map((tag: string) => (
+                  <span key={tag} className="asset-chip asset-tag">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="catalog-hero-actions">
+            <button
+              className="button"
+              type="button"
+              disabled={building || asset === null}
+              onClick={() => {
+                setBuilding(true)
+                setError(null)
+                void requestAssetBuild(assetId).catch((err: unknown) => {
+                  setBuilding(false)
+                  setError(err instanceof Error ? err.message : "Could not build context")
+                })
+              }}
+            >
+              {building ? "Building context…" : "Build context"}
+            </button>
+          </div>
+        </div>
       </header>
-      {error !== null ? <p className="error-text">{error}</p> : null}
-      <div className="tab-row">
+      {error !== null ? <p className="error-text asset-alert">{error}</p> : null}
+      <div className="tabs" role="tablist" aria-label="Asset sections">
         {allowed.map((name: AssetTab) => (
-          <button key={name} type="button" className={tab === name ? "is-on" : ""} onClick={() => { selectTab(name) }}>
-            {name}
+          <button
+            key={name}
+            type="button"
+            className={tab === name ? "tab selected" : "tab"}
+            role="tab"
+            aria-selected={tab === name}
+            onClick={() => {
+              selectTab(name)
+            }}
+          >
+            {TAB_LABELS[name]}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => {
-            void requestAssetBuild(assetId)
-          }}
-        >
-          Build context
-        </button>
       </div>
       {tableTab !== null && asset !== null && tableId !== null ? (
         <TableAssetView
@@ -102,23 +167,20 @@ export function AssetPage(): ReactElement {
         />
       ) : null}
       {tab === "overview" && asset !== null && !isTable ? (
-        <>
-          <ContextEditor
-            kind="asset"
-            id={asset.id}
-            name={asset.name}
-            context={asset.context}
-            origin={asset.context_origin}
-            onChanged={() => {
-              void fetchAsset(asset.id).then(setAsset)
-            }}
-          />
-          <ul>
-            {asset.memberships.map((membership) => (
-              <li key={membership.id}>{membership.scope_id ?? membership.space_id}</li>
-            ))}
-          </ul>
-        </>
+        <div className="asset-sheet">
+          <section className="asset-card">
+            <ContextEditor
+              kind="asset"
+              id={asset.id}
+              name={asset.name}
+              context={asset.context}
+              origin={asset.context_origin}
+              onChanged={() => {
+                void fetchAsset(asset.id).then(setAsset)
+              }}
+            />
+          </section>
+        </div>
       ) : null}
       {tab === "source" && asset !== null && !isTable ? (
         nodeId !== null ? (
@@ -129,23 +191,27 @@ export function AssetPage(): ReactElement {
       ) : null}
       {tab === "runs" ? <AssetRuns assetId={assetId} /> : null}
       {tab === "config" ? (
-        <div>
-          <label>
-            Refresh
-            <select
-              value={config.refreshMode}
-              onChange={(event) => {
-                const mode: RefreshMode = event.target.value === "ON_CHANGE" || event.target.value === "MANUAL"
-                  ? event.target.value
-                  : "INTERVAL"
-                config.commit(config.minutes, config.enabled, config.options, config.model, config.effort, mode)
-              }}
-            >
-              <option value="INTERVAL">Interval</option>
-              <option value="ON_CHANGE">On change</option>
-              <option value="MANUAL">Manual</option>
-            </select>
-          </label>
+        <div className="asset-sheet">
+          <section className="asset-card asset-config">
+            <h2>Refresh</h2>
+            <p className="catalog-lead">Choose when this asset rebuilds its context.</p>
+            <label className="asset-field">
+              <span>Mode</span>
+              <select
+                value={config.refreshMode}
+                onChange={(event) => {
+                  const mode: RefreshMode = event.target.value === "ON_CHANGE" || event.target.value === "MANUAL"
+                    ? event.target.value
+                    : "INTERVAL"
+                  config.commit(config.minutes, config.enabled, config.options, config.model, config.effort, mode)
+                }}
+              >
+                <option value="INTERVAL">Interval</option>
+                <option value="ON_CHANGE">On change</option>
+                <option value="MANUAL">Manual</option>
+              </select>
+            </label>
+          </section>
         </div>
       ) : null}
     </section>
@@ -155,4 +221,39 @@ export function AssetPage(): ReactElement {
 function isTableViewTab(tab: AssetTab): tab is TableAssetTab {
   const names: readonly string[] = TABLE_VIEW_TABS
   return names.includes(tab)
+}
+
+function kindLabel(kind: AssetKind | undefined): string {
+  if (kind === "TABLE") {
+    return "Table"
+  }
+  if (kind === "AIRFLOW_DAG") {
+    return "Airflow DAG"
+  }
+  if (kind === "NOTEBOOK") {
+    return "Notebook"
+  }
+  if (kind === "FILE") {
+    return "File"
+  }
+  return "Asset"
+}
+
+function declaredTags(asset: AssetRecord): string[] {
+  if (Array.isArray(asset.tags) && asset.tags.length > 0) {
+    return asset.tags.filter((tag: string) => tag !== "")
+  }
+  const raw: unknown = asset.properties.tags
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw.filter((item: unknown): item is string => typeof item === "string" && item !== "")
+}
+
+function propertyString(properties: Record<string, unknown>, key: string): string | null {
+  const value: unknown = properties[key]
+  if (typeof value !== "string" || value === "") {
+    return null
+  }
+  return value
 }

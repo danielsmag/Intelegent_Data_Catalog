@@ -551,6 +551,7 @@ function AssetRow(props: {
         />
       </span>
       <span className="asset-row__identity" role="cell">
+        {row.kind === "TABLE" ? <Availability status={row.status} /> : null}
         <button
           type="button"
           className="asset-row__name"
@@ -597,6 +598,13 @@ function AssetRow(props: {
       </span>
     </div>
   )
+}
+
+function Availability(props: { status: string }): ReactElement {
+  const active: boolean = props.status === "ACTIVE"
+  const tone: string = active ? "active" : "disabled"
+  const label: string = active ? "Active" : "Disabled"
+  return <span className={`asset-availability asset-availability--${tone}`}>{label}</span>
 }
 
 function StateMark(props: { row: AssetListItem }): ReactElement {

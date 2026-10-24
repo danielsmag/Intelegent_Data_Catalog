@@ -616,6 +616,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                       aria-current={tableSelected ? "page" : undefined}
                                     >
                                       <span className="chevron-spacer" />
+                                      <Availability status={table.status} />
                                       <IcebergIcon />
                                       <span className="tree-label">{table.name}</span>
                                     </WorkbenchLink>
@@ -934,6 +935,13 @@ function filterSpaces(spaces: HierarchySpace[], query: string): HierarchySpace[]
     }
   }
   return matched
+}
+
+function Availability(props: { status: string }): ReactElement {
+  const active: boolean = props.status === "ACTIVE"
+  const tone: string = active ? "active" : "disabled"
+  const label: string = active ? "Active" : "Disabled"
+  return <span className={`asset-availability asset-availability--${tone}`}>{label}</span>
 }
 
 function filterAirflow(nodes: HierarchyAirflow[], needle: string): HierarchyAirflow[] {
