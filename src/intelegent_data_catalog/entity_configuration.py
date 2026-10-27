@@ -54,6 +54,10 @@ _DAG_OPTIONS: dict[str, bool] = {
     "include_source": True,
     "include_previous": True,
 }
+_INSTANCE_OPTIONS: dict[str, bool] = {
+    "include_source": True,
+    "include_previous": True,
+}
 _FILE_OPTIONS: dict[str, bool] = {
     "include_outputs": False,
     "include_table_links": True,
@@ -66,6 +70,7 @@ _DEFAULTS: dict[RefreshSubjectKind, dict[str, bool]] = {
 _ASSET_DEFAULTS: dict[AssetKind, dict[str, bool]] = {
     AssetKind.TABLE: _TABLE_OPTIONS,
     AssetKind.AIRFLOW_DAG: _DAG_OPTIONS,
+    AssetKind.AIRFLOW_INSTANCE: _INSTANCE_OPTIONS,
     AssetKind.NOTEBOOK: _FILE_OPTIONS,
     AssetKind.FILE: _FILE_OPTIONS,
 }

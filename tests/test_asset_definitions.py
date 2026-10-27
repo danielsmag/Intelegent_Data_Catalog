@@ -23,6 +23,7 @@ from intelegent_data_catalog.assets.definitions.models import (
 )
 from intelegent_data_catalog.assets.definitions.scanner import AssetDefinitionScanner
 from intelegent_data_catalog.assets.dsl import (
+    AirflowInstanceOperator,
     AirflowOperator,
     Asset,
     IcebergTableOperator,
@@ -46,6 +47,8 @@ from intelegent_data_catalog.assets.execution.executor import (
 from intelegent_data_catalog.assets.execution.runtime import OperatorRunner
 from intelegent_data_catalog.assets.execution.schedule import AssetOperatorSchedule
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
+from intelegent_data_catalog.assets.kinds.instance_asset import InstanceAsset, InstanceAssetDetail
+from intelegent_data_catalog.assets.service import _UnavailableAgents
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
 from intelegent_data_catalog.exceptions import CatalogError
@@ -568,6 +571,62 @@ def test_airflow_and_page_operators_link_existing_rows(tmp_path: Path) -> None:
         database.dispose()
 
 
+def test_airflow_instance_operator_links_existing_instance(tmp_path: Path) -> None:
+    """AirflowInstanceOperator attaches the registered instance and exposes its detail."""
+    database: CatalogDatabase
+    session: Session
+    store: MemoryObjectStore
+    scanner: AssetDefinitionScanner
+    database, session, store, scanner, executor = _open(tmp_path)
+    try:
+        _dag(session)
+        source: str = (
+            "from intelegent_data_catalog.assets.dsl import Asset, AirflowInstanceOperator\n"
+            'Asset("prod", AirflowInstanceOperator(instance="prod-airflow"))\n'
+        )
+        _put(store, "assets/sales/asset_instance.py", source)
+        scanner.scan(datetime.now(UTC))
+        asset: AssetRow | None = session.scalar(
+            select(AssetRow).where(AssetRow.kind == AssetKind.AIRFLOW_INSTANCE.value),
+        )
+        instance: AirflowInstanceRow | None = session.scalar(select(AirflowInstanceRow))
+        assert asset is not None
+        assert instance is not None
+        assert instance.asset_id == asset.id
+        assert len(executor.workloads) == 1
+        detail: InstanceAssetDetail = InstanceAsset(asset, session, _UnavailableAgents()).detail()
+        assert detail.instance_id == instance.id
+        assert detail.slug == "prod-airflow"
+        assert detail.status == AirflowInstanceStatus.ACTIVE.value
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_missing_airflow_instance_stays_unresolved(tmp_path: Path) -> None:
+    """A slug with no registered instance does not create an asset."""
+    database: CatalogDatabase
+    session: Session
+    store: MemoryObjectStore
+    scanner: AssetDefinitionScanner
+    database, session, store, scanner, executor = _open(tmp_path)
+    try:
+        source: str = (
+            "from intelegent_data_catalog.assets.dsl import Asset, AirflowInstanceOperator\n"
+            'Asset("prod", AirflowInstanceOperator(instance="missing-airflow"))\n'
+        )
+        _put(store, "assets/sales/asset_missing.py", source)
+        scanner.scan(datetime.now(UTC))
+        item: AssetDefinitionItemRow | None = session.scalar(select(AssetDefinitionItemRow))
+        assert item is not None
+        assert item.status == DefinitionItemStatus.UNRESOLVED.value
+        assert session.scalar(select(AssetRow)) is None
+        assert executor.workloads == []
+    finally:
+        session.close()
+        database.dispose()
+
+
 def test_held_lock_skips_scan() -> None:
     """A held lock does not start a scan and is not released."""
 
@@ -819,6 +878,8 @@ def test_operator_round_trip_and_default_execute() -> None:
     assert operator_from_ref(postgres.to_ref()) == postgres
     dag: AirflowOperator = AirflowOperator(instance="prod-airflow", dag_id="etl")
     assert operator_from_ref(dag.to_ref()) == dag
+    instance_operator: AirflowInstanceOperator = AirflowInstanceOperator(instance="prod-airflow")
+    assert operator_from_ref(instance_operator.to_ref()) == instance_operator
     with pytest.raises(AssetDefinitionError, match="unknown operator"):
         operator_from_ref(OperatorRef(type="MissingOperator", params={}))
     context: _Context = _Context()

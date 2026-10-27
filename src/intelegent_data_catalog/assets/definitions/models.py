@@ -37,6 +37,15 @@ class AirflowSourceRef(BaseModel):
     dag_id: str = Field(min_length=1, max_length=250)
 
 
+class AirflowInstanceSourceRef(BaseModel):
+    """Registered Airflow instance named by slug."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["airflow_instance"] = "airflow_instance"
+    instance: str = Field(min_length=1)
+
+
 class PageSourceRef(BaseModel):
     """Workspace file or notebook named by workspace slug and path."""
 
@@ -48,7 +57,7 @@ class PageSourceRef(BaseModel):
 
 
 SourceRef = Annotated[
-    TableSourceRef | AirflowSourceRef | PageSourceRef,
+    TableSourceRef | AirflowSourceRef | AirflowInstanceSourceRef | PageSourceRef,
     Field(discriminator="kind"),
 ]
 

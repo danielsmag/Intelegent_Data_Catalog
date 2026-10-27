@@ -45,6 +45,7 @@ def search_assets(
     service: AssetServiceDep,
     q: Annotated[str | None, Query()] = None,
     kinds: Annotated[list[AssetKind] | None, Query()] = None,
+    formats: Annotated[list[str] | None, Query()] = None,
     owner: Annotated[str, Query()] = "all",
     workspace_id: Annotated[UUID | None, Query()] = None,
     scope_id: Annotated[UUID | None, Query()] = None,
@@ -59,6 +60,7 @@ def search_assets(
 ) -> AssetPage:
     """Search assets the caller can see."""
     selected_kinds: list[AssetKind] = [] if kinds is None else kinds
+    selected_formats: list[str] = [] if formats is None else formats
     owner_filter: str = owner if owner in {"me", "shared", "all"} else "all"
     sort_key: str = sort if sort in {
         "name",
@@ -74,6 +76,7 @@ def search_assets(
         AssetQuery(
             q=q,
             kinds=selected_kinds,
+            formats=selected_formats,
             owner=owner_filter,  # type: ignore[arg-type]
             workspace_id=workspace_id,
             scope_id=scope_id,

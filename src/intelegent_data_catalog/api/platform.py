@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository
 from intelegent_data_catalog.assets.base import Asset, AssetAgentProvider
+from intelegent_data_catalog.assets.kinds.instance_asset import InstanceAssetAgentAdapter
 from intelegent_data_catalog.assets.kinds.table_asset import TableAssetAgentAdapter
 from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
 from intelegent_data_catalog.assets.registry import AssetRegistry
@@ -577,6 +578,17 @@ class _PlatformAgents(AssetAgentProvider):
             )
         agent: TableAgent = self._platform._table_factory(column_graph, models).create(table_id)
         return TableAssetAgentAdapter(table_id, agent, self._platform._session)
+
+    def for_instance(self, instance_id: UUID) -> InstanceAssetAgentAdapter:
+        models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
+        repository: AirflowRepository = AirflowRepository(self._platform._session)
+        builder: AirflowGraphBuilder = AirflowGraphBuilder(models.airflow_proposer, repository)
+        factory: AirflowAgentFactory = self._platform._airflow_factory(builder, models)
+        return InstanceAssetAgentAdapter(
+            instance_id,
+            factory.create(instance_id),
+            self._platform._session,
+        )
 
     def for_dag(self, dag_row_id: UUID, instance_id: UUID) -> AirflowDagAgent:
         models: CatalogModels = self._platform._models(self._options.model, self._options.effort)

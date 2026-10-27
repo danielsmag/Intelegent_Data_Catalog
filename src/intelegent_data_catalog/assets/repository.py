@@ -266,6 +266,11 @@ class AssetRepository:
             filters.append(AssetRow.owner_user_id.is_(None))
         if len(query.kinds) > 0:
             filters.append(AssetRow.kind.in_([kind.value for kind in query.kinds]))
+        if len(query.formats) > 0:
+            stored_format: ColumnElement[str] = func.lower(AssetRow.properties["table_format"].as_string())
+            wanted: list[str] = [item.lower() for item in query.formats if item != ""]
+            if len(wanted) > 0:
+                filters.append(stored_format.in_(wanted))
         if query.status is not None:
             filters.append(AssetRow.status == query.status.value)
         if query.has_context is True:
@@ -397,6 +402,7 @@ class AssetRepository:
                     owner_user_id=row.owner_user_id,
                     status=AssetStatus(row.status),
                     subtitle=_subtitle(row.properties),
+                    table_format=_table_format(row.properties),
                     membership_count=len(scopes) + len(spaces),
                     scopes=scopes,
                     spaces=spaces,
@@ -663,6 +669,13 @@ def _score(mode: str, interval: int, last_built: datetime | None, now: datetime)
     age: float = (_aware(now) - _aware(last_built)).total_seconds()
     raw: int = 100 - int(age / span * 100)
     return max(0, min(100, raw))
+
+
+def _table_format(properties: dict[str, object]) -> str | None:
+    value: object = properties.get("table_format")
+    if isinstance(value, str) and value != "":
+        return value
+    return None
 
 
 def _subtitle(properties: dict[str, object]) -> str | None:

@@ -37,6 +37,7 @@ from intelegent_data_catalog.persistence.enums import (
 )
 from intelegent_data_catalog.persistence.models import (
     AirflowDagRow,
+    AirflowInstanceRow,
     AssetDefinitionFileRow,
     AssetDefinitionItemRow,
     AssetMembershipRow,
@@ -310,6 +311,8 @@ class AssetDefinitionApplier:
                 return self._sync.ensure_table(resolved)
             case AirflowDagRow():
                 return self._sync.ensure_dag(resolved)
+            case AirflowInstanceRow():
+                return self._sync.ensure_instance(resolved)
             case WorkspaceNodeRow():
                 created: AssetRow | None = self._sync.ensure_file(resolved)
                 if created is None:

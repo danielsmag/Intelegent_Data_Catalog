@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom"
 import { isAbortError } from "./api"
 import {
   bulkMembership,
+  detailString,
+  fetchAsset,
   searchAssets,
   updateAssetStatus,
   type AssetKind,
@@ -14,16 +16,33 @@ import {
 } from "./assetsApi"
 import { watchAssetDrag } from "./editorDrag"
 import { openInFocusedGroup } from "./editorLayout"
+import { InstanceForm } from "./AirflowPages"
+import {
+  createAirflowInstance,
+  syncAirflowInstance,
+  updateAirflowInstance,
+  type AirflowInstance,
+  type AirflowInstanceInput,
+  type AirflowInstanceStatus,
+} from "./airflowApi"
+import { AirflowIcon, IcebergIcon } from "./icons"
 import { useEditorStatus, useEditorTitle } from "./editorSlots"
 import { onAssetBuildFinished, onKnowledgeBuildFinished, requestAssetBuild } from "./knowledgeBuild"
 import { showPageAlert } from "./pageAlertStack"
 import { fetchHierarchy, type HierarchySpace } from "./registryApi"
 import { getActiveWorkspaceId } from "./workspaceStore"
 
+const SERVICES: readonly { id: ServiceId; label: string }[] = [
+  { id: "", label: "All services" },
+  { id: "airflow", label: "Airflow" },
+  { id: "iceberg", label: "Iceberg" },
+]
+
 const KIND_TABS: readonly { id: "all" | AssetKind; label: string }[] = [
   { id: "all", label: "Assets" },
   { id: "TABLE", label: "Tables" },
-  { id: "AIRFLOW_DAG", label: "DAGs" },
+  { id: "AIRFLOW_DAG", label: "Airflow DAGs" },
+  { id: "AIRFLOW_INSTANCE", label: "Airflow instances" },
   { id: "NOTEBOOK", label: "Notebooks" },
   { id: "FILE", label: "Files" },
 ]
@@ -62,10 +81,16 @@ export function AssetsTablePage(): ReactElement {
   const status: AssetStatus | null = statusParam(params.get("status"))
   const offset: number = Number(params.get("offset") ?? "0")
   const kinds: AssetKind[] = params.getAll("kind").filter(isKind)
-  const activeKind: "all" | AssetKind = kinds.length === 1 ? (kinds[0] ?? "all") : "all"
+  const service: ServiceId = serviceParam(params.get("service"))
+  const activeKind: BoardKind = boardKind(kinds)
+  const queryKinds: AssetKind[] = serviceKinds(service, kinds)
+  const queryFormats: string[] = service === "iceberg" ? ["ICEBERG"] : []
+  const creatingInstance: boolean =
+    (service === "airflow" || activeKind === "AIRFLOW_INSTANCE") && params.get("new") === "1"
   const chosenRank = RANKS.find((item) => item.id === rank) ?? RANKS[2]
   const now: number = useClock(FRESHNESS_TICK_MS)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
+  const [reloadingId, setReloadingId] = useState<string | null>(null)
   const buildingIds: MutableRefObject<Set<string>> = useRef<Set<string>>(new Set())
   const reloadRef: MutableRefObject<() => void> = useRef<() => void>(() => {})
   useEditorTitle("Assets")
@@ -83,7 +108,8 @@ export function AssetsTablePage(): ReactElement {
       void searchAssets(
         assetListQuery({
           q: queryText,
-          kinds,
+          kinds: queryKinds,
+          formats: queryFormats,
           owner,
           scopeId,
           status,
@@ -162,6 +188,52 @@ export function AssetsTablePage(): ReactElement {
   }, [])
   const rows: AssetListItem[] = page?.items ?? []
   const total: number = page?.total ?? 0
+  function toggleInstance(assetId: string, current: AssetStatus): void {
+    const next: AirflowInstanceStatus = current === "ACTIVE" ? "DISABLED" : "ACTIVE"
+    const shown: AssetStatus = next === "DISABLED" ? "DEPRECATED" : "ACTIVE"
+    setSwitchingId(assetId)
+    setPage((loaded: AssetPage | null) => replaceStatus(loaded, assetId, shown))
+    void fetchAsset(assetId)
+      .then((asset) => {
+        const instanceId: string | null = detailString(asset.detail, "instance_id")
+        if (instanceId === null) {
+          throw new Error("Airflow instance is missing")
+        }
+        return updateAirflowInstance(instanceId, { status: next })
+      })
+      .catch((err: unknown) => {
+        setPage((loaded: AssetPage | null) => replaceStatus(loaded, assetId, current))
+        showPageAlert(err instanceof Error ? err.message : "Could not change Airflow status", "error", "Assets")
+      })
+      .finally(() => {
+        setSwitchingId((busy: string | null) => (busy === assetId ? null : busy))
+      })
+  }
+  function reloadMetadata(assetId: string): void {
+    setReloadingId(assetId)
+    void fetchAsset(assetId)
+      .then((asset) => {
+        const instanceId: string | null = detailString(asset.detail, "instance_id")
+        if (instanceId === null) {
+          throw new Error("Airflow instance is missing")
+        }
+        return syncAirflowInstance(instanceId)
+      })
+      .then((run) => {
+        if (run.sanitized_error !== null) {
+          showPageAlert(run.sanitized_error, "error", "Assets")
+          return
+        }
+        showPageAlert("Reloaded Airflow metadata", "success", "Assets")
+        reloadRef.current()
+      })
+      .catch((err: unknown) => {
+        showPageAlert(err instanceof Error ? err.message : "Could not reload Airflow metadata", "error", "Assets")
+      })
+      .finally(() => {
+        setReloadingId((busy: string | null) => (busy === assetId ? null : busy))
+      })
+  }
   function toggleAvailability(assetId: string, current: AssetStatus): void {
     const next: AssetStatus = current === "ACTIVE" ? "DEPRECATED" : "ACTIVE"
     setSwitchingId(assetId)
@@ -206,9 +278,22 @@ export function AssetsTablePage(): ReactElement {
     }
     setParams(updated)
   }
+  function selectService(next: ServiceId): void {
+    const updated: URLSearchParams = new URLSearchParams(params)
+    updated.delete("kind")
+    updated.delete("offset")
+    updated.delete("new")
+    if (next === "") {
+      updated.delete("service")
+    } else {
+      updated.set("service", next)
+    }
+    setParams(updated)
+  }
   function selectKind(kind: "all" | AssetKind): void {
     const updated: URLSearchParams = new URLSearchParams(params)
     updated.delete("kind")
+    updated.delete("service")
     if (kind !== "all") {
       updated.append("kind", kind)
     }
@@ -233,18 +318,48 @@ export function AssetsTablePage(): ReactElement {
             <p className="catalog-kicker">Catalog</p>
             <h1>Assets</h1>
           </div>
-          <span className="catalog-count">{loading && page === null ? "Loading…" : assetCount(total)}</span>
+          <div className="catalog-hero-actions">
+            {activeKind === "AIRFLOW_INSTANCE" ? (
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  patch({ new: creatingInstance ? null : "1" })
+                }}
+              >
+                {creatingInstance ? "Close" : "Add instance"}
+              </button>
+            ) : null}
+            <span className="catalog-count">{loading && page === null ? "Loading…" : assetCount(total)}</span>
+          </div>
         </div>
-        <p className="catalog-lead">Tables, DAGs, notebooks, and files in this workspace.</p>
+        <p className="catalog-lead">Tables, DAGs, Airflow instances, notebooks, and files in this workspace.</p>
       </header>
+      {creatingInstance ? (
+        <div className="catalog-panel">
+          <InstanceForm
+            submitLabel="Add instance"
+            onCancel={() => {
+              patch({ new: null })
+            }}
+            onSubmit={async (input: AirflowInstanceInput) => {
+              const created: AirflowInstance = await createAirflowInstance(input)
+              patch({ new: null })
+              if (created.asset_id !== null) {
+                openInFocusedGroup(`/assets/${created.asset_id}`)
+              }
+            }}
+          />
+        </div>
+      ) : null}
       <div className="tabs" role="tablist" aria-label="Asset kinds">
         {KIND_TABS.map((item) => (
           <button
             key={item.id}
             type="button"
             role="tab"
-            className={activeKind === item.id ? "tab selected" : "tab"}
-            aria-selected={activeKind === item.id}
+            className={service === "" && activeKind === item.id ? "tab selected" : "tab"}
+            aria-selected={service === "" && activeKind === item.id}
             onClick={() => {
               selectKind(item.id)
             }}
@@ -263,6 +378,19 @@ export function AssetsTablePage(): ReactElement {
             patch({ q: event.target.value, offset: null })
           }}
         />
+        <select
+          aria-label="Service type"
+          value={service}
+          onChange={(event) => {
+            selectService(serviceParam(event.target.value))
+          }}
+        >
+          {SERVICES.map((item) => (
+            <option key={item.id === "" ? "all" : item.id} value={item.id}>
+              {item.label}
+            </option>
+          ))}
+        </select>
         <div className="asset-board__pills" role="group" aria-label="Status">
           {STATUSES.map((item) => (
             <button
@@ -420,7 +548,15 @@ export function AssetsTablePage(): ReactElement {
             }}
             switching={switchingId === row.id}
             onToggle={() => {
+              if (row.kind === "AIRFLOW_INSTANCE") {
+                toggleInstance(row.id, row.status)
+                return
+              }
               toggleAvailability(row.id, row.status)
+            }}
+            reloading={reloadingId === row.id}
+            onReload={() => {
+              reloadMetadata(row.id)
             }}
             onDragStart={(event: ReactPointerEvent<HTMLButtonElement>) => {
               const ids: string[] = selected.has(row.id) && selected.size > 1 ? [...selected] : [row.id]
@@ -474,6 +610,7 @@ function useClock(intervalMs: number): number {
 function assetListQuery(input: {
   q: string
   kinds: AssetKind[]
+  formats: string[]
   owner: "me" | "shared" | "all"
   scopeId: string | null
   status: AssetStatus | null
@@ -485,6 +622,7 @@ function assetListQuery(input: {
   return {
     q: input.q,
     kinds: input.kinds,
+    formats: input.formats,
     owner: input.owner,
     workspaceId: getActiveWorkspaceId(),
     scopeId: input.scopeId ?? undefined,
@@ -555,6 +693,8 @@ function AssetRow(props: {
   onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void
   switching: boolean
   onToggle: () => void
+  reloading: boolean
+  onReload: () => void
 }): ReactElement {
   const row: AssetListItem = props.row
   const score: number = liveFreshness(row, props.now)
@@ -572,7 +712,17 @@ function AssetRow(props: {
         />
       </span>
       <span className="asset-row__identity" role="cell">
-        {row.kind === "TABLE" ? (
+        {isAirflowKind(row.kind) ? (
+          <span className="asset-row__mark" title="Airflow">
+            <AirflowIcon />
+          </span>
+        ) : null}
+        {row.kind === "TABLE" && isIceberg(row.table_format) ? (
+          <span className="asset-row__mark" title="Iceberg">
+            <IcebergIcon />
+          </span>
+        ) : null}
+        {row.kind === "TABLE" || row.kind === "AIRFLOW_INSTANCE" ? (
           <Availability status={row.status} disabled={props.switching} onToggle={props.onToggle} />
         ) : null}
         <button
@@ -604,7 +754,18 @@ function AssetRow(props: {
       <span role="cell">
         {formatWhen(row.updated_at)}
       </span>
-      <span role="cell">
+      <span className="asset-row__actions" role="cell">
+        {row.kind === "AIRFLOW_INSTANCE" ? (
+          <button
+            type="button"
+            className="button secondary asset-row__build"
+            disabled={props.reloading || row.status !== "ACTIVE"}
+            title="Reload Airflow metadata"
+            onClick={props.onReload}
+          >
+            {props.reloading ? "Reloading" : "Reload"}
+          </button>
+        ) : null}
         <button
           type="button"
           className="button secondary asset-row__build"
@@ -776,9 +937,47 @@ function weekdayLabel(value: string): string | null {
   return `${left}–${right}`
 }
 
+type BoardKind = "all" | AssetKind
+type ServiceId = "" | "airflow" | "iceberg"
+
+function boardKind(kinds: readonly AssetKind[]): BoardKind {
+  if (kinds.length === 1) {
+    return kinds[0] ?? "all"
+  }
+  return "all"
+}
+
+function serviceParam(value: string | null): ServiceId {
+  if (value === "airflow" || value === "iceberg") {
+    return value
+  }
+  return ""
+}
+
+function serviceKinds(service: ServiceId, kinds: readonly AssetKind[]): AssetKind[] {
+  if (service === "airflow") {
+    return ["AIRFLOW_DAG", "AIRFLOW_INSTANCE"]
+  }
+  if (service === "iceberg") {
+    return ["TABLE"]
+  }
+  return [...kinds]
+}
+
+function isIceberg(format: string | null): boolean {
+  return format !== null && format.toUpperCase() === "ICEBERG"
+}
+
+function isAirflowKind(kind: AssetKind): boolean {
+  return kind === "AIRFLOW_DAG" || kind === "AIRFLOW_INSTANCE"
+}
+
 function kindLabel(kind: AssetKind): string {
   if (kind === "AIRFLOW_DAG") {
-    return "DAG"
+    return "Airflow DAG"
+  }
+  if (kind === "AIRFLOW_INSTANCE") {
+    return "Airflow instance"
   }
   if (kind === "NOTEBOOK") {
     return "Notebook"
@@ -790,7 +989,13 @@ function kindLabel(kind: AssetKind): string {
 }
 
 function isKind(value: string): value is AssetKind {
-  return value === "TABLE" || value === "AIRFLOW_DAG" || value === "NOTEBOOK" || value === "FILE"
+  return (
+    value === "TABLE" ||
+    value === "AIRFLOW_DAG" ||
+    value === "AIRFLOW_INSTANCE" ||
+    value === "NOTEBOOK" ||
+    value === "FILE"
+  )
 }
 
 function statusParam(value: string | null): AssetStatus | null {
@@ -808,7 +1013,8 @@ function ownerParam(value: string | null): "me" | "shared" | "all" {
 }
 
 async function exportCsv(params: URLSearchParams): Promise<void> {
-  const kinds: AssetKind[] = params.getAll("kind").filter(isKind)
+  const kinds: AssetKind[] = serviceKinds(serviceParam(params.get("service")), params.getAll("kind").filter(isKind))
+  const formats: string[] = params.get("service") === "iceberg" ? ["ICEBERG"] : []
   const collected: AssetListItem[] = []
   let offset: number = 0
   const status: AssetStatus | null = statusParam(params.get("status"))
@@ -816,6 +1022,7 @@ async function exportCsv(params: URLSearchParams): Promise<void> {
     const page: AssetPage = await searchAssets({
       q: params.get("q") ?? undefined,
       kinds,
+      formats,
       owner: ownerParam(params.get("owner")),
       workspaceId: getActiveWorkspaceId(),
       scopeId: params.get("scope") ?? undefined,

@@ -46,6 +46,10 @@ class AssetAgentProvider(ABC):
         """Agent for one Airflow DAG."""
 
     @abstractmethod
+    def for_instance(self, instance_id: UUID) -> AssetAgent:
+        """Agent for one Airflow instance."""
+
+    @abstractmethod
     def for_file(self, asset_id: UUID, notebook: bool) -> AssetAgent:
         """Agent for one workspace file or notebook."""
 

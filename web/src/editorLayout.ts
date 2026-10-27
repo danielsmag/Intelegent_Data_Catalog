@@ -38,7 +38,7 @@ export type RouteIds = {
   explorerTable: string | null
 }
 
-export type SidebarKind = "spaces" | "airflow" | "catalog" | "none"
+export type SidebarKind = "spaces" | "catalog" | "none"
 
 type HistoryMode = "push" | "replace" | "none"
 
@@ -103,11 +103,7 @@ export function titleFromPath(path: string): string {
     return "Table"
   }
   if (head === "airflow") {
-    if (parts[2] === "dags") {
-      const dag: string | undefined = parts[3]
-      return dag === undefined ? "DAG" : decodeURIComponent(dag)
-    }
-    return parts.length === 1 ? "Airflow" : "Instance"
+    return "Assets"
   }
   if (head === "catalog") {
     const table: string | undefined = parts[4]
@@ -120,7 +116,7 @@ export function titleFromPath(path: string): string {
     return "Search"
   }
   if (head === "sources") {
-    return "Sources"
+    return "Catalog"
   }
   if (head === "assets") {
     return parts[1] === undefined ? "Assets" : "Asset"
@@ -150,11 +146,8 @@ export function titleFromPath(path: string): string {
 }
 
 export function sidebarKind(pathname: string): SidebarKind {
-  if (pathname === "/query" || pathname.startsWith("/search") || pathname.startsWith("/sources")) {
+  if (pathname === "/query" || pathname.startsWith("/search")) {
     return "none"
-  }
-  if (pathname.startsWith("/airflow")) {
-    return "airflow"
   }
   if (pathname.startsWith("/catalog")) {
     return "catalog"

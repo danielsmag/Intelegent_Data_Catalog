@@ -90,6 +90,7 @@ class AirflowInstanceRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: UUID
+    asset_id: UUID | None = None
     name: str
     slug: str
     base_url: str

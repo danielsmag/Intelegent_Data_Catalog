@@ -509,6 +509,7 @@ class AirflowRepository:
             elif attachment.airflow_instance_id is not None:
                 by_instance[attachment.airflow_instance_id] = attachment.id
         self._merge_dag_memberships(scope_ids, space_ids, direct)
+        self._merge_instance_memberships(scope_ids, space_ids, by_instance)
         dags: dict[uuid.UUID, AirflowDagRow] = self.dags_by_row_ids(set(direct))
         instance_id: uuid.UUID
         for instance_id in by_instance:
@@ -569,6 +570,28 @@ class AirflowRepository:
         pair: tuple[AssetMembershipRow, AirflowDagRow]
         for pair in self._session.execute(statement):
             direct.setdefault(pair[1].id, pair[0].id)
+
+    def _merge_instance_memberships(
+        self,
+        scope_ids: set[uuid.UUID],
+        space_ids: set[uuid.UUID],
+        by_instance: dict[uuid.UUID, uuid.UUID],
+    ) -> None:
+        clauses: list[ColumnElement[bool]] = []
+        if len(scope_ids) > 0:
+            clauses.append(AssetMembershipRow.scope_id.in_(scope_ids))
+        if len(space_ids) > 0:
+            clauses.append(AssetMembershipRow.space_id.in_(space_ids))
+        if len(clauses) == 0:
+            return
+        statement = (
+            select(AssetMembershipRow, AirflowInstanceRow)
+            .join(AirflowInstanceRow, AirflowInstanceRow.asset_id == AssetMembershipRow.asset_id)
+            .where(or_(*clauses))
+        )
+        pair: tuple[AssetMembershipRow, AirflowInstanceRow]
+        for pair in self._session.execute(statement):
+            by_instance.setdefault(pair[1].id, pair[0].id)
 
     def dag_by_asset(self, asset_id: uuid.UUID) -> AirflowDagRow | None:
         """Return the DAG snapshot linked to an asset."""

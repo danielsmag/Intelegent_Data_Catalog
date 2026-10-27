@@ -3684,6 +3684,12 @@ html.editor-dragging * {
   align-items: center;
 }
 
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .filter-chip.is-on {
   outline: 1px solid var(--accent, #7aa2f7);
 }
@@ -3936,6 +3942,18 @@ html.editor-dragging * {
 
 .asset-row__identity {
   min-width: 0;
+}
+
+.asset-row__mark {
+  display: inline-flex;
+  margin-right: 6px;
+  vertical-align: -3px;
+}
+
+.asset-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .asset-row__name {

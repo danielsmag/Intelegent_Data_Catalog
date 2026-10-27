@@ -121,6 +121,7 @@ class AssetListItem(BaseModel):
     owner_user_id: UUID | None
     status: AssetStatus
     subtitle: str | None
+    table_format: str | None = None
     membership_count: int
     scopes: list[AssetTargetRef]
     spaces: list[AssetTargetRef]
@@ -151,6 +152,7 @@ class AssetQuery(BaseModel):
 
     q: str | None = None
     kinds: list[AssetKind] = Field(default_factory=list)
+    formats: list[str] = Field(default_factory=list)
     owner: AssetOwnerFilter = "all"
     workspace_id: UUID | None = None
     scope_id: UUID | None = None

@@ -281,6 +281,9 @@ class _UnavailableAgents(AssetAgentProvider):
     def for_dag(self, dag_row_id: UUID, instance_id: UUID) -> AssetAgent:
         raise LlmUnavailableError("language model is not configured")
 
+    def for_instance(self, instance_id: UUID) -> AssetAgent:
+        raise LlmUnavailableError("language model is not configured")
+
     def for_file(self, asset_id: UUID, notebook: bool) -> AssetAgent:
         raise LlmUnavailableError("language model is not configured")
 

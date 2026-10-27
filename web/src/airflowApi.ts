@@ -8,6 +8,7 @@ export type AirflowSyncStatus = "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED"
 
 export type AirflowInstance = {
   id: string
+  asset_id: string | null
   name: string
   slug: string
   base_url: string

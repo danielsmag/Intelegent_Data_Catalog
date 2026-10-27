@@ -774,7 +774,7 @@ class AirflowInstanceRow(Base):
     """Registered Airflow 3 deployment. The password is stored and never returned."""
 
     __tablename__: str = "airflow_instances"
-    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
+    __table_args__: tuple[UniqueConstraint | CheckConstraint | Index, ...] = (
         UniqueConstraint("base_url", name="uq_airflow_instances_base_url"),
         _enum_check(
             "status",
@@ -786,9 +786,21 @@ class AirflowInstanceRow(Base):
             tuple(item.value for item in ContextOrigin),
             "ck_airflow_instances_context_origin",
         ),
+        Index(
+            "uq_airflow_instances_asset",
+            "asset_id",
+            unique=True,
+            sqlite_where=text("asset_id IS NOT NULL"),
+            postgresql_where=text("asset_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     base_url: Mapped[str] = mapped_column(String(2048), nullable=False)

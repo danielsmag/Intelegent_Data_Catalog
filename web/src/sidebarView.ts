@@ -3,9 +3,7 @@ import { useSyncExternalStore } from "react"
 export type SidebarView =
   | "spaces"
   | "catalog"
-  | "airflow"
   | "search"
-  | "sources"
   | "query"
   | "workspace"
   | "assets"
@@ -27,9 +25,7 @@ function isSidebarView(value: string | null): value is SidebarView {
   return (
     value === "spaces" ||
     value === "catalog" ||
-    value === "airflow" ||
     value === "search" ||
-    value === "sources" ||
     value === "query" ||
     value === "workspace" ||
     value === "assets"
@@ -48,7 +44,7 @@ export function sidebarViewForPath(path: string): SidebarView | null {
     return "search"
   }
   if (pathname === "/sources" || pathname.startsWith("/sources/")) {
-    return "sources"
+    return "catalog"
   }
   if (pathname === "/workspace") {
     return "workspace"
@@ -62,6 +58,12 @@ function readStored(): SidebarView {
   }
   try {
     const stored: string | null = window.sessionStorage.getItem(STORAGE_KEY)
+    if (stored === "airflow") {
+      return "assets"
+    }
+    if (stored === "sources") {
+      return "catalog"
+    }
     if (isSidebarView(stored)) {
       return stored
     }

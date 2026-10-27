@@ -2,6 +2,7 @@
 
 from intelegent_data_catalog.assets.dsl.nodes import Asset, Scope, Space
 from intelegent_data_catalog.assets.dsl.operators import (
+    AirflowInstanceOperator,
     AirflowOperator,
     IcebergTableOperator,
     Operator,
@@ -13,6 +14,7 @@ from intelegent_data_catalog.assets.dsl.operators import (
 )
 
 __all__ = [
+    "AirflowInstanceOperator",
     "AirflowOperator",
     "Asset",
     "IcebergTableOperator",

@@ -1,11 +1,4 @@
 import { apiFetch } from "./http"
-import {
-  fetchAirflowAttachments,
-  fetchAirflowDags,
-  type AirflowAttachment,
-  type AirflowAttachmentTarget,
-  type AirflowDag,
-} from "./airflowApi"
 import { isAbortError } from "./api"
 
 export type SpaceRecord = {
@@ -118,13 +111,6 @@ export type SearchHitRecord = {
   name: string
   qualified_name: string
   description: string | null
-}
-
-export type DataSourceRecord = {
-  id: string
-  name: string
-  type: string
-  credential_ref: string | null
 }
 
 export type AssetBindingRecord = {
@@ -792,10 +778,6 @@ function contextPatchPath(kind: ContextEntityKind, id: string): string {
   }
 }
 
-export async function fetchDataSources(signal: AbortSignal): Promise<DataSourceRecord[]> {
-  return readJson<DataSourceRecord[]>("/api/v1/data-sources", signal)
-}
-
 export type HierarchyTable = {
   id: string
   assetId: string | null
@@ -837,7 +819,6 @@ export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpac
       const nested: HierarchyScope[] = await Promise.all(
         scopes.map(async (scope: ScopeRecord): Promise<HierarchyScope> => {
           const tables: CatalogTableRecord[] = await fetchScopeTables(scope.id, signal)
-          const airflow: HierarchyAirflow[] = await hierarchyAirflow("scope", scope.id, signal)
           return {
             id: scope.id,
             name: scope.name,
@@ -847,57 +828,20 @@ export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpac
               name: table.name,
               status: table.status,
             })),
-            airflow,
+            airflow: [],
           }
         }),
       )
-      const airflow: HierarchyAirflow[] = await hierarchyAirflow("space", space.id, signal)
       return {
         id: space.id,
         name: space.name,
         isolation_mode: space.isolation_mode,
         scopes: nested,
-        airflow,
+        airflow: [],
       }
     }),
   )
   return trees
-}
-
-async function hierarchyAirflow(
-  kind: AirflowAttachmentTarget,
-  targetId: string,
-  signal: AbortSignal,
-): Promise<HierarchyAirflow[]> {
-  let attachments: AirflowAttachment[]
-  try {
-    attachments = await fetchAirflowAttachments(kind, targetId, signal)
-  } catch (err: unknown) {
-    if (isAbortError(err)) {
-      throw err
-    }
-    return []
-  }
-  const groups: Map<string, HierarchyAirflow> = new Map()
-  for (const attachment of attachments) {
-    const group: HierarchyAirflow = groups.get(attachment.instance_id) ?? {
-      instanceId: attachment.instance_id,
-      name: attachment.instance_name,
-      dags: [],
-    }
-    if (attachment.dag_id === null || attachment.dag_row_id === null) {
-      const dags: AirflowDag[] = await fetchAirflowDags(attachment.instance_id, signal)
-      for (const dag of dags) {
-        if (!group.dags.some((item: HierarchyDag) => item.dagId === dag.dag_id)) {
-          group.dags.push({ dagRowId: dag.id, dagId: dag.dag_id })
-        }
-      }
-    } else if (!group.dags.some((item: HierarchyDag) => item.dagId === attachment.dag_id)) {
-      group.dags.push({ dagRowId: attachment.dag_row_id, dagId: attachment.dag_id })
-    }
-    groups.set(attachment.instance_id, group)
-  }
-  return [...groups.values()]
 }
 
 export async function searchCatalog(query: string, signal: AbortSignal): Promise<SearchHitRecord[]> {

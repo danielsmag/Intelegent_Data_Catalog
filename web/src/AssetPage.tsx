@@ -8,6 +8,8 @@ import { useEntityConfig, type RefreshMode } from "./refreshSettings"
 import { onAssetBuildFinished, requestAssetBuild } from "./knowledgeBuild"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { TableAssetView, type TableAssetTab } from "./TableDetail"
+import { AirflowDagView, AirflowInstanceView } from "./AirflowPages"
+import { openInFocusedGroup } from "./editorLayout"
 
 const OTHER_TABS = ["overview", "source", "runs", "config"] as const
 const TABLE_TABS = [
@@ -91,6 +93,22 @@ export function AssetPage(): ReactElement {
   const sourceKey: string | null = asset === null ? null : propertyString(asset.properties, "source_key")
   const tags: string[] = asset === null ? [] : declaredTags(asset)
   const visibility: string = asset?.owner_user_id === null ? "Shared" : "Personal"
+  const instanceId: string | null = asset === null ? null : detailString(asset.detail, "instance_id")
+  const dagId: string | null = asset === null ? null : detailString(asset.detail, "dag_id")
+  if (asset?.kind === "AIRFLOW_INSTANCE" && instanceId !== null) {
+    return (
+      <AirflowInstanceView
+        instanceId={instanceId}
+        assetId={asset.id}
+        onDeleted={() => {
+          openInFocusedGroup("/assets?kind=AIRFLOW_INSTANCE")
+        }}
+      />
+    )
+  }
+  if (asset?.kind === "AIRFLOW_DAG" && instanceId !== null && dagId !== null) {
+    return <AirflowDagView instanceId={instanceId} dagId={dagId} onBack={null} />
+  }
   return (
     <section className={tab === "graph" ? "catalog-page section-fill" : "catalog-page"}>
       <header className="catalog-hero asset-hero">
@@ -229,6 +247,9 @@ function kindLabel(kind: AssetKind | undefined): string {
   }
   if (kind === "AIRFLOW_DAG") {
     return "Airflow DAG"
+  }
+  if (kind === "AIRFLOW_INSTANCE") {
+    return "Airflow instance"
   }
   if (kind === "NOTEBOOK") {
     return "Notebook"

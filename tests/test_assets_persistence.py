@@ -108,7 +108,7 @@ def test_upgrade_from_workspace_files_backfills_assets(tmp_path: Path) -> None:
     with engine.connect() as connection:
         kind_rows = connection.execute(text("SELECT kind FROM assets"))
         kinds: set[str] = {str(row[0]) for row in kind_rows}
-        assert kinds == {"TABLE", "AIRFLOW_DAG", "FILE"}
+        assert kinds == {"TABLE", "AIRFLOW_DAG", "AIRFLOW_INSTANCE", "FILE"}
         counted = connection.execute(text("SELECT COUNT(*) FROM asset_memberships"))
         memberships: int = int(counted.scalar_one())
         assert memberships == 2

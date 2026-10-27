@@ -37,6 +37,7 @@ def instance_read(row: AirflowInstanceRow, dag_count: int) -> AirflowInstanceRea
     """Build an instance response. The password stays on the row."""
     return AirflowInstanceRead(
         id=row.id,
+        asset_id=row.asset_id,
         name=row.name,
         slug=row.slug,
         base_url=row.base_url,

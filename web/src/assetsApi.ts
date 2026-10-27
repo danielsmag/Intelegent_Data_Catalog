@@ -1,6 +1,6 @@
 import { apiFetch, readDetail } from "./http"
 
-export type AssetKind = "TABLE" | "AIRFLOW_DAG" | "NOTEBOOK" | "FILE"
+export type AssetKind = "TABLE" | "AIRFLOW_DAG" | "AIRFLOW_INSTANCE" | "NOTEBOOK" | "FILE"
 export type AssetStatus = "ACTIVE" | "MISSING" | "DEPRECATED"
 export type RefreshMode = "INTERVAL" | "ON_CHANGE" | "MANUAL"
 export type ContextState = "none" | "user" | "llm"
@@ -56,6 +56,7 @@ export type AssetListItem = {
   owner_user_id: string | null
   status: AssetStatus
   subtitle: string | null
+  table_format: string | null
   membership_count: number
   scopes: AssetTargetRef[]
   spaces: AssetTargetRef[]
@@ -78,6 +79,7 @@ export type AssetPage = {
 export type AssetQuery = {
   q?: string
   kinds?: AssetKind[]
+  formats?: string[]
   owner?: "me" | "shared" | "all"
   workspaceId?: string | null
   scopeId?: string
@@ -168,6 +170,9 @@ export async function searchAssets(query: AssetQuery, signal?: AbortSignal): Pro
   }
   for (const kind of query.kinds ?? []) {
     params.append("kinds", kind)
+  }
+  for (const format of query.formats ?? []) {
+    params.append("formats", format)
   }
   if (query.owner !== undefined) {
     params.set("owner", query.owner)

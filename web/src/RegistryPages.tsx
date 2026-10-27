@@ -3,8 +3,6 @@ import { Link, useParams } from "react-router-dom"
 import { useTabParam } from "./useTabParam"
 import { BuildingBanner } from "./BuildingBanner"
 import { AssetMembershipZone } from "./AssetMembershipZone"
-import { AirflowAttachmentsPanel } from "./AirflowAttachmentsPanel"
-import { AttachAirflowForm } from "./AttachAirflowForm"
 import { AttachCatalogForm } from "./AttachCatalogForm"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { ConfigRail, optionsFromFields } from "./ConfigRail"
@@ -56,7 +54,6 @@ import {
   fetchCatalogColumns,
   fetchCatalogTable,
   fetchKnowledgeGraph,
-  fetchDataSources,
   fetchLineage,
   fetchRelationshipGraph,
   fetchRelationships,
@@ -72,7 +69,6 @@ import {
   type CatalogColumnRecord,
   type CatalogTableRecord,
   type ContextGenerationJob,
-  type DataSourceRecord,
   type GraphViewRecord,
   type KnowledgeBuildJob,
   type KnowledgeContext,
@@ -265,15 +261,14 @@ export function SpacesPage(): ReactElement {
   )
 }
 
-const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "assets", "airflow", "graph"]
+const SPACE_TABS: readonly SpaceTab[] = ["overview", "scopes", "assets", "graph"]
 
-type SpaceTab = "overview" | "scopes" | "assets" | "airflow" | "graph"
+type SpaceTab = "overview" | "scopes" | "assets" | "graph"
 
 const SPACE_OPTION_FIELDS: readonly OptionField[] = [
   { key: "include_scope_knowledge", label: "Include scope knowledge", defaultValue: true },
   { key: "include_previous", label: "Keep previous findings", defaultValue: true },
   { key: "include_summary", label: "Write summary", defaultValue: true },
-  { key: "include_airflow", label: "Include Airflow", defaultValue: true },
 ]
 
 export function SpacePage(): ReactElement {
@@ -292,7 +287,6 @@ export function SpacePage(): ReactElement {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<boolean>(false)
   const [renaming, setRenaming] = useState<boolean>(false)
-  const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
   const config: EntityConfigController = useEntityConfig("space", spaceId, SPACE_OPTION_FIELDS)
   const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
   useRunningJobWatch(
@@ -307,7 +301,6 @@ export function SpacePage(): ReactElement {
   useEffect(() => {
     setCreating(false)
     setRenaming(false)
-    setAttachingAirflow(false)
     setBuilding(false)
     setBuildJobId(null)
     setKnowledge(null)
@@ -523,18 +516,6 @@ export function SpacePage(): ReactElement {
               {creating ? null : <PlusIcon />}
               {creating ? "Close" : "Add scope"}
             </button>
-            <button
-              type="button"
-              className="button with-icon"
-              aria-expanded={attachingAirflow}
-              disabled={space === null}
-              onClick={() => {
-                setAttachingAirflow((open: boolean) => !open)
-                selectTab("airflow")
-              }}
-            >
-              {attachingAirflow ? "Close" : "Attach Airflow"}
-            </button>
             </div>
           </div>
           <p className="catalog-lead">{lead}</p>
@@ -661,32 +642,6 @@ export function SpacePage(): ReactElement {
           </>
         ) : null}
         {tab === "assets" ? <AssetMembershipZone targetKind="space" targetId={spaceId} /> : null}
-        {tab === "airflow" ? (
-          <>
-            {attachingAirflow ? (
-              <div className="catalog-panel">
-                <AttachAirflowForm
-                  targetKind="space"
-                  targetId={spaceId}
-                  onCancel={() => {
-                    setAttachingAirflow(false)
-                  }}
-                  onAttached={() => {
-                    bumpCatalogRevision()
-                  }}
-                />
-              </div>
-            ) : null}
-            <AirflowAttachmentsPanel
-              targetKind="space"
-              targetId={spaceId}
-              revision={revision}
-              onChanged={() => {
-                bumpCatalogRevision()
-              }}
-            />
-          </>
-        ) : null}
         {tab === "graph" ? (
           <SubgraphView
             graph={spaceGraph}
@@ -699,15 +654,14 @@ export function SpacePage(): ReactElement {
   )
 }
 
-const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "assets", "airflow", "graph"]
+const SCOPE_TABS: readonly ScopeTab[] = ["overview", "tables", "assets", "graph"]
 
-type ScopeTab = "overview" | "tables" | "assets" | "airflow" | "graph"
+type ScopeTab = "overview" | "tables" | "assets" | "graph"
 
 const SCOPE_OPTION_FIELDS: readonly OptionField[] = [
   { key: "include_table_knowledge", label: "Include table knowledge", defaultValue: true },
   { key: "include_previous", label: "Keep previous findings", defaultValue: true },
   { key: "include_summary", label: "Write summary", defaultValue: true },
-  { key: "include_airflow", label: "Include Airflow", defaultValue: true },
 ]
 
 export function ScopePage(): ReactElement {
@@ -726,7 +680,6 @@ export function ScopePage(): ReactElement {
   const [error, setError] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<boolean>(false)
   const [attaching, setAttaching] = useState<boolean>(false)
-  const [attachingAirflow, setAttachingAirflow] = useState<boolean>(false)
   const config: EntityConfigController = useEntityConfig("scope", scopeId, SCOPE_OPTION_FIELDS)
   const rebuildLabel: string | null = useDeadlineLabel(config.nextRunAt, config.loaded && config.enabled)
   useRunningJobWatch(
@@ -740,7 +693,6 @@ export function ScopePage(): ReactElement {
   )
   useEffect(() => {
     setAttaching(false)
-    setAttachingAirflow(false)
     setRenaming(false)
     setSpaceName(null)
     setBuilding(false)
@@ -964,18 +916,6 @@ export function ScopePage(): ReactElement {
               {attaching ? null : <PlusIcon />}
               {attaching ? "Close" : "Attach from catalog"}
             </button>
-            <button
-              type="button"
-              className="button with-icon"
-              aria-expanded={attachingAirflow}
-              disabled={scope === null}
-              onClick={() => {
-                setAttachingAirflow((open: boolean) => !open)
-                selectTab("airflow")
-              }}
-            >
-              {attachingAirflow ? "Close" : "Attach Airflow"}
-            </button>
             </div>
           </div>
           <p className="catalog-lead">{lead}</p>
@@ -1084,32 +1024,6 @@ export function ScopePage(): ReactElement {
           </>
         ) : null}
         {tab === "assets" ? <AssetMembershipZone targetKind="scope" targetId={scopeId} /> : null}
-        {tab === "airflow" ? (
-          <>
-            {attachingAirflow ? (
-              <div className="catalog-panel">
-                <AttachAirflowForm
-                  targetKind="scope"
-                  targetId={scopeId}
-                  onCancel={() => {
-                    setAttachingAirflow(false)
-                  }}
-                  onAttached={() => {
-                    bumpCatalogRevision()
-                  }}
-                />
-              </div>
-            ) : null}
-            <AirflowAttachmentsPanel
-              targetKind="scope"
-              targetId={scopeId}
-              revision={revision}
-              onChanged={() => {
-                bumpCatalogRevision()
-              }}
-            />
-          </>
-        ) : null}
         {tab === "graph" ? (
           <SubgraphView
             graph={scopeGraph}
@@ -1583,51 +1497,4 @@ export function SearchPage(): ReactElement {
       </section>
     </>
   )
-}
-
-export function DataSourcesPage(): ReactElement {
-  const [sources, setSources] = useState<DataSourceRecord[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useLoad(setSources, setError, fetchDataSources)
-  return (
-    <>
-      <section>
-        <h1>Data sources</h1>
-        <p className="comment">A source record does not provision a Trino or Spark connector.</p>
-        {error !== null ? <p className="error-text">{error}</p> : null}
-        {sources !== null && sources.length === 0 ? <p className="note">No data sources yet.</p> : null}
-        <ul className="registry-list">
-          {(sources ?? []).map((source: DataSourceRecord) => (
-            <li key={source.id}>
-              <strong>{source.name}</strong>
-              <span className="badge">{source.type}</span>
-              <span className="comment">{source.credential_ref ?? "No credential reference"}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </>
-  )
-}
-
-function useLoad<T>(
-  setValue: (value: T) => void,
-  setError: (value: string | null) => void,
-  load: (signal: AbortSignal) => Promise<T>,
-): void {
-  useEffect(() => {
-    const controller: AbortController = new AbortController()
-    void load(controller.signal)
-      .then((loaded: T) => {
-        setValue(loaded)
-      })
-      .catch((err: unknown) => {
-        if (!isAbortError(err)) {
-          setError(errorMessage(err))
-        }
-      })
-    return () => {
-      controller.abort()
-    }
-  }, [load, setError, setValue])
 }

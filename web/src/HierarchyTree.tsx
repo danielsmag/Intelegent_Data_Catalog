@@ -5,7 +5,7 @@ import { openInFocusedGroup, parseRouteIds, pathnameOf, searchOf, useFocusedPath
 import { WorkbenchLink } from "./editorSlots"
 import { bumpCatalogRevision, useCatalogRevision } from "./catalogRevision"
 import { CreateRecordForm } from "./CreateRecordForm"
-import { AirflowIcon, Chevron, IcebergIcon, MoreIcon, PanelChevron, ScopeIcon, SearchIcon, SpaceIcon } from "./icons"
+import { Chevron, IcebergIcon, MoreIcon, PanelChevron, ScopeIcon, SearchIcon, SpaceIcon } from "./icons"
 import { RenameRecordForm } from "./RenameRecordForm"
 import { ResizeHandle } from "./ResizeHandle"
 import {
@@ -16,8 +16,6 @@ import {
   renameScope,
   renameSpace,
   fetchHierarchy,
-  type HierarchyAirflow,
-  type HierarchyDag,
   type HierarchyScope,
   type HierarchySpace,
   type HierarchyTable,
@@ -68,12 +66,8 @@ function writeCollapsedKeys(keys: ReadonlySet<string>): void {
   }
 }
 
-function revealAncestors(spaces: readonly HierarchySpace[], pathname: string, search: string): readonly string[] {
+function revealAncestors(spaces: readonly HierarchySpace[], pathname: string): readonly string[] {
   const ids: RouteIds = parseRouteIds(pathname)
-  const params: URLSearchParams = new URLSearchParams(search)
-  const onAirflow: boolean = params.get("tab") === "airflow"
-  const instanceId: string | null = params.get("instance")
-  const dagId: string | null = params.get("dag")
   if (ids.tableId !== null) {
     for (const space of spaces) {
       for (const scope of space.scopes) {
@@ -93,12 +87,6 @@ function revealAncestors(spaces: readonly HierarchySpace[], pathname: string, se
         continue
       }
       const keys: string[] = ["spaces", `space:${space.id}`, `scopes:${space.id}`]
-      if (onAirflow && instanceId !== null) {
-        keys.push(`scope:${scope.id}`, `airflow-group:${scope.id}`)
-        if (dagId !== null) {
-          keys.push(`airflow:${scope.id}:${instanceId}`)
-        }
-      }
       return keys
     }
     return []
@@ -109,12 +97,6 @@ function revealAncestors(spaces: readonly HierarchySpace[], pathname: string, se
       return []
     }
     const keys: string[] = ["spaces"]
-    if (onAirflow && instanceId !== null) {
-      keys.push(`space:${space.id}`, `airflow-group:${space.id}`)
-      if (dagId !== null) {
-        keys.push(`airflow:${space.id}:${instanceId}`)
-      }
-    }
     return keys
   }
   return []
@@ -198,7 +180,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
       return
     }
     revealedPath.current = focused
-    const keys: readonly string[] = revealAncestors(spaces, pathname, search)
+    const keys: readonly string[] = revealAncestors(spaces, pathname)
     if (keys.length === 0) {
       return
     }
@@ -367,9 +349,6 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
         <span className="figure-table">
           <IcebergIcon /> Iceberg
         </span>
-        <span className="figure-airflow">
-          <AirflowIcon /> Airflow
-        </span>
       </div>
       <label className="search-field">
         <SearchIcon />
@@ -378,7 +357,7 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
           type="search"
           placeholder="Filter hierarchy"
           value={query}
-          aria-label="Filter spaces, scopes, tables, and Airflow"
+          aria-label="Filter spaces, scopes, and tables"
           onChange={(event: ChangeEvent<HTMLInputElement>) => {
             setQuery(event.target.value)
           }}
@@ -657,58 +636,12 @@ export function HierarchyTree(props: HierarchyTreeProps): ReactElement {
                                 })}
                               </TreeGroup>
                             ) : null}
-                            {scope.airflow.length > 0 ? (
-                              <TreeGroup
-                                groupKey={`airflow-group:${scope.id}`}
-                                label="Airflow"
-                                depth="depth-section"
-                                figure="figure-airflow"
-                                icon={<AirflowIcon />}
-                                closed={closed(`airflow-group:${scope.id}`)}
-                                onToggle={toggle}
-                              >
-                                <AirflowNodes
-                                  nodes={scope.airflow}
-                                  parentKey={scope.id}
-                                  ownerPath={`/scopes/${scope.id}`}
-                                  instanceDepth="depth-node"
-                                  dagDepth="depth-child"
-                                  collapsed={closed}
-                                  onToggle={toggle}
-                                  pathname={pathname}
-                                  search={search}
-                                />
-                              </TreeGroup>
-                            ) : null}
                           </>
                         )}
                       </div>
                     )
                   })}
                   </TreeGroup>
-                  ) : null}
-                  {space.airflow.length > 0 ? (
-                    <TreeGroup
-                      groupKey={`airflow-group:${space.id}`}
-                      label="Airflow"
-                      depth="depth-scopes"
-                      figure="figure-airflow"
-                      icon={<AirflowIcon />}
-                      closed={closed(`airflow-group:${space.id}`)}
-                      onToggle={toggle}
-                    >
-                      <AirflowNodes
-                        nodes={space.airflow}
-                        parentKey={space.id}
-                        ownerPath={`/spaces/${space.id}`}
-                        instanceDepth="depth-scope"
-                        dagDepth="depth-section"
-                        collapsed={closed}
-                        onToggle={toggle}
-                        pathname={pathname}
-                        search={search}
-                      />
-                    </TreeGroup>
                   ) : null}
                 </>
               )}
@@ -855,82 +788,6 @@ function TreeGroup(props: {
   )
 }
 
-function AirflowNodes(props: {
-  nodes: HierarchyAirflow[]
-  parentKey: string
-  ownerPath: string
-  instanceDepth: string
-  dagDepth: string
-  collapsed: (key: string) => boolean
-  onToggle: (key: string) => void
-  pathname: string
-  search: string
-}): ReactElement | null {
-  if (props.nodes.length === 0) {
-    return null
-  }
-  const onOwner: boolean = props.pathname === props.ownerPath
-  const search: URLSearchParams = new URLSearchParams(props.search)
-  const onAirflowTab: boolean = onOwner && search.get("tab") === "airflow"
-  const selectedInstance: string | null = search.get("instance")
-  const selectedDag: string | null = search.get("dag")
-  return (
-    <>
-      {props.nodes.map((instance: HierarchyAirflow) => {
-        const instanceKey: string = `airflow:${props.parentKey}:${instance.instanceId}`
-        const instanceClosed: boolean = props.collapsed(instanceKey)
-        const instancePath: string = `${props.ownerPath}?tab=airflow&instance=${encodeURIComponent(instance.instanceId)}`
-        const instanceSelected: boolean =
-          onAirflowTab && selectedInstance === instance.instanceId && selectedDag === null
-        return (
-          <div key={instance.instanceId} role="treeitem" aria-expanded={!instanceClosed}>
-            <div className={instanceSelected ? `tree-row ${props.instanceDepth} current-branch` : `tree-row ${props.instanceDepth}`}>
-              <button
-                type="button"
-                className="chevron"
-                aria-label={instanceClosed ? `Expand ${instance.name}` : `Collapse ${instance.name}`}
-                onClick={() => {
-                  props.onToggle(instanceKey)
-                }}
-              >
-                <Chevron open={!instanceClosed} />
-              </button>
-              <WorkbenchLink
-                to={instancePath}
-                className="tree-link figure-airflow"
-                aria-current={instanceSelected ? "page" : undefined}
-              >
-                <AirflowIcon />
-                <span className="tree-label">{instance.name}</span>
-              </WorkbenchLink>
-            </div>
-            {instanceClosed
-              ? null
-              : instance.dags.map((dag: HierarchyDag) => {
-                  const dagPath: string = `${instancePath}&dag=${encodeURIComponent(dag.dagId)}`
-                  const dagSelected: boolean =
-                    onAirflowTab && selectedInstance === instance.instanceId && selectedDag === dag.dagId
-                  return (
-                    <WorkbenchLink
-                      key={dag.dagRowId}
-                      to={dagPath}
-                      className={`tree-row ${props.dagDepth} figure-airflow`}
-                      role="treeitem"
-                      aria-current={dagSelected ? "page" : undefined}
-                    >
-                      <span className="chevron-spacer" />
-                      <AirflowIcon />
-                      <span className="tree-label">{dag.dagId}</span>
-                    </WorkbenchLink>
-                  )
-                })}
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
 function filterSpaces(spaces: HierarchySpace[], query: string): HierarchySpace[] {
   const needle: string = query.trim().toLowerCase()
   if (needle === "") {
@@ -951,19 +808,17 @@ function filterSpaces(spaces: HierarchySpace[], query: string): HierarchySpace[]
       const tables: HierarchyTable[] = scope.tables.filter((table: HierarchyTable) =>
         table.name.toLowerCase().includes(needle),
       )
-      const airflow: HierarchyAirflow[] = filterAirflow(scope.airflow, needle)
-      if (tables.length > 0 || airflow.length > 0) {
-        scopes.push({ id: scope.id, name: scope.name, tables, airflow })
+      if (tables.length > 0) {
+        scopes.push({ id: scope.id, name: scope.name, tables, airflow: [] })
       }
     }
-    const airflow: HierarchyAirflow[] = filterAirflow(space.airflow, needle)
-    if (scopes.length > 0 || airflow.length > 0) {
+    if (scopes.length > 0) {
       matched.push({
         id: space.id,
         name: space.name,
         isolation_mode: space.isolation_mode,
         scopes,
-        airflow,
+        airflow: [],
       })
     }
   }
@@ -993,21 +848,4 @@ function Availability(props: {
       {label}
     </button>
   )
-}
-
-function filterAirflow(nodes: HierarchyAirflow[], needle: string): HierarchyAirflow[] {
-  const matched: HierarchyAirflow[] = []
-  for (const instance of nodes) {
-    if (instance.name.toLowerCase().includes(needle)) {
-      matched.push(instance)
-      continue
-    }
-    const dags: HierarchyDag[] = instance.dags.filter((dag: HierarchyDag) =>
-      dag.dagId.toLowerCase().includes(needle),
-    )
-    if (dags.length > 0) {
-      matched.push({ instanceId: instance.instanceId, name: instance.name, dags })
-    }
-  }
-  return matched
 }

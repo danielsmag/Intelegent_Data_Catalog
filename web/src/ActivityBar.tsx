@@ -1,12 +1,10 @@
 import type { ReactElement } from "react"
 import { signOut, useAuthState } from "./auth"
 import {
-  AirflowIcon,
   AssetIcon,
   BrandMark,
   CatalogIcon,
   GearIcon,
-  GraphIcon,
   QueryIcon,
   SignOutIcon,
   SpaceIcon,
@@ -33,9 +31,7 @@ export function ActivityBar(): ReactElement {
     { view: "assets", label: "Assets", icon: <AssetIcon /> },
     { view: "spaces", label: "Spaces", icon: <SpaceIcon /> },
     { view: "catalog", label: "Catalog", icon: <CatalogIcon /> },
-    { view: "airflow", label: "Airflow", icon: <AirflowIcon /> },
     { view: "search", label: "Search", icon: <QueryIcon />, gap: true },
-    { view: "sources", label: "Sources", icon: <GraphIcon /> },
     { view: "query", label: "Query", icon: <TableIcon /> },
   ]
   return (

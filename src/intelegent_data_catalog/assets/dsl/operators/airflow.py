@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pydantic import Field, model_validator
 
-from intelegent_data_catalog.assets.definitions.models import AirflowSourceRef
+from intelegent_data_catalog.assets.definitions.models import (
+    AirflowInstanceSourceRef,
+    AirflowSourceRef,
+)
 from intelegent_data_catalog.assets.dsl.operators.base import Operator
 from intelegent_data_catalog.registry.identifiers import require_slug
 
@@ -32,3 +35,27 @@ class AirflowOperator(Operator):
     def to_source(self) -> AirflowSourceRef:
         """Return the stored source reference."""
         return AirflowSourceRef(instance=self.instance, dag_id=self.dag_id)
+
+
+class AirflowInstanceOperator(Operator):
+    """Link one registered Airflow instance. The ``include_*`` fields are its build flags."""
+
+    instance: str = Field(min_length=1, max_length=255)
+    include_source: bool = True
+    include_previous: bool = True
+
+    @model_validator(mode="after")
+    def _instance_slug(self) -> AirflowInstanceOperator:
+        require_slug(self.instance)
+        return self
+
+    def context_flags(self) -> dict[str, bool]:
+        """Instance build flags."""
+        return {
+            "include_source": self.include_source,
+            "include_previous": self.include_previous,
+        }
+
+    def to_source(self) -> AirflowInstanceSourceRef:
+        """Return the stored source reference."""
+        return AirflowInstanceSourceRef(instance=self.instance)

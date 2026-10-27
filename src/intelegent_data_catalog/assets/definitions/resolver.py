@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.assets.definitions.models import (
+    AirflowInstanceSourceRef,
     AirflowSourceRef,
     PageSourceRef,
     TableSourceRef,
@@ -35,7 +36,7 @@ class RejectedSource:
         self.reason: str = reason
 
 
-ResolvedSource = CatalogTableRow | AirflowDagRow | WorkspaceNodeRow
+ResolvedSource = CatalogTableRow | AirflowDagRow | AirflowInstanceRow | WorkspaceNodeRow
 SourceOutcome = ResolvedSource | UnresolvedSource | RejectedSource
 
 
@@ -45,13 +46,18 @@ class SourceResolver:
     def __init__(self, session: Session) -> None:
         self._session: Session = session
 
-    def resolve(self, source: TableSourceRef | AirflowSourceRef | PageSourceRef) -> SourceOutcome:
+    def resolve(
+        self,
+        source: TableSourceRef | AirflowSourceRef | AirflowInstanceSourceRef | PageSourceRef,
+    ) -> SourceOutcome:
         """Return the source row, or why it cannot be linked yet."""
         match source:
             case TableSourceRef():
                 return self._table(source)
             case AirflowSourceRef():
                 return self._dag(source)
+            case AirflowInstanceSourceRef():
+                return self._instance(source)
             case PageSourceRef():
                 return self._page(source)
 
@@ -88,6 +94,14 @@ class SourceResolver:
         if dag is None:
             return UnresolvedSource(f"airflow dag not found: {source.dag_id}")
         return dag
+
+    def _instance(self, source: AirflowInstanceSourceRef) -> AirflowInstanceRow | UnresolvedSource:
+        instance: AirflowInstanceRow | None = self._session.scalar(
+            select(AirflowInstanceRow).where(AirflowInstanceRow.slug == source.instance),
+        )
+        if instance is None:
+            return UnresolvedSource(f"airflow instance not found: {source.instance}")
+        return instance
 
     def _page(self, source: PageSourceRef) -> WorkspaceNodeRow | UnresolvedSource | RejectedSource:
         workspace: WorkspaceRow | None = self._session.scalar(

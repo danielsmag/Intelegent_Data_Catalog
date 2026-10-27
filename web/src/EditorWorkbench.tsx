@@ -8,15 +8,14 @@ import {
   Router,
   Routes,
   useParams,
+  useSearchParams,
   type Location,
   type Navigator,
   type Path,
   type To,
 } from "react-router-dom"
 import { ActivityBar } from "./ActivityBar"
-import { AirflowDagPage, AirflowInstancePage, AirflowInstancesPage } from "./AirflowPages"
-import { AirflowSidebar } from "./AirflowSidebar"
-import { useAirflowSidebarOpen, setAirflowSidebarOpen } from "./airflowSidebarStore"
+import { fetchAirflowInstance } from "./airflowApi"
 import { CatalogPage } from "./Explorer"
 import { CatalogSidebar } from "./CatalogTree"
 import { EditorDragGhost, EditorDropEdges, EditorTabBar } from "./EditorTabBar"
@@ -52,7 +51,7 @@ import { fetchCatalogTable } from "./registryApi"
 import { WorkspacesPage } from "./WorkspacesPage"
 import { ResizeHandle } from "./ResizeHandle"
 import { QueryPage } from "./QueryPage"
-import { DataSourcesPage, RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
+import { RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
 import { setPendingQuerySql, setSidebarView, sidebarViewForPath, useSidebarView, type SidebarView } from "./sidebarView"
 import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { setWorkspaceSidebarOpen, useWorkspaceSidebarOpen } from "./workspaceSidebar"
@@ -113,7 +112,6 @@ export function EditorWorkbench(): ReactElement {
 function SecondSidebar(): ReactElement {
   const view: SidebarView = useSidebarView()
   const spacesOpen: boolean = useSpacesSidebarOpen()
-  const airflowOpen: boolean = useAirflowSidebarOpen()
   const workspaceOpen: boolean = useWorkspaceSidebarOpen()
   const assetsOpen: boolean = useAssetsSidebarOpen()
   if (view === "spaces") {
@@ -123,16 +121,6 @@ function SecondSidebar(): ReactElement {
         collapsed={!spacesOpen}
         onToggleCollapsed={() => {
           setSpacesSidebarOpen(!spacesOpen)
-        }}
-      />
-    )
-  }
-  if (view === "airflow") {
-    return (
-      <AirflowSidebar
-        collapsed={!airflowOpen}
-        onToggleCollapsed={() => {
-          setAirflowSidebarOpen(!airflowOpen)
         }}
       />
     )
@@ -164,13 +152,6 @@ function SecondSidebar(): ReactElement {
     return (
       <ToolSidebar title="Search">
         <SearchPage />
-      </ToolSidebar>
-    )
-  }
-  if (view === "sources") {
-    return (
-      <ToolSidebar title="Sources">
-        <DataSourcesPage />
       </ToolSidebar>
     )
   }
@@ -405,6 +386,49 @@ function TableAssetRedirect(): ReactElement {
   return <p className="note">Opening asset...</p>
 }
 
+function AirflowListRedirect(): ReactElement {
+  const [params] = useSearchParams()
+  const next: URLSearchParams = new URLSearchParams()
+  next.set("kind", "AIRFLOW_INSTANCE")
+  if (params.get("new") === "1") {
+    next.set("new", "1")
+  }
+  return <Navigate to={`/assets?${next.toString()}`} replace />
+}
+
+function AirflowInstanceRedirect(): ReactElement {
+  const instanceId: string = useParams().instanceId ?? ""
+  const dagId: string | undefined = useParams().dagId
+  const [target, setTarget] = useState<string | null>(null)
+  useEffect(() => {
+    const controller: AbortController = new AbortController()
+    void fetchAirflowInstance(instanceId, controller.signal)
+      .then((instance) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        if (instance.asset_id === null) {
+          setTarget("/assets?kind=AIRFLOW_INSTANCE")
+          return
+        }
+        const dag: string = dagId === undefined ? "" : `?dag=${encodeURIComponent(dagId)}`
+        setTarget(`/assets/${instance.asset_id}${dag}`)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setTarget("/assets?kind=AIRFLOW_INSTANCE")
+        }
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [instanceId, dagId])
+  if (target === null) {
+    return <p className="note">Opening asset...</p>
+  }
+  return <Navigate to={target} replace />
+}
+
 function WorkspaceFileRoute(): ReactElement {
   const nodeId: string = useParams().nodeId ?? ""
   return <WorkspaceFilePage nodeId={nodeId} />
@@ -414,9 +438,9 @@ function EditorRoutes(): ReactElement {
   return (
     <Routes>
       <Route path="/" element={<SpacesPage />} />
-      <Route path="/airflow" element={<AirflowInstancesPage />} />
-      <Route path="/airflow/:instanceId" element={<AirflowInstancePage />} />
-      <Route path="/airflow/:instanceId/dags/:dagId" element={<AirflowDagPage />} />
+      <Route path="/airflow" element={<AirflowListRedirect />} />
+      <Route path="/airflow/:instanceId" element={<AirflowInstanceRedirect />} />
+      <Route path="/airflow/:instanceId/dags/:dagId" element={<AirflowInstanceRedirect />} />
       <Route path="/catalog" element={<CatalogPage />} />
       <Route path="/catalog/:source/:catalog/:namespace/:table" element={<CatalogPage />} />
       <Route path="/spaces" element={<SpacesPage />} />
@@ -432,6 +456,8 @@ function EditorRoutes(): ReactElement {
       <Route path="/assets/:assetId" element={<AssetPage />} />
       <Route path="/registry/tables/:tableId" element={<TableAssetRedirect />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />
+      <Route path="/sources" element={<Navigate to="/catalog" replace />} />
+      <Route path="/sources/*" element={<Navigate to="/catalog" replace />} />
       <Route path="*" element={<MissingPage />} />
     </Routes>
   )

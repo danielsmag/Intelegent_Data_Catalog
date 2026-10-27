@@ -361,17 +361,6 @@ export function AirflowIcon(): ReactElement {
   )
 }
 
-export function GraphIcon(): ReactElement {
-  return (
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-      <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="16" cy="6" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="15" cy="16" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M10 7.2 14 6.6M9.2 9.6l4.6 5M16.6 8.2 15.4 13.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  )
-}
-
 export function QueryIcon(): ReactElement {
   return (
     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">

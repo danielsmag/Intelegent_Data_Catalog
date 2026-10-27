@@ -6,15 +6,19 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from dependency_injector import providers
 from fastapi import FastAPI
+from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.persistence.enums import AssetKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
+from intelegent_data_catalog.persistence.models import AirflowInstanceRow, AssetRow
 
 _PASSWORD: str = "s3cret-airflow"
 _DAG_ID: str = "append_sales_customer"
@@ -40,6 +44,19 @@ def test_instance_crud_hides_the_password(tmp_path: Path) -> None:
         assert body["has_credentials"] is True
         assert body["slug"] == "local"
         assert body["dag_count"] == 0
+        asset_id: str = _text(body, "asset_id")
+        session: Session = database.session()
+        try:
+            instance_id: UUID = UUID(str(body["id"]))
+            linked: AirflowInstanceRow | None = session.get(AirflowInstanceRow, instance_id)
+            assert linked is not None
+            assert linked.asset_id is not None
+            assert str(linked.asset_id) == asset_id
+            stored: AssetRow | None = session.get(AssetRow, linked.asset_id)
+            assert stored is not None
+            assert stored.kind == AssetKind.AIRFLOW_INSTANCE.value
+        finally:
+            session.close()
         duplicate: httpx.Response = _send(
             app,
             "POST",
@@ -71,6 +88,13 @@ def test_instance_crud_hides_the_password(tmp_path: Path) -> None:
         assert report["ok"] is True
         assert report["version"] == "3.3.2"
         assert _PASSWORD not in tested.text
+        removed: httpx.Response = _send(app, "DELETE", f"/api/v1/airflow/instances/{body['id']}")
+        assert removed.status_code == 204
+        after: Session = database.session()
+        try:
+            assert after.get(AssetRow, UUID(asset_id)) is None
+        finally:
+            after.close()
     finally:
         http.close()
         database.dispose()

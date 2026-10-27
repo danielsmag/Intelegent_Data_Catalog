@@ -4,7 +4,10 @@ from pydantic import ValidationError
 
 from intelegent_data_catalog.assets.definitions.models import OperatorRef
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
-from intelegent_data_catalog.assets.dsl.operators.airflow import AirflowOperator
+from intelegent_data_catalog.assets.dsl.operators.airflow import (
+    AirflowInstanceOperator,
+    AirflowOperator,
+)
 from intelegent_data_catalog.assets.dsl.operators.base import Operator
 from intelegent_data_catalog.assets.dsl.operators.page import PageOperator
 from intelegent_data_catalog.assets.dsl.operators.tables import (
@@ -18,6 +21,7 @@ _OPERATORS: dict[str, type[Operator]] = {
         IcebergTableOperator,
         PostgresTableOperator,
         AirflowOperator,
+        AirflowInstanceOperator,
         PageOperator,
     )
 }

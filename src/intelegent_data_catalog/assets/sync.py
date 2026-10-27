@@ -1,4 +1,4 @@
-"""Keep an asset row next to its catalog table, DAG, or workspace file."""
+"""Keep an asset row next to its catalog table, DAG, Airflow instance, or workspace file."""
 
 from __future__ import annotations
 
@@ -11,9 +11,14 @@ from intelegent_data_catalog.assets.naming import AssetSlugs
 from intelegent_data_catalog.assets.repository import AssetRepository
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.constants import SHARED_WORKSPACE_ID
-from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus
+from intelegent_data_catalog.persistence.enums import (
+    AirflowInstanceStatus,
+    AssetKind,
+    AssetStatus,
+)
 from intelegent_data_catalog.persistence.models import (
     AirflowDagRow,
+    AirflowInstanceRow,
     AssetRow,
     CatalogTableRow,
     WorkspaceNodeRow,
@@ -115,6 +120,53 @@ class AssetSync:
         self._session.flush()
         return asset
 
+    def ensure_instance(self, row: AirflowInstanceRow) -> AssetRow:
+        """Create or refresh the instance asset. Definition keys on the asset stay."""
+        asset: AssetRow | None = self._existing(row.asset_id)
+        now: datetime = utc_now()
+        status: str = (
+            AssetStatus.DEPRECATED.value
+            if row.status == AirflowInstanceStatus.DISABLED.value
+            else AssetStatus.ACTIVE.value
+        )
+        properties: dict[str, object] = {
+            "instance_id": str(row.id),
+            "slug": row.slug,
+        }
+        if asset is None:
+            asset = self._insert(
+                kind=AssetKind.AIRFLOW_INSTANCE,
+                name=row.name,
+                raw_slug=row.slug or row.name,
+                description=row.description,
+                context=row.context,
+                context_origin=row.context_origin,
+                workspace_id=SHARED_WORKSPACE_ID,
+                owner_user_id=None,
+                created_by=None,
+                properties=properties,
+                status=status,
+                last_synced_at=row.last_synced_at,
+                now=now,
+            )
+            row.asset_id = asset.id
+        else:
+            asset.name = _clip(row.name)
+            asset.description = row.description
+            asset.status = status
+            asset.properties = _keep_declared(asset.properties, properties)
+            asset.last_synced_at = row.last_synced_at
+            asset.updated_at = now
+        self._session.flush()
+        return asset
+
+    def delete_instance(self, row: AirflowInstanceRow) -> None:
+        """Delete the asset linked to an Airflow instance. The instance row stays."""
+        asset_id: UUID | None = row.asset_id
+        row.asset_id = None
+        self._session.flush()
+        self._delete_linked(asset_id)
+
     def ensure_file(self, row: WorkspaceNodeRow) -> AssetRow | None:
         """Create or refresh the file or notebook asset. Folders are ignored."""
         if row.kind != "FILE":
@@ -209,6 +261,16 @@ class AssetSync:
         if asset is None:
             return
         self._repository.delete(asset)
+
+
+def _keep_declared(current: dict[str, object], properties: dict[str, object]) -> dict[str, object]:
+    """Keep definition overlay keys when the source row is refreshed."""
+    merged: dict[str, object] = dict(properties)
+    key: str
+    for key in ("definition", "declared", "tags"):
+        if key in current:
+            merged[key] = current[key]
+    return merged
 
 
 def _clip(value: str) -> str:

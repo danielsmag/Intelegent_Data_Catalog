@@ -2,8 +2,8 @@ UI
 ==
 
 The activity bar switches the sidebar. The editor opens the page for the
-thing you select. Paths such as ``/query`` and ``/sources`` select the
-matching view on their own.
+thing you select. Paths such as ``/query`` and ``/search`` select the
+matching view on their own. ``/sources`` opens Catalog.
 
 .. list-table::
    :header-rows: 1
@@ -19,12 +19,8 @@ matching view on their own.
      - Registry tree of spaces, scopes, and attached tables.
    * - Catalog
      - Physical catalogs, namespaces, and tables from the explorer.
-   * - Airflow
-     - Registered instances and their DAGs. Add an instance from this sidebar.
    * - Search
      - Catalog search.
-   * - Sources
-     - Data source records. A source record does not provision a Trino or Spark connector.
    * - Query
      - One read-only Spark SQL statement. See :doc:`/howto/query`.
 

@@ -25,6 +25,7 @@ class AssetKind(StrEnum):
 
     TABLE = "TABLE"
     AIRFLOW_DAG = "AIRFLOW_DAG"
+    AIRFLOW_INSTANCE = "AIRFLOW_INSTANCE"
     NOTEBOOK = "NOTEBOOK"
     FILE = "FILE"
 
