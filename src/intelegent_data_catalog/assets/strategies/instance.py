@@ -1,4 +1,4 @@
-"""Airflow instance asset. Context builds go through the instance agent."""
+"""Airflow instance kind. Context builds go through the instance agent."""
 
 from uuid import UUID
 
@@ -6,8 +6,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.assets.base import Asset, AssetAgent
+from intelegent_data_catalog.assets.base import AssetAgent, AssetAgentProvider
 from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
+from intelegent_data_catalog.assets.strategies.flags import INSTANCE_FLAGS
 from intelegent_data_catalog.exceptions import EntityNotFoundError
 from intelegent_data_catalog.knowledge.models import AirflowAnalysisContext, AirflowContextOptions
 from intelegent_data_catalog.knowledge.operations.airflow_operation import AirflowInstanceAgent
@@ -15,11 +16,6 @@ from intelegent_data_catalog.knowledge.store import AirflowKnowledgeContextStore
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind
 from intelegent_data_catalog.persistence.models import AirflowInstanceRow
-
-_INSTANCE_OPTIONS: dict[str, bool] = {
-    "include_source": True,
-    "include_previous": True,
-}
 
 
 class InstanceAssetDetail(BaseModel):
@@ -54,8 +50,11 @@ class InstanceAssetAgentAdapter(AssetAgent):
         flags: dict[str, bool] = options.flags
         built: AirflowAnalysisContext = self._agent.build_context(
             AirflowContextOptions(
-                include_source=flags.get("include_source", True),
-                include_previous=flags.get("include_previous", True),
+                include_source=flags.get("include_source", INSTANCE_FLAGS["include_source"]),
+                include_previous=flags.get(
+                    "include_previous",
+                    INSTANCE_FLAGS["include_previous"],
+                ),
                 include_summary=True,
                 model=options.model,
                 effort=options.effort,
@@ -89,30 +88,37 @@ class InstanceAssetAgentAdapter(AssetAgent):
         return self._agent.describe()
 
 
-class InstanceAsset(Asset):
-    """One registered Airflow instance addressed as an asset."""
+class InstanceStrategy:
+    """One registered Airflow instance addressed through one asset id."""
 
-    def default_options(self) -> dict[str, bool]:
+    def default_flags(self) -> dict[str, bool]:
         """Flags for an instance context build."""
-        return dict(_INSTANCE_OPTIONS)
+        return dict(INSTANCE_FLAGS)
 
-    def agent(self) -> AssetAgent:
+    def agent(
+        self,
+        session: Session,
+        agents: AssetAgentProvider,
+        asset_id: UUID,
+    ) -> AssetAgent:
         """Adapter over the instance agent."""
-        instance: AirflowInstanceRow = self._instance()
-        return self._agents.for_instance(instance.id)
+        instance: AirflowInstanceRow = _instance(session, asset_id)
+        return agents.for_instance(instance.id)
 
-    def detail(self) -> InstanceAssetDetail:
+    def detail(self, session: Session, asset_id: UUID) -> InstanceAssetDetail:
         """Instance id, slug, and registry status."""
-        instance: AirflowInstanceRow = self._instance()
+        instance: AirflowInstanceRow = _instance(session, asset_id)
         return InstanceAssetDetail(
             instance_id=instance.id,
             slug=instance.slug,
             status=instance.status,
         )
 
-    def _instance(self) -> AirflowInstanceRow:
-        statement = select(AirflowInstanceRow).where(AirflowInstanceRow.asset_id == self.id)
-        instance: AirflowInstanceRow | None = self._session.scalar(statement)
-        if instance is None:
-            raise EntityNotFoundError("airflow instance", str(self.id))
-        return instance
+
+def _instance(session: Session, asset_id: UUID) -> AirflowInstanceRow:
+    instance: AirflowInstanceRow | None = session.scalar(
+        select(AirflowInstanceRow).where(AirflowInstanceRow.asset_id == asset_id),
+    )
+    if instance is None:
+        raise EntityNotFoundError("airflow instance", str(asset_id))
+    return instance

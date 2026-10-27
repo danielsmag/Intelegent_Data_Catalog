@@ -1,6 +1,9 @@
-"""Asset base class. Each kind supplies its agent and detail payload."""
+"""Asset base class. A kind strategy supplies the agent and detail payload."""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -16,6 +19,9 @@ from intelegent_data_catalog.assets.store import AssetKnowledgeStore
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus, ContextOrigin
 from intelegent_data_catalog.persistence.models import AssetMembershipRow, AssetRow
+
+if TYPE_CHECKING:
+    from intelegent_data_catalog.assets.strategies.protocol import KindStrategy
 
 
 class AssetAgent(ABC):
@@ -54,13 +60,20 @@ class AssetAgentProvider(ABC):
         """Agent for one workspace file or notebook."""
 
 
-class Asset(ABC):
-    """One catalog object. Subclasses know how to load their source row and agent."""
+class Asset:
+    """One catalog object. The strategy loads the source row and opens the agent."""
 
-    def __init__(self, row: AssetRow, session: Session, agents: AssetAgentProvider) -> None:
+    def __init__(
+        self,
+        row: AssetRow,
+        session: Session,
+        agents: AssetAgentProvider,
+        strategy: KindStrategy,
+    ) -> None:
         self._row: AssetRow = row
         self._session: Session = session
         self._agents: AssetAgentProvider = agents
+        self._strategy: KindStrategy = strategy
         self._repository: AssetRepository = AssetRepository(session)
 
     @property
@@ -132,17 +145,13 @@ class Asset(ABC):
         self._session.commit()
         return text
 
-    @abstractmethod
-    def default_options(self) -> dict[str, bool]:
-        """Flags stored when the asset has no configuration row yet."""
-
-    @abstractmethod
     def agent(self) -> AssetAgent:
         """Agent that builds this asset."""
+        return self._strategy.agent(self._session, self._agents, self.id)
 
-    @abstractmethod
     def detail(self) -> BaseModel:
         """Kind payload returned by the API."""
+        return self._strategy.detail(self._session, self.id)
 
 
 def _membership(row: AssetMembershipRow) -> AssetMembershipRead:

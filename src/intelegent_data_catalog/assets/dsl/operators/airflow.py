@@ -9,6 +9,7 @@ from intelegent_data_catalog.assets.definitions.models import (
     AirflowSourceRef,
 )
 from intelegent_data_catalog.assets.dsl.operators.base import Operator
+from intelegent_data_catalog.assets.strategies.flags import DAG_FLAGS, INSTANCE_FLAGS
 from intelegent_data_catalog.registry.identifiers import require_slug
 
 
@@ -17,8 +18,8 @@ class AirflowOperator(Operator):
 
     instance: str = Field(min_length=1, max_length=255)
     dag_id: str = Field(min_length=1, max_length=250)
-    include_source: bool = True
-    include_previous: bool = True
+    include_source: bool = DAG_FLAGS["include_source"]
+    include_previous: bool = DAG_FLAGS["include_previous"]
 
     @model_validator(mode="after")
     def _instance_slug(self) -> AirflowOperator:
@@ -41,8 +42,8 @@ class AirflowInstanceOperator(Operator):
     """Link one registered Airflow instance. The ``include_*`` fields are its build flags."""
 
     instance: str = Field(min_length=1, max_length=255)
-    include_source: bool = True
-    include_previous: bool = True
+    include_source: bool = INSTANCE_FLAGS["include_source"]
+    include_previous: bool = INSTANCE_FLAGS["include_previous"]
 
     @model_validator(mode="after")
     def _instance_slug(self) -> AirflowInstanceOperator:

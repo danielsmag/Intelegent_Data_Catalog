@@ -7,11 +7,11 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository
 from intelegent_data_catalog.assets.base import Asset, AssetAgentProvider
-from intelegent_data_catalog.assets.kinds.instance_asset import InstanceAssetAgentAdapter
-from intelegent_data_catalog.assets.kinds.table_asset import TableAssetAgentAdapter
 from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
 from intelegent_data_catalog.assets.registry import AssetRegistry
 from intelegent_data_catalog.assets.store import AssetKnowledgeStore
+from intelegent_data_catalog.assets.strategies.instance import InstanceAssetAgentAdapter
+from intelegent_data_catalog.assets.strategies.table import TableAssetAgentAdapter
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings, ModelId, ReasoningEffort

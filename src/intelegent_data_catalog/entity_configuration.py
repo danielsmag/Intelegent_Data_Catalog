@@ -8,6 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.assets.strategies.flags import (
+    DAG_FLAGS,
+    FILE_FLAGS,
+    INSTANCE_FLAGS,
+    TABLE_FLAGS,
+)
 from intelegent_data_catalog.core.settings import (
     ModelId,
     ReasoningEffort,
@@ -45,34 +51,17 @@ _SCOPE_OPTIONS: dict[str, bool] = {
     "include_summary": True,
     "include_airflow": True,
 }
-_TABLE_OPTIONS: dict[str, bool] = {
-    "include_graph": True,
-    "include_lineage": True,
-    "include_data_profile": False,
-}
-_DAG_OPTIONS: dict[str, bool] = {
-    "include_source": True,
-    "include_previous": True,
-}
-_INSTANCE_OPTIONS: dict[str, bool] = {
-    "include_source": True,
-    "include_previous": True,
-}
-_FILE_OPTIONS: dict[str, bool] = {
-    "include_outputs": False,
-    "include_table_links": True,
-}
 _DEFAULTS: dict[RefreshSubjectKind, dict[str, bool]] = {
     RefreshSubjectKind.SPACE: _SPACE_OPTIONS,
     RefreshSubjectKind.SCOPE: _SCOPE_OPTIONS,
-    RefreshSubjectKind.TABLE: _TABLE_OPTIONS,
+    RefreshSubjectKind.TABLE: TABLE_FLAGS,
 }
 _ASSET_DEFAULTS: dict[AssetKind, dict[str, bool]] = {
-    AssetKind.TABLE: _TABLE_OPTIONS,
-    AssetKind.AIRFLOW_DAG: _DAG_OPTIONS,
-    AssetKind.AIRFLOW_INSTANCE: _INSTANCE_OPTIONS,
-    AssetKind.NOTEBOOK: _FILE_OPTIONS,
-    AssetKind.FILE: _FILE_OPTIONS,
+    AssetKind.TABLE: TABLE_FLAGS,
+    AssetKind.AIRFLOW_DAG: DAG_FLAGS,
+    AssetKind.AIRFLOW_INSTANCE: INSTANCE_FLAGS,
+    AssetKind.NOTEBOOK: FILE_FLAGS,
+    AssetKind.FILE: FILE_FLAGS,
 }
 
 
@@ -289,7 +278,7 @@ class EntityConfigurationService:
         if kind is RefreshSubjectKind.ASSET:
             asset_kind: str | None = self._asset_kind(kind, subject_id)
             if asset_kind is None:
-                return dict(_TABLE_OPTIONS)
+                return dict(TABLE_FLAGS)
             return dict(_ASSET_DEFAULTS[AssetKind(asset_kind)])
         return dict(_DEFAULTS[kind])
 
@@ -405,7 +394,7 @@ def _checked_options(
 ) -> dict[str, bool]:
     if kind is RefreshSubjectKind.ASSET:
         if asset_kind is None:
-            allowed: dict[str, bool] = dict(_TABLE_OPTIONS)
+            allowed: dict[str, bool] = dict(TABLE_FLAGS)
         else:
             allowed = dict(_ASSET_DEFAULTS[AssetKind(asset_kind)])
     else:

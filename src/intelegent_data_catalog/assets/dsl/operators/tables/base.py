@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from intelegent_data_catalog.assets.definitions.models import TableSourceRef
 from intelegent_data_catalog.assets.dsl.operators.base import Operator
+from intelegent_data_catalog.assets.strategies.flags import TABLE_FLAGS
 
 
 class TableOperator(Operator):
@@ -16,9 +17,9 @@ class TableOperator(Operator):
 
     source_key: str = Field(min_length=1, max_length=2048)
     data_source: str | None = None
-    include_graph: bool = True
-    include_lineage: bool = True
-    include_data_profile: bool = False
+    include_graph: bool = TABLE_FLAGS["include_graph"]
+    include_lineage: bool = TABLE_FLAGS["include_lineage"]
+    include_data_profile: bool = TABLE_FLAGS["include_data_profile"]
 
     @model_validator(mode="after")
     def _data_source_not_blank(self) -> TableOperator:

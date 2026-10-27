@@ -1,4 +1,4 @@
-"""Table asset. Context builds go through the existing table agent."""
+"""Table kind. Context builds go through the existing table agent."""
 
 from uuid import UUID
 
@@ -6,8 +6,9 @@ from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationEr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.assets.base import Asset, AssetAgent
+from intelegent_data_catalog.assets.base import AssetAgent, AssetAgentProvider
 from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
+from intelegent_data_catalog.assets.strategies.flags import TABLE_FLAGS
 from intelegent_data_catalog.exceptions import EntityNotFoundError, PersistenceUnavailableError
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableContextOptions
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
@@ -17,12 +18,6 @@ from intelegent_data_catalog.persistence.models import CatalogTableRow
 from intelegent_data_catalog.registry.reads import dump_model
 
 _JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
-
-_TABLE_OPTIONS: dict[str, bool] = {
-    "include_graph": True,
-    "include_lineage": True,
-    "include_data_profile": False,
-}
 
 
 class TableAssetDetail(BaseModel):
@@ -53,9 +48,12 @@ class TableAssetAgentAdapter(AssetAgent):
         flags: dict[str, bool] = options.flags
         built: TableAnalysisContext = self._agent.build_context(
             TableContextOptions(
-                include_data_profile=flags.get("include_data_profile", False),
-                include_graph=flags.get("include_graph", True),
-                include_lineage=flags.get("include_lineage", True),
+                include_data_profile=flags.get(
+                    "include_data_profile",
+                    TABLE_FLAGS["include_data_profile"],
+                ),
+                include_graph=flags.get("include_graph", TABLE_FLAGS["include_graph"]),
+                include_lineage=flags.get("include_lineage", TABLE_FLAGS["include_lineage"]),
                 model=options.model,
                 effort=options.effort,
             ),
@@ -78,21 +76,26 @@ class TableAssetAgentAdapter(AssetAgent):
         return self._agent.describe_table()
 
 
-class TableAsset(Asset):
-    """A catalog table addressed as an asset."""
+class TableStrategy:
+    """Catalog table addressed through one asset id."""
 
-    def default_options(self) -> dict[str, bool]:
+    def default_flags(self) -> dict[str, bool]:
         """Flags for a table context build."""
-        return dict(_TABLE_OPTIONS)
+        return dict(TABLE_FLAGS)
 
-    def agent(self) -> AssetAgent:
+    def agent(
+        self,
+        session: Session,
+        agents: AssetAgentProvider,
+        asset_id: UUID,
+    ) -> AssetAgent:
         """Adapter over the table agent for this asset's table."""
-        table: CatalogTableRow = self._table()
-        return self._agents.for_table(table.id)
+        table: CatalogTableRow = _table(session, asset_id)
+        return agents.for_table(table.id)
 
-    def detail(self) -> TableAssetDetail:
+    def detail(self, session: Session, asset_id: UUID) -> TableAssetDetail:
         """Table id and source key."""
-        table: CatalogTableRow = self._table()
+        table: CatalogTableRow = _table(session, asset_id)
         return TableAssetDetail(
             table_id=table.id,
             source_key=table.source_key,
@@ -100,12 +103,14 @@ class TableAsset(Asset):
             scope_id=table.scope_id,
         )
 
-    def _table(self) -> CatalogTableRow:
-        statement = select(CatalogTableRow).where(CatalogTableRow.asset_id == self.id)
-        table: CatalogTableRow | None = self._session.scalar(statement)
-        if table is None:
-            raise EntityNotFoundError("catalog table", str(self.id))
-        return table
+
+def _table(session: Session, asset_id: UUID) -> CatalogTableRow:
+    table: CatalogTableRow | None = session.scalar(
+        select(CatalogTableRow).where(CatalogTableRow.asset_id == asset_id),
+    )
+    if table is None:
+        raise EntityNotFoundError("catalog table", str(asset_id))
+    return table
 
 
 def _analysis_payload(built: TableAnalysisContext) -> dict[str, JsonValue]:

@@ -10,7 +10,7 @@ import httpx
 import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -47,8 +47,9 @@ from intelegent_data_catalog.assets.execution.executor import (
 from intelegent_data_catalog.assets.execution.runtime import OperatorRunner
 from intelegent_data_catalog.assets.execution.schedule import AssetOperatorSchedule
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
-from intelegent_data_catalog.assets.kinds.instance_asset import InstanceAsset, InstanceAssetDetail
+from intelegent_data_catalog.assets.registry import AssetRegistry
 from intelegent_data_catalog.assets.service import _UnavailableAgents
+from intelegent_data_catalog.assets.strategies.instance import InstanceAssetDetail
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
 from intelegent_data_catalog.exceptions import CatalogError
@@ -594,7 +595,9 @@ def test_airflow_instance_operator_links_existing_instance(tmp_path: Path) -> No
         assert instance is not None
         assert instance.asset_id == asset.id
         assert len(executor.workloads) == 1
-        detail: InstanceAssetDetail = InstanceAsset(asset, session, _UnavailableAgents()).detail()
+        loaded: BaseModel = AssetRegistry(session, _UnavailableAgents()).load(asset.id).detail()
+        assert isinstance(loaded, InstanceAssetDetail)
+        detail: InstanceAssetDetail = loaded
         assert detail.instance_id == instance.id
         assert detail.slug == "prod-airflow"
         assert detail.status == AirflowInstanceStatus.ACTIVE.value
