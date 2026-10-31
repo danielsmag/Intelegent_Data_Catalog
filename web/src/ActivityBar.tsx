@@ -24,6 +24,14 @@ type Item = {
   gap?: boolean
 }
 
+function activityClass(item: Item): string {
+  const names: string[] = ["activity-button"]
+  if (item.gap === true) {
+    names.push("activity-gap")
+  }
+  return names.join(" ")
+}
+
 export function ActivityBar(): ReactElement {
   const current: SidebarView = useSidebarView()
   const items: Item[] = [
@@ -44,7 +52,7 @@ export function ActivityBar(): ReactElement {
           <button
             key={item.view}
             type="button"
-            className={item.gap === true ? "activity-button activity-gap" : "activity-button"}
+            className={activityClass(item)}
             aria-current={current === item.view ? "page" : undefined}
             aria-label={item.label}
             title={item.label}

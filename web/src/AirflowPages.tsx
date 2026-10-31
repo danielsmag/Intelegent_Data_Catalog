@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react"
 import { Link, useSearchParams } from "react-router-dom"
+import { AgentPackPanel } from "./AgentPackPanel"
 import { BuildingBanner } from "./BuildingBanner"
 import {
   addDagTable,
@@ -98,8 +99,8 @@ function Section(props: { title: string; error: string | null; children: ReactEl
   )
 }
 
-const INSTANCE_TABS: readonly InstanceTab[] = ["overview", "dags", "mappings", "runs", "config"]
-type InstanceTab = "overview" | "dags" | "mappings" | "runs" | "config"
+const INSTANCE_TABS: readonly InstanceTab[] = ["overview", "dags", "mappings", "runs", "agent", "config"]
+type InstanceTab = "overview" | "dags" | "mappings" | "runs" | "agent" | "config"
 
 export function AirflowInstanceView(props: {
   instanceId: string
@@ -477,6 +478,7 @@ export function AirflowInstanceView(props: {
         {tab === "dags" ? <DagRows instanceId={instanceId} dags={dags} /> : null}
         {tab === "mappings" ? <MappingRows instanceId={instanceId} mappings={mappings} /> : null}
         {tab === "runs" ? <AssetRuns assetId={props.assetId} /> : null}
+        {tab === "agent" ? <AgentPackPanel assetId={props.assetId} assetKind="AIRFLOW_INSTANCE" /> : null}
         {tab === "config" ? (
           <div className="asset-sheet">
             <section className="asset-card asset-config">
@@ -737,8 +739,8 @@ function MappingRows(props: { instanceId: string; mappings: AirflowDagTable[] })
   )
 }
 
-const DAG_TABS: readonly DagTab[] = ["overview", "tasks", "runs", "tables", "source"]
-type DagTab = "overview" | "tasks" | "runs" | "tables" | "source"
+const DAG_TABS: readonly DagTab[] = ["overview", "tasks", "runs", "tables", "source", "agent"]
+type DagTab = "overview" | "tasks" | "runs" | "tables" | "source" | "agent"
 
 export function AirflowDagView(props: {
   instanceId: string
@@ -884,6 +886,13 @@ export function AirflowDagView(props: {
               mappings={dag.tables}
             />
           </div>
+        ) : null}
+        {tab === "agent" ? (
+          dag?.asset_id != null ? (
+            <AgentPackPanel assetId={dag.asset_id} assetKind="AIRFLOW_DAG" />
+          ) : (
+            <p className="note">This DAG has no asset yet.</p>
+          )
         ) : null}
         {tab === "source" ? (
           dag?.source_code ? (

@@ -6,10 +6,22 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from intelegent_data_catalog.api.dependencies import (
+    AgentPackDep,
     AssetServiceDep,
     CatalogJobsDep,
     EntityConfigurationDep,
     PlatformDep,
+)
+from intelegent_data_catalog.assets.agent_pack.models import (
+    AgentDetail,
+    AgentPackRead,
+    AgentWrite,
+    PromptDetail,
+    PromptWrite,
+    RuleDetail,
+    RuleWrite,
+    SkillDetail,
+    SkillWrite,
 )
 from intelegent_data_catalog.assets.execution.models import AssetRunRead, AssetRunTaskDetail
 from intelegent_data_catalog.assets.models import (
@@ -138,6 +150,99 @@ def update_asset(asset_id: UUID, body: AssetUpdate, service: AssetServiceDep) ->
 def delete_asset(asset_id: UUID, service: AssetServiceDep) -> None:
     """Delete an asset. The source object stays."""
     service.delete(asset_id)
+
+
+@router.get("/assets/{asset_id}/agent-pack", response_model=AgentPackRead)
+def read_agent_pack(asset_id: UUID, service: AgentPackDep) -> AgentPackRead:
+    """List prompts, rules, skills, and the agent card for one asset."""
+    return service.list_pack(asset_id)
+
+
+@router.get("/assets/{asset_id}/agent-pack/agent", response_model=AgentDetail)
+def read_agent_card(asset_id: UUID, service: AgentPackDep) -> AgentDetail:
+    """Return ``AGENTS.md``."""
+    return service.get_agent(asset_id)
+
+
+@router.put("/assets/{asset_id}/agent-pack/agent", response_model=AgentDetail)
+def put_agent_card(asset_id: UUID, body: AgentWrite, service: AgentPackDep) -> AgentDetail:
+    """Replace ``AGENTS.md``."""
+    return service.put_agent(asset_id, body)
+
+
+@router.delete("/assets/{asset_id}/agent-pack/agent", status_code=204)
+def delete_agent_card(asset_id: UUID, service: AgentPackDep) -> None:
+    """Remove ``AGENTS.md``."""
+    service.delete(asset_id, "agent", None)
+
+
+@router.get("/assets/{asset_id}/agent-pack/prompts/{slug}", response_model=PromptDetail)
+def read_agent_prompt(asset_id: UUID, slug: str, service: AgentPackDep) -> PromptDetail:
+    """Return one prompt."""
+    return service.get_prompt(asset_id, slug)
+
+
+@router.put("/assets/{asset_id}/agent-pack/prompts/{slug}", response_model=PromptDetail)
+def put_agent_prompt(
+    asset_id: UUID,
+    slug: str,
+    body: PromptWrite,
+    service: AgentPackDep,
+) -> PromptDetail:
+    """Write one prompt."""
+    return service.put_prompt(asset_id, slug, body)
+
+
+@router.delete("/assets/{asset_id}/agent-pack/prompts/{slug}", status_code=204)
+def delete_agent_prompt(asset_id: UUID, slug: str, service: AgentPackDep) -> None:
+    """Remove one prompt."""
+    service.delete(asset_id, "prompts", slug)
+
+
+@router.get("/assets/{asset_id}/agent-pack/rules/{slug}", response_model=RuleDetail)
+def read_agent_rule(asset_id: UUID, slug: str, service: AgentPackDep) -> RuleDetail:
+    """Return one rule."""
+    return service.get_rule(asset_id, slug)
+
+
+@router.put("/assets/{asset_id}/agent-pack/rules/{slug}", response_model=RuleDetail)
+def put_agent_rule(
+    asset_id: UUID,
+    slug: str,
+    body: RuleWrite,
+    service: AgentPackDep,
+) -> RuleDetail:
+    """Write one rule."""
+    return service.put_rule(asset_id, slug, body)
+
+
+@router.delete("/assets/{asset_id}/agent-pack/rules/{slug}", status_code=204)
+def delete_agent_rule(asset_id: UUID, slug: str, service: AgentPackDep) -> None:
+    """Remove one rule."""
+    service.delete(asset_id, "rules", slug)
+
+
+@router.get("/assets/{asset_id}/agent-pack/skills/{slug}", response_model=SkillDetail)
+def read_agent_skill(asset_id: UUID, slug: str, service: AgentPackDep) -> SkillDetail:
+    """Return one skill."""
+    return service.get_skill(asset_id, slug)
+
+
+@router.put("/assets/{asset_id}/agent-pack/skills/{slug}", response_model=SkillDetail)
+def put_agent_skill(
+    asset_id: UUID,
+    slug: str,
+    body: SkillWrite,
+    service: AgentPackDep,
+) -> SkillDetail:
+    """Write one skill."""
+    return service.put_skill(asset_id, slug, body)
+
+
+@router.delete("/assets/{asset_id}/agent-pack/skills/{slug}", status_code=204)
+def delete_agent_skill(asset_id: UUID, slug: str, service: AgentPackDep) -> None:
+    """Remove one skill directory."""
+    service.delete(asset_id, "skills", slug)
 
 
 @router.get("/assets/{asset_id}/configuration", response_model=EntityConfigurationRead)

@@ -12,6 +12,7 @@ from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.api.visibility import SpaceResolver
+from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
 from intelegent_data_catalog.assets.definitions.listing import AssetDefinitionListing
 from intelegent_data_catalog.assets.definitions.service import AssetDefinitionService
 from intelegent_data_catalog.assets.service import AssetService
@@ -218,6 +219,7 @@ def get_platform(
         settings,
         query,
         container.object_store(),
+        container.asset_definition_store(),
     )
     try:
         yield platform
@@ -446,6 +448,34 @@ def get_asset_definition_listing(
 
 
 AssetDefinitionListingDep = Annotated[AssetDefinitionListing, Depends(get_asset_definition_listing)]
+
+
+def get_agent_pack(
+    container: Annotated[AppContainer, Depends(get_container)],
+    access: Annotated[AccessContext, Depends(get_access)],
+) -> Iterator[AgentPackService]:
+    """Open one catalog session for agent markdown beside an asset declaration."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: AgentPackService = AgentPackService(
+        session,
+        container.asset_definition_store(),
+        container.settings().asset_definitions,
+        access,
+    )
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AgentPackDep = Annotated[AgentPackService, Depends(get_agent_pack)]
 
 
 def get_notebook_kernels(

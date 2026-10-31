@@ -23,6 +23,7 @@ from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    RetryFeedbackPart,
     RetryPromptPart,
     ToolReturnPart,
 )
@@ -33,9 +34,20 @@ from pydantic_ai.usage import UsageLimits
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import LlmError, LlmUnavailableError
+from intelegent_data_catalog.llm.overlay import current_instructions, current_task
 from intelegent_data_catalog.llm.trace import AgentTrace
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.llm")
+
+
+def _merge_instructions(instructions: str | None) -> str | None:
+    """Keep caller instructions and append the asset pack when a describe is active."""
+    extra: str | None = current_instructions()
+    if extra is None or extra.strip() == "":
+        return instructions
+    if instructions is None or instructions.strip() == "":
+        return extra
+    return f"{instructions.rstrip()}\n\n{extra.strip()}"
 
 _ERROR_LIMIT: int = 300
 _GPT_4_1_COMPLETION_LIMIT: int = 32768
@@ -79,7 +91,11 @@ class ModelCall[DepsT, OutputT]:
         instructions: str | None = None,
     ) -> OutputT:
         """Run until the model finishes or the request limit is reached."""
-        return asyncio.run(self._execute(prompt, deps, instructions))
+        sent: str = prompt
+        task: str | None = current_task()
+        if task is not None and '"task"' not in prompt:
+            sent = f"{prompt}\n\nTask:\n{task}"
+        return asyncio.run(self._execute(sent, deps, _merge_instructions(instructions)))
 
     async def _execute(
         self,
@@ -210,7 +226,10 @@ def _observe_event(trace: AgentTrace, event: AgentStreamEvent) -> None:
         return
     if not isinstance(event, FunctionToolResultEvent):
         return
-    part: ToolReturnPart | RetryPromptPart = event.part
+    part: ToolReturnPart | RetryPromptPart | RetryFeedbackPart = event.part
+    if isinstance(part, RetryFeedbackPart):
+        trace.observe_retry("model", part.content)
+        return
     if isinstance(part, RetryPromptPart):
         tool_name: str = part.tool_name or "model"
         trace.observe_retry(tool_name, part.content)

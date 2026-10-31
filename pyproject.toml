@@ -19,6 +19,7 @@ dependencies = [
     "opentelemetry-sdk>=1.45.1",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
+    "pydantic-ai-harness[skills]>=0.64.0",
     "pydantic-ai-slim[anthropic,openai]>=2.54.0",
     "pydantic-settings>=2.15.0",
     "pyiceberg[pyarrow,sql-sqlite]>=0.12.0",

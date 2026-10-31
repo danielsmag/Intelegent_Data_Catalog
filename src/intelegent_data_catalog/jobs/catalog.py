@@ -156,6 +156,7 @@ class CatalogAssetBuild:
                         self._container.settings(),
                         self._container.query_service(),
                         self._container.object_store(),
+                        self._container.asset_definition_store(),
                     )
                     platform.build_asset_context(subject_id, options)
                 except CatalogError as err:
@@ -193,6 +194,7 @@ class CatalogContextGeneration:
                 self._container.settings(),
                 self._container.query_service(),
                 self._container.object_store(),
+                self._container.asset_definition_store(),
             )
             platform.generate_context(subject_id, options)
         except Exception:

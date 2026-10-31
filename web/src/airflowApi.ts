@@ -133,6 +133,7 @@ export type AirflowDagTable = {
 export type AirflowDag = {
   id: string
   instance_id: string
+  asset_id: string | null
   dag_id: string
   display_name: string | null
   description: string | null

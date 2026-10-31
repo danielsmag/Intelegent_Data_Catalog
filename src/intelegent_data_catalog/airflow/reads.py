@@ -61,6 +61,7 @@ def dag_read(row: AirflowDagRow, tables: list[AirflowDagTableRead]) -> AirflowDa
     return AirflowDagRead(
         id=row.id,
         instance_id=row.instance_id,
+        asset_id=row.asset_id,
         dag_id=row.dag_id,
         display_name=row.display_name,
         description=row.description,

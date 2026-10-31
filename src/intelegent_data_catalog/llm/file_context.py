@@ -7,6 +7,7 @@ from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.assets.models import FileCatalogContext, FileContextProposal
 from intelegent_data_catalog.llm.agent import ProposalAgent
+from intelegent_data_catalog.llm.overlay import current_task
 from intelegent_data_catalog.llm.run import ModelCall
 from intelegent_data_catalog.llm.structured import structured_output
 
@@ -28,6 +29,7 @@ class _FilePrompt(BaseModel):
     kind: str
     text: str
     referenced_tables: list[str]
+    task: str | None = None
 
 
 class FileContextAgent(ProposalAgent[FileCatalogContext, FileContextProposal]):
@@ -60,8 +62,9 @@ class FileContextAgent(ProposalAgent[FileCatalogContext, FileContextProposal]):
             kind=context.kind.value,
             text=context.text[:_TEXT_LIMIT],
             referenced_tables=context.referenced_tables,
+            task=current_task(),
         )
-        return self._call.run(prompt.model_dump_json(), context)
+        return self._call.run(prompt.model_dump_json(exclude_none=True), context)
 
 
 def _agent(model: Model) -> Agent[FileCatalogContext, FileContextProposal]:

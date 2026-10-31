@@ -9,6 +9,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 from pydantic_ai.messages import (
     ModelMessage,
+    RetryFeedbackPart,
     RetryPromptPart,
     TextPart,
     ToolCallPart,
@@ -19,10 +20,9 @@ from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import RunUsage
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
-from intelegent_data_catalog.jobs.trace import TraceStep, publish_build_step
 
 _INFO_LIMIT: int = 500
-_STEPS: dict[str, TraceStep] = {
+_STEPS: dict[str, str] = {
     "ask": "ask",
     "tool_call": "tool_call",
     "tool_result": "tool_result",
@@ -110,6 +110,10 @@ class AgentTrace:
             rendered_content: str = _render(part.content)
             self._emit("tool_result", f"{part.tool_name} {rendered_content}", publish=publish)
             return
+        if isinstance(part, RetryFeedbackPart):
+            rendered_feedback: str = _render(part.content)
+            self._emit("retry", f"model {rendered_feedback}", publish=publish)
+            return
         if isinstance(part, RetryPromptPart):
             tool_name: str = part.tool_name or "model"
             rendered_retry: str = _render(part.content)
@@ -130,10 +134,12 @@ class AgentTrace:
                 logger.debug("agent=%s %s=%s", self._agent_name, kind, body)
         if not publish:
             return
-        step: TraceStep | None = _STEPS.get(kind)
+        step: str | None = _STEPS.get(kind)
         if step is None:
             return
-        publish_build_step(self._agent_name, step, body)
+        from intelegent_data_catalog.jobs.trace import publish_build_step
+
+        publish_build_step(self._agent_name, step, body)  # type: ignore[arg-type]
 
 
 def _usage_detail(input_tokens: int, output_tokens: int, elapsed_seconds: float) -> str:

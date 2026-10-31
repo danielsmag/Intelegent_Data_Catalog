@@ -264,6 +264,7 @@ class AirflowDagRead(BaseModel):
 
     id: UUID
     instance_id: UUID
+    asset_id: UUID | None = None
     dag_id: str
     display_name: str | None
     description: str | None

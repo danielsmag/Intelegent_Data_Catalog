@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
+    RetryFeedbackPart,
     RetryPromptPart,
     TextPart,
     UserPromptPart,
@@ -523,12 +524,17 @@ def _user_text(messages: list[ModelMessage]) -> str:
 
 def _feedback(messages: list[ModelMessage]) -> str:
     chunks: list[str] = []
+    seen_user: bool = False
     message: ModelMessage
     for message in messages:
         part: object
         for part in message.parts:
-            if isinstance(part, RetryPromptPart):
+            if isinstance(part, RetryPromptPart | RetryFeedbackPart):
                 chunks.append(str(part.content))
+            elif isinstance(part, UserPromptPart):
+                if seen_user:
+                    chunks.append(str(part.content))
+                seen_user = True
     return "\n".join(chunks)
 
 

@@ -145,6 +145,7 @@ class OperatorRunner:
                 self._container.settings(),
                 self._container.query_service(),
                 self._container.object_store(),
+                self._container.asset_definition_store(),
             )
             context: PlatformOperatorContext = PlatformOperatorContext(
                 session,

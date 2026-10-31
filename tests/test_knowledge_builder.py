@@ -9,10 +9,12 @@ import pytest
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
+    RetryFeedbackPart,
     RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
+    UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
@@ -952,10 +954,15 @@ def _operation_agent(
 
 def _feedback(messages: list[ModelMessage]) -> str:
     chunks: list[str] = []
+    seen_user: bool = False
     for message in messages:
         for part in message.parts:
-            if isinstance(part, ToolReturnPart | RetryPromptPart):
+            if isinstance(part, ToolReturnPart | RetryPromptPart | RetryFeedbackPart):
                 chunks.append(str(part.content))
+            elif isinstance(part, UserPromptPart):
+                if seen_user:
+                    chunks.append(str(part.content))
+                seen_user = True
     return "\n".join(chunks)
 
 

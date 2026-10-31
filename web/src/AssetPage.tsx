@@ -10,8 +10,9 @@ import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { TableAssetView, type TableAssetTab } from "./TableDetail"
 import { AirflowDagView, AirflowInstanceView } from "./AirflowPages"
 import { openInFocusedGroup } from "./editorLayout"
+import { AgentPackPanel } from "./AgentPackPanel"
 
-const OTHER_TABS = ["overview", "source", "runs", "config"] as const
+const OTHER_TABS = ["overview", "source", "runs", "agent", "config"] as const
 const TABLE_TABS = [
   "overview",
   "columns",
@@ -20,6 +21,7 @@ const TABLE_TABS = [
   "graph",
   "source",
   "runs",
+  "agent",
   "config",
 ] as const
 type AssetTab = (typeof TABLE_TABS)[number]
@@ -32,6 +34,7 @@ const TAB_LABELS: Record<AssetTab, string> = {
   graph: "Graph",
   source: "Source",
   runs: "Runs",
+  agent: "Agent",
   config: "Config",
 }
 
@@ -208,6 +211,9 @@ export function AssetPage(): ReactElement {
         )
       ) : null}
       {tab === "runs" ? <AssetRuns assetId={assetId} /> : null}
+      {tab === "agent" && asset !== null ? (
+        <AgentPackPanel assetId={asset.id} assetKind={asset.kind} />
+      ) : null}
       {tab === "config" ? (
         <div className="asset-sheet">
           <section className="asset-card asset-config">

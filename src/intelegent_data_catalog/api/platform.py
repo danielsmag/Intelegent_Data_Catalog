@@ -6,12 +6,23 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository
+from intelegent_data_catalog.assets.agent_pack.compose import (
+    active_task,
+    allowed_tools,
+    compose_rules,
+    describe_instructions,
+    narrow_flags,
+)
+from intelegent_data_catalog.assets.agent_pack.runtime import render_skills
+from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
 from intelegent_data_catalog.assets.base import Asset, AssetAgentProvider
 from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
 from intelegent_data_catalog.assets.registry import AssetRegistry
 from intelegent_data_catalog.assets.store import AssetKnowledgeStore
 from intelegent_data_catalog.assets.strategies.instance import InstanceAssetAgentAdapter
 from intelegent_data_catalog.assets.strategies.table import TableAssetAgentAdapter
+from intelegent_data_catalog.auth.access import AccessContext
+from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings, ModelId, ReasoningEffort
@@ -112,6 +123,8 @@ from intelegent_data_catalog.knowledge.store import (
 )
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.factory import CatalogModels, thinking_level
+from intelegent_data_catalog.llm.overlay import DescribeOverlay, describe_overlay
+from intelegent_data_catalog.persistence.enums import AssetKind
 from intelegent_data_catalog.persistence.models import (
     AirflowDagRow,
     AirflowInstanceRow,
@@ -133,6 +146,25 @@ from intelegent_data_catalog.sources.trino.discovery import TrinoCatalogSource
 from intelegent_data_catalog.storage.object_store import ObjectStore
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.knowledge")
+_JOB_USER: UUID = UUID(int=0)
+
+
+def _job_access() -> AccessContext:
+    """Visibility used when a worker loads a pack. ``load`` does not check it."""
+    return AccessContext(
+        principal=Principal(
+            subject="catalog-job",
+            email=None,
+            name="catalog-job",
+            roles=frozenset(),
+            is_admin=True,
+        ),
+        user_id=_JOB_USER,
+        workspace_id=None,
+        member_workspace_ids=frozenset(),
+        admin_workspace_ids=frozenset(),
+        visible_space_ids=None,
+    )
 
 
 class RequestPlatform:
@@ -144,8 +176,10 @@ class RequestPlatform:
         settings: AppSettings,
         query: QueryService,
         objects: ObjectStore | None = None,
+        definitions: ObjectStore | None = None,
     ) -> None:
         self._session: Session = session
+        self._definitions: ObjectStore | None = definitions
         self._settings: AppSettings = settings
         repo: RegistryRepository = RegistryRepository(session)
         self.spaces: SpaceService = SpaceService(repo)
@@ -365,13 +399,14 @@ class RequestPlatform:
                     raise EntityNotFoundError("column", str(subject_id))
                 self._table_factory(None, models).create(row.table_id).describe_column(subject_id)
             case "asset":
-                AssetRegistry(
-                    self._session,
-                    _PlatformAgents(
-                        self,
-                        AssetContextOptions(model=options.model, effort=options.effort),
-                    ),
-                ).load(subject_id).describe()
+                with describe_overlay(self._pack_overlay(subject_id)):
+                    AssetRegistry(
+                        self._session,
+                        _PlatformAgents(
+                            self,
+                            AssetContextOptions(model=options.model, effort=options.effort),
+                        ),
+                    ).load(subject_id).describe()
         logger.info("generate context done kind=%s subject_id=%s", options.kind, subject_id)
 
     def build_asset_context(
@@ -381,10 +416,56 @@ class RequestPlatform:
     ) -> AssetAnalysisContext:
         """Build one asset context with the agent for its kind and store the snapshot."""
         logger.info("build asset context start asset_id=%s", asset_id)
-        asset: Asset = AssetRegistry(self._session, _PlatformAgents(self, options)).load(asset_id)
-        built: AssetAnalysisContext = asset.build_context(options)
+        selected: AssetContextOptions = self._narrow_pack_flags(asset_id, options)
+        with describe_overlay(self._pack_overlay(asset_id)):
+            asset: Asset = AssetRegistry(
+                self._session,
+                _PlatformAgents(self, selected),
+            ).load(asset_id)
+            built: AssetAnalysisContext = asset.build_context(selected)
         logger.info("build asset context done asset_id=%s kind=%s", asset_id, built.kind.value)
         return built
+
+    def _pack_service(self) -> AgentPackService | None:
+        if self._definitions is None:
+            return None
+        return AgentPackService(
+            self._session,
+            self._definitions,
+            self._settings.asset_definitions,
+            _job_access(),
+        )
+
+    def _pack_overlay(self, asset_id: UUID) -> DescribeOverlay | None:
+        service: AgentPackService | None = self._pack_service()
+        if service is None or self._definitions is None:
+            return None
+        pack = service.load(asset_id)
+        rendered: str = render_skills(self._definitions, pack)
+        instructions: str | None = describe_instructions(
+            pack.agents,
+            compose_rules(pack.rules),
+            rendered,
+        )
+        task: str | None = active_task(pack.prompts)
+        if instructions is None and task is None:
+            return None
+        return DescribeOverlay(instructions, task)
+
+    def _narrow_pack_flags(
+        self,
+        asset_id: UUID,
+        options: AssetContextOptions,
+    ) -> AssetContextOptions:
+        service: AgentPackService | None = self._pack_service()
+        if service is None:
+            return options
+        row: AssetRow | None = self._session.get(AssetRow, asset_id)
+        if row is None:
+            return options
+        pack = service.load(asset_id)
+        allowed: set[str] | None = allowed_tools(pack.skills, options.flags, AssetKind(row.kind))
+        return options.model_copy(update={"flags": narrow_flags(options.flags, allowed)})
 
     def read_asset_context(self, asset_id: UUID) -> AssetAnalysisContext:
         """Return the last context saved for this asset."""

@@ -33,6 +33,7 @@ from intelegent_data_catalog.knowledge.models import (
     _context_text,
 )
 from intelegent_data_catalog.llm.agent import TableModelAgent
+from intelegent_data_catalog.llm.overlay import current_task
 from intelegent_data_catalog.llm.run import ModelCall
 from intelegent_data_catalog.llm.structured import structured_output
 from intelegent_data_catalog.llm.tools.table import (
@@ -143,6 +144,7 @@ class _TablePrompt(BaseModel):
     subgraph: list[_PromptLink]
     upstream_tables: list[str]
     downstream_tables: list[str]
+    task: str | None = None
 
 
 class _PromptNamedColumn(BaseModel):
@@ -203,6 +205,7 @@ class _ColumnsPrompt(BaseModel):
     table_context: str | None
     columns: list[_PromptNamedColumn]
     subgraph: list[_PromptLink]
+    task: str | None = None
 
 
 class _ColumnPrompt(BaseModel):
@@ -219,6 +222,7 @@ class _ColumnPrompt(BaseModel):
     relations: list[_PromptRelation]
     upstream_tables: list[str]
     downstream_tables: list[str]
+    task: str | None = None
 
 
 class _ColumnsDeps:
@@ -390,6 +394,7 @@ def _table_prompt(context: TableContextInput) -> _TablePrompt:
         subgraph=_links(context.subgraph, _names(context.table.columns)),
         upstream_tables=_lineage_names(context.saved, upstream=True),
         downstream_tables=_lineage_names(context.saved, upstream=False),
+        task=current_task(),
     )
 
 
@@ -404,6 +409,7 @@ def _columns_prompt(context: TableColumnsContextInput) -> _ColumnsPrompt:
             _touching(context.subgraph, {column.id for column in context.columns}),
             _names(context.table.columns),
         ),
+        task=current_task(),
     )
 
 
@@ -418,6 +424,7 @@ def _column_prompt(context: ColumnContextInput) -> _ColumnPrompt:
         relations=_relations(context.subgraph, context.column.id, _names(context.table.columns)),
         upstream_tables=_lineage_names(context.saved, upstream=True),
         downstream_tables=_lineage_names(context.saved, upstream=False),
+        task=current_task(),
     )
 
 
