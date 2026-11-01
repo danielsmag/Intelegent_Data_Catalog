@@ -1,8 +1,11 @@
 """Read and write the markdown pack stored beside one asset declaration."""
 
+import asyncio
+import re
 from datetime import datetime
 from uuid import UUID
 
+from pydantic_ai_harness.memory import MemoryFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,11 +21,14 @@ from intelegent_data_catalog.assets.agent_pack.document import (
     parse_markdown,
     render_markdown,
 )
+from intelegent_data_catalog.assets.agent_pack.memory_store import ObjectMemoryStore
 from intelegent_data_catalog.assets.agent_pack.models import (
     AgentCardRead,
     AgentDetail,
     AgentPackRead,
     AgentWrite,
+    MemoryFileDetail,
+    MemoryFileRead,
     PromptDetail,
     PromptRead,
     PromptWrite,
@@ -47,6 +53,8 @@ from intelegent_data_catalog.persistence.models import (
 from intelegent_data_catalog.storage.object_store import ObjectStore, StoredObject
 
 _MAX_FILES: int = 40
+_MEMORY_NAME: re.Pattern[str] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
+_MEMORY_CHARS: int = 24_000
 _TOOLS: dict[AssetKind, frozenset[str]] = {
     AssetKind.TABLE: frozenset({"metadata", "profile", "lineage", "graph"}),
     AssetKind.FILE: frozenset({"source", "outputs", "table_links"}),
@@ -265,6 +273,40 @@ class AgentPackService:
             return
         raise ValidationAppError("unknown agent file kind", field="kind")
 
+    def list_memory(self, asset_id: UUID) -> list[MemoryFileRead]:
+        """Return the notes the model stored for this asset."""
+        self._require_asset(asset_id)
+        prefix: str = f"agent-memory/{asset_id}/main/"
+        found: list[MemoryFileRead] = []
+        stored: StoredObject
+        for stored in self._store.list(prefix):
+            name: str = stored.key[len(prefix) :]
+            if not _visible_memory_name(name):
+                continue
+            found.append(MemoryFileRead(name=name, updated_at=stored.last_modified))
+        found.sort(key=_memory_order)
+        return found
+
+    def get_memory(self, asset_id: UUID, name: str) -> MemoryFileDetail:
+        """Return one notebook file for the preview."""
+        self._require_asset(asset_id)
+        cleaned: str = _memory_name(name)
+        path: str = f"{asset_id}/main/{cleaned}"
+        key: str = f"agent-memory/{path}"
+        store: ObjectMemoryStore = ObjectMemoryStore(self._store, "agent-memory/")
+        found: MemoryFile | None = asyncio.run(store.read(path, max_chars=_MEMORY_CHARS))
+        if found is None:
+            raise EntityNotFoundError("agent memory", cleaned)
+        updated_by: str | None = None
+        if found.metadata is not None:
+            updated_by = found.metadata.get("updated_by")
+        return MemoryFileDetail(
+            name=cleaned,
+            body=found.content,
+            updated_by=updated_by,
+            updated_at=_modified(self._store.list(key), key),
+        )
+
     def load(self, asset_id: UUID) -> LoadedPack:
         """Return the files a describe run should apply. Missing packs are empty."""
         loaded: LoadedPack = LoadedPack()
@@ -393,6 +435,22 @@ class AgentPackService:
         if key not in existing and len(existing) >= _MAX_FILES:
             raise ValidationAppError("this asset already has 40 agent files", field="slug")
         self._store.put(key, text.encode(), "text/markdown")
+
+
+def _memory_order(item: MemoryFileRead) -> tuple[bool, str]:
+    return (item.name != "MEMORY.md", item.name)
+
+
+def _visible_memory_name(name: str) -> bool:
+    if "/" in name or not name.endswith(".md") or ".." in name:
+        return False
+    return _MEMORY_NAME.fullmatch(name) is not None
+
+
+def _memory_name(name: str) -> str:
+    if not _visible_memory_name(name):
+        raise ValidationAppError("memory file name is invalid", field="name")
+    return name
 
 
 def _can_see(row: AssetRow, access: AccessContext) -> bool:

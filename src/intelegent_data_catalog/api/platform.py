@@ -448,9 +448,7 @@ class RequestPlatform:
             rendered,
         )
         task: str | None = active_task(pack.prompts)
-        if instructions is None and task is None:
-            return None
-        return DescribeOverlay(instructions, task)
+        return DescribeOverlay(instructions, task, asset_id, self._definitions)
 
     def _narrow_pack_flags(
         self,

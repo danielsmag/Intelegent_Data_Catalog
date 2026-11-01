@@ -16,6 +16,8 @@ from intelegent_data_catalog.assets.agent_pack.models import (
     AgentDetail,
     AgentPackRead,
     AgentWrite,
+    MemoryFileDetail,
+    MemoryFileRead,
     PromptDetail,
     PromptWrite,
     RuleDetail,
@@ -150,6 +152,22 @@ def update_asset(asset_id: UUID, body: AssetUpdate, service: AssetServiceDep) ->
 def delete_asset(asset_id: UUID, service: AssetServiceDep) -> None:
     """Delete an asset. The source object stays."""
     service.delete(asset_id)
+
+
+@router.get("/assets/{asset_id}/agent-memory", response_model=list[MemoryFileRead])
+def read_agent_memory(asset_id: UUID, service: AgentPackDep) -> list[MemoryFileRead]:
+    """List the asset notebook."""
+    return service.list_memory(asset_id)
+
+
+@router.get("/assets/{asset_id}/agent-memory/{name}", response_model=MemoryFileDetail)
+def read_agent_memory_file(
+    asset_id: UUID,
+    name: str,
+    service: AgentPackDep,
+) -> MemoryFileDetail:
+    """Return one notebook file for the preview."""
+    return service.get_memory(asset_id, name)
 
 
 @router.get("/assets/{asset_id}/agent-pack", response_model=AgentPackRead)

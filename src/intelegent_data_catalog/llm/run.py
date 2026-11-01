@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterable, Awaitable, Callable
+from typing import cast
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import (
@@ -31,10 +32,11 @@ from pydantic_ai.models import Model
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.settings import ModelSettings, ThinkingLevel
 from pydantic_ai.usage import UsageLimits
+from pydantic_ai_harness import Memory
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import LlmError, LlmUnavailableError
-from intelegent_data_catalog.llm.overlay import current_instructions, current_task
+from intelegent_data_catalog.llm.overlay import current_instructions, current_memory, current_task
 from intelegent_data_catalog.llm.trace import AgentTrace
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.llm")
@@ -95,7 +97,7 @@ class ModelCall[DepsT, OutputT]:
         task: str | None = current_task()
         if task is not None and '"task"' not in prompt:
             sent = f"{prompt}\n\nTask:\n{task}"
-        return asyncio.run(self._execute(sent, deps, _merge_instructions(instructions)))
+        return asyncio.run(self._execute(prompt=sent, deps=deps, instructions=_merge_instructions(instructions)))  # noqa: E501
 
     async def _execute(
         self,
@@ -159,21 +161,27 @@ class ModelCall[DepsT, OutputT]:
         ],
     ) -> AgentRunResult[OutputT]:
         """Run one agent call. The caller applies the total timeout."""
+        found: Memory[object] | None = current_memory()
+        memory: Memory[DepsT] | None = cast("Memory[DepsT] | None", found)
+        limit: int = self._max_requests if memory is None else self._max_requests + 2
+        capabilities: list[Memory[DepsT]] | None = None if memory is None else [memory]
         if instructions is None:
             return await self._agent.run(
                 prompt,
                 deps=deps,
                 model_settings=self._settings,
-                usage_limits=UsageLimits(request_limit=self._max_requests),
+                usage_limits=UsageLimits(request_limit=limit),
                 event_stream_handler=handle_events,
+                capabilities=capabilities,
             )
         return await self._agent.run(
             prompt,
             deps=deps,
             instructions=instructions,
             model_settings=self._settings,
-            usage_limits=UsageLimits(request_limit=self._max_requests),
+            usage_limits=UsageLimits(request_limit=limit),
             event_stream_handler=handle_events,
+            capabilities=capabilities,
         )
 
 

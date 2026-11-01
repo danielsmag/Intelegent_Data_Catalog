@@ -155,3 +155,19 @@ class AgentWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     body: str = Field(default="", max_length=24_000)
+
+
+class MemoryFileRead(BaseModel):
+    """One notebook file, without its markdown body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    updated_at: datetime | None = None
+
+
+class MemoryFileDetail(MemoryFileRead):
+    """One notebook file the agent wrote. The page only displays it."""
+
+    body: str
+    updated_by: str | None = None

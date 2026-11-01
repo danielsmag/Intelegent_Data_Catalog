@@ -53,6 +53,23 @@ export type AgentPack = {
   skills: SkillFile[]
 }
 
+export type MemoryFile = {
+  name: string
+  updated_at: string | null
+  body?: string
+  updated_by?: string | null
+}
+
+export function fetchMemory(assetId: string, signal?: AbortSignal): Promise<MemoryFile[]> {
+  return requestJson<MemoryFile[]>(`/api/v1/assets/${assetId}/agent-memory`, { signal })
+}
+
+export function fetchMemoryFile(assetId: string, name: string): Promise<MemoryFile> {
+  return requestJson<MemoryFile>(
+    `/api/v1/assets/${assetId}/agent-memory/${encodeURIComponent(name)}`,
+  )
+}
+
 export function fetchAgentPack(assetId: string, signal?: AbortSignal): Promise<AgentPack> {
   return requestJson<AgentPack>(`/api/v1/assets/${assetId}/agent-pack`, { signal })
 }
