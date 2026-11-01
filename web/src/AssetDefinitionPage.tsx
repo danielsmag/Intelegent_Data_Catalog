@@ -7,6 +7,7 @@ import {
   type AssetDefinitionItem,
   type AssetDefinitionText,
 } from "./assetDefinitionsApi"
+import { DefinitionDocument } from "./DefinitionDocument"
 import { openInFocusedGroup } from "./editorLayout"
 import { useEditorTitle } from "./editorSlots"
 
@@ -16,6 +17,7 @@ export function AssetDefinitionPage(): ReactElement {
   const [detail, setDetail] = useState<AssetDefinitionFileDetail | null>(null)
   const [source, setSource] = useState<string | null>(null)
   const [filename, setFilename] = useState<string>("")
+  const [storedKey, setStoredKey] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
   useEditorTitle(filename === "" ? null : filename)
   useEffect(() => {
@@ -26,6 +28,7 @@ export function AssetDefinitionPage(): ReactElement {
       }
       setDetail(null)
       setSource(null)
+      setStoredKey("")
       setError(err instanceof Error ? err.message : "Could not load definition file")
     }
     if (fileId !== undefined && fileId !== "") {
@@ -33,6 +36,7 @@ export function AssetDefinitionPage(): ReactElement {
         .then((row: AssetDefinitionFileDetail) => {
           setDetail(row)
           setSource(row.source)
+          setStoredKey(row.file.key)
           setFilename(fileName(row.file.key))
           setError(null)
         })
@@ -43,6 +47,7 @@ export function AssetDefinitionPage(): ReactElement {
         .then((row: AssetDefinitionText) => {
           setDetail(null)
           setSource(row.source)
+          setStoredKey(row.key)
           setFilename(fileName(row.key))
           setError(null)
         })
@@ -53,15 +58,20 @@ export function AssetDefinitionPage(): ReactElement {
     }
   }, [fileId, objectKey])
   const heading: string = filename === "" ? "Definition" : filename
+  const document: ReactElement | null = source === null ? null : (
+    <DefinitionDocument filename={filename} objectKey={storedKey} source={source} />
+  )
   return (
     <section className="page-grid">
-      <header className="page-intro">
-        <p className="eyebrow">Definition</p>
-        <h1>{heading}</h1>
-      </header>
+      {document !== null ? null : (
+        <header className="page-intro">
+          <p className="eyebrow">Definition</p>
+          <h1>{heading}</h1>
+        </header>
+      )}
       {error !== null ? <p className="error-text">{error}</p> : null}
       {source === null && error === null ? <p className="note">Loading script…</p> : null}
-      {source !== null ? <pre className="source-code">{source}</pre> : null}
+      {document !== null ? document : source !== null ? <pre className="source-code">{source}</pre> : null}
       {detail !== null && detail.items.length > 0 ? (
         <>
           <h2>Included</h2>

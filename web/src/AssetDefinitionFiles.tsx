@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactElement } from "react"
+import { useEffect, useRef, useState, type ReactElement, type RefObject } from "react"
 import { fetchAssetDefinitionObjects, type AssetDefinitionObject } from "./assetDefinitionsApi"
 import { watchPathDrag } from "./editorDrag"
-import { openInFocusedGroup } from "./editorLayout"
+import { openInFocusedGroup, pathnameOf, useFocusedPath, useTreeReveal } from "./editorLayout"
 import { Chevron, FileIcon, FolderIcon } from "./icons"
 
 type AssetFileNode = {
@@ -18,7 +18,12 @@ export function AssetDefinitionFiles(): ReactElement {
   const [nodes, setNodes] = useState<AssetFileNode[]>([])
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading")
   const [message, setMessage] = useState<string>("")
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  const [revealTick, setRevealTick] = useState<number>(0)
+  const treeRef: RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null)
+  const focused: string = useFocusedPath()
+  const revealRequest: number = useTreeReveal()
+  const currentPath: string | null = focusedFilePath(nodes, pathnameOf(focused))
 
   useEffect(() => {
     const controller: AbortController = new AbortController()
@@ -40,6 +45,33 @@ export function AssetDefinitionFiles(): ReactElement {
     }
   }, [])
 
+  useEffect(() => {
+    if (currentPath === null) {
+      return
+    }
+    const folders: readonly string[] = ancestorFolders(currentPath)
+    setOpen((current: ReadonlySet<string>) => {
+      let changed: boolean = false
+      const next: Set<string> = new Set(current)
+      for (const folder of folders) {
+        if (!next.has(folder)) {
+          next.add(folder)
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    setRevealTick((current: number) => current + 1)
+  }, [currentPath, revealRequest])
+
+  useEffect(() => {
+    if (revealTick === 0) {
+      return
+    }
+    const row: Element | null = treeRef.current?.querySelector('[aria-current="page"]') ?? null
+    row?.scrollIntoView({ block: "nearest" })
+  }, [revealTick])
+
   if (status === "loading") {
     return <p className="tree-status">Loading files…</p>
   }
@@ -50,15 +82,16 @@ export function AssetDefinitionFiles(): ReactElement {
     return <p className="tree-status">No files in the assets folder.</p>
   }
   return (
-    <div className="asset-files" role="tree" aria-label="Asset definition files">
+    <div ref={treeRef} className="asset-files" role="tree" aria-label="Asset definition files">
       {nodes.map((node: AssetFileNode) => (
         <FileNode
           key={node.path}
           node={node}
           depth={0}
-          collapsed={collapsed}
+          open={open}
+          currentPath={currentPath}
           onToggle={(path: string) => {
-            setCollapsed(togglePath(collapsed, path))
+            setOpen(togglePath(open, path))
           }}
         />
       ))}
@@ -69,18 +102,21 @@ export function AssetDefinitionFiles(): ReactElement {
 function FileNode(props: {
   node: AssetFileNode
   depth: number
-  collapsed: ReadonlySet<string>
+  open: ReadonlySet<string>
+  currentPath: string | null
   onToggle: (path: string) => void
 }): ReactElement {
-  const expanded: boolean = !props.collapsed.has(props.node.path)
+  const expanded: boolean = props.open.has(props.node.path)
   const pad: number = 6 + props.depth * 14
   if (props.node.kind === "file") {
     const pagePath: string = definitionPagePath(props.node)
-    const rowClass: string = "tree-row tree-row--draggable"
+    const current: boolean = props.currentPath === props.node.path
+    const rowClass: string = current ? "tree-row tree-row--draggable current-branch" : "tree-row tree-row--draggable"
     return (
       <div
         className={rowClass}
         role="treeitem"
+        aria-current={current ? "page" : undefined}
         style={{ paddingLeft: pad }}
         title={props.node.name}
         onDoubleClick={() => {
@@ -122,13 +158,59 @@ function FileNode(props: {
               key={child.path}
               node={child}
               depth={props.depth + 1}
-              collapsed={props.collapsed}
+              open={props.open}
+              currentPath={props.currentPath}
               onToggle={props.onToggle}
             />
           ))
         : null}
     </div>
   )
+}
+
+function focusedFilePath(nodes: readonly AssetFileNode[], pathname: string): string | null {
+  const parts: string[] = pathname.split("/").filter((part: string) => part.length > 0)
+  if (parts[0] !== "asset-definitions") {
+    return null
+  }
+  if (parts[1] === "text") {
+    const encoded: string | undefined = parts[2]
+    if (encoded === undefined) {
+      return null
+    }
+    const key: string = decodeURIComponent(encoded)
+    return findFile(nodes, (node: AssetFileNode) => node.objectKey === key)
+  }
+  const fileId: string | undefined = parts[1]
+  if (fileId === undefined || fileId === "") {
+    return null
+  }
+  return findFile(nodes, (node: AssetFileNode) => node.fileId === fileId)
+}
+
+function findFile(nodes: readonly AssetFileNode[], match: (node: AssetFileNode) => boolean): string | null {
+  for (const node of nodes) {
+    if (node.kind === "file" && match(node)) {
+      return node.path
+    }
+    const nested: string | null = findFile(node.children, match)
+    if (nested !== null) {
+      return nested
+    }
+  }
+  return null
+}
+
+function ancestorFolders(filePath: string): string[] {
+  const parts: string[] = filePath.split("/")
+  parts.pop()
+  const folders: string[] = []
+  let prefix: string = ""
+  for (const part of parts) {
+    prefix = prefix === "" ? part : `${prefix}/${part}`
+    folders.push(prefix)
+  }
+  return folders
 }
 
 function definitionPagePath(node: AssetFileNode): string {
@@ -138,8 +220,8 @@ function definitionPagePath(node: AssetFileNode): string {
   return `/asset-definitions/text/${encodeURIComponent(node.objectKey)}`
 }
 
-function togglePath(collapsed: ReadonlySet<string>, path: string): ReadonlySet<string> {
-  const next: Set<string> = new Set(collapsed)
+function togglePath(open: ReadonlySet<string>, path: string): ReadonlySet<string> {
+  const next: Set<string> = new Set(open)
   if (next.has(path)) {
     next.delete(path)
   } else {
