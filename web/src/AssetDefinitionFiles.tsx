@@ -14,16 +14,53 @@ type AssetFileNode = {
   children: AssetFileNode[]
 }
 
+const openStorageKey: string = "asset-files-open"
+
+function readOpenPaths(): ReadonlySet<string> {
+  try {
+    const raw: string | null = window.localStorage.getItem(openStorageKey)
+    if (raw === null) {
+      return new Set()
+    }
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return new Set()
+    }
+    const paths: string[] = []
+    for (const item of parsed) {
+      if (typeof item === "string") {
+        paths.push(item)
+      }
+    }
+    return new Set(paths)
+  } catch {
+    return new Set()
+  }
+}
+
+function writeOpenPaths(paths: ReadonlySet<string>): void {
+  try {
+    const stored: string[] = [...paths]
+    window.localStorage.setItem(openStorageKey, JSON.stringify(stored))
+  } catch {
+    // Private mode can block storage. In-memory state still updates.
+  }
+}
+
 export function AssetDefinitionFiles(): ReactElement {
   const [nodes, setNodes] = useState<AssetFileNode[]>([])
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading")
   const [message, setMessage] = useState<string>("")
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  const [open, setOpen] = useState<ReadonlySet<string>>(readOpenPaths)
   const [revealTick, setRevealTick] = useState<number>(0)
   const treeRef: RefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null)
   const focused: string = useFocusedPath()
   const revealRequest: number = useTreeReveal()
   const currentPath: string | null = focusedFilePath(nodes, pathnameOf(focused))
+
+  useEffect(() => {
+    writeOpenPaths(open)
+  }, [open])
 
   useEffect(() => {
     const controller: AbortController = new AbortController()
