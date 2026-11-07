@@ -44,8 +44,11 @@ class AssetAgentProvider(ABC):
     """Opens the agent for one asset kind. ``RequestPlatform`` is the production provider."""
 
     @abstractmethod
-    def for_table(self, table_id: UUID) -> AssetAgent:
-        """Agent for one catalog table."""
+    def for_table(self, table_id: UUID, asset_id: UUID, *, primary: bool) -> AssetAgent:
+        """Agent for one catalog table.
+
+        ``primary`` is false for an alias asset. Its describe must not write the shared table row.
+        """
 
     @abstractmethod
     def for_dag(self, dag_row_id: UUID, instance_id: UUID) -> AssetAgent:

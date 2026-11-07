@@ -59,7 +59,58 @@ the table you mean. The stored operator name is that class.
        ),
    )
 
-Both default to the table build flags:
+Schema
+------
+
+:class:`~intelegent_data_catalog.assets.dsl.SchemaOperator` names every
+catalog table in one physical catalog and namespace. The applier keeps one
+parent item with no asset, plus one child item per table. The child key is
+``<key>/<table name>``. Each child is its own ``TABLE`` asset. It does not
+take ``catalog_tables.asset_id``, so an explicit table declaration for the
+same table stays a separate asset with its own context, runs, and agent files.
+
+.. code-block:: python
+
+   from intelegent_data_catalog.assets.dsl import Asset, SchemaOperator
+
+   asset = Asset(
+       key="sales",
+       operator=SchemaOperator(
+           catalog="iceberg",
+           namespace="sales",
+           data_source="lakehouse",
+           include=["orders"],
+           exclude=["returns"],
+       ),
+       schedule="0 2 * * *",
+   )
+
+``include`` limits the names. ``None`` and an empty list mean the whole
+schema. ``exclude`` drops names after ``include``. A blank name or a repeated
+name is rejected. ``data_source`` is optional and works like the table
+operators. Zero matches, or an unknown data source, leave the parent
+``UNRESOLVED``. A later scan tries again. An applied schema is resolved again
+on every scan, so a new table becomes a child and a removed table drops its
+child.
+
+``describe`` defaults to true. ``skip_described`` defaults to true, so a child
+that already has context skips the model call. The run still records the
+describe step.
+
+``pack_max_files`` (default 40, from 1 to 200) caps agent files in each layer.
+``pack_single_active_prompt`` (default true) rejects a second active prompt in
+the same layer. Set it false and every enabled active prompt is sent, joined
+in name order.
+
+Agent files for a schema live beside ``asset_<key>.py``. Each child can add
+``asset_<table>/`` in that same directory. The ``asset_`` marker is required.
+A folder without it is ignored. The folder is not created until something is
+written there. Files merge by slug: the table file replaces the schema file.
+An overlay rule with ``enabled: false`` turns that schema rule off for that
+table only. An overlay ``AGENTS.md`` replaces the schema card. Writes from a
+child go to ``asset_<table>/`` unless the request names ``layer=schema``.
+
+``IcebergTableOperator`` and ``PostgresTableOperator`` default to the table build flags:
 
 .. list-table::
    :header-rows: 1

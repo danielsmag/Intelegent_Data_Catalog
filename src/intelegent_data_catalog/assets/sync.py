@@ -79,6 +79,53 @@ class AssetSync:
         self._session.flush()
         return asset
 
+    def ensure_table_alias(
+        self,
+        row: CatalogTableRow,
+        existing: AssetRow | None,
+        raw_slug: str,
+    ) -> AssetRow:
+        """Create or refresh a table asset that does not own the catalog row.
+
+        ``catalog_tables.asset_id`` stays on the primary asset.
+        """
+        now: datetime = utc_now()
+        known: set[str] = {item.value for item in AssetStatus}
+        status: str = row.status if row.status in known else AssetStatus.ACTIVE.value
+        properties: dict[str, object] = {
+            "source_key": row.source_key,
+            "table_format": row.table_format,
+            "table_id": str(row.id),
+        }
+        if row.asset_id is not None:
+            properties["alias_of"] = str(row.asset_id)
+        if existing is None:
+            created: AssetRow = self._insert(
+                kind=AssetKind.TABLE,
+                name=row.name,
+                raw_slug=raw_slug,
+                description=row.description,
+                context=row.context,
+                context_origin=row.context_origin,
+                workspace_id=SHARED_WORKSPACE_ID,
+                owner_user_id=None,
+                created_by=None,
+                properties=properties,
+                status=status,
+                last_synced_at=row.last_synced_at,
+                now=now,
+            )
+            self._session.flush()
+            return created
+        existing.name = _clip(row.name)
+        existing.description = row.description
+        existing.status = status
+        existing.properties = properties
+        existing.last_synced_at = row.last_synced_at
+        existing.updated_at = now
+        self._session.flush()
+        return existing
+
     def delete_table(self, row: CatalogTableRow) -> None:
         """Delete the asset linked to a catalog table."""
         self._delete_linked(row.asset_id)

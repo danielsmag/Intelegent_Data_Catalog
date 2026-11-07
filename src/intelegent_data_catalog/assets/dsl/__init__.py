@@ -9,6 +9,7 @@ from intelegent_data_catalog.assets.dsl.operators import (
     OperatorContext,
     PageOperator,
     PostgresTableOperator,
+    SchemaOperator,
     TableOperator,
     operator_from_ref,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "OperatorContext",
     "PageOperator",
     "PostgresTableOperator",
+    "SchemaOperator",
     "Scope",
     "Space",
     "TableOperator",

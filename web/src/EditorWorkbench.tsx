@@ -389,7 +389,7 @@ function TableAssetRedirect(): ReactElement {
 function AirflowListRedirect(): ReactElement {
   const [params] = useSearchParams()
   const next: URLSearchParams = new URLSearchParams()
-  next.set("kind", "AIRFLOW_INSTANCE")
+  next.set("service", "airflow")
   if (params.get("new") === "1") {
     next.set("new", "1")
   }
@@ -408,7 +408,7 @@ function AirflowInstanceRedirect(): ReactElement {
           return
         }
         if (instance.asset_id === null) {
-          setTarget("/assets?kind=AIRFLOW_INSTANCE")
+          setTarget("/assets?service=airflow")
           return
         }
         const dag: string = dagId === undefined ? "" : `?dag=${encodeURIComponent(dagId)}`
@@ -416,7 +416,7 @@ function AirflowInstanceRedirect(): ReactElement {
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          setTarget("/assets?kind=AIRFLOW_INSTANCE")
+          setTarget("/assets?service=airflow")
         }
       })
     return () => {

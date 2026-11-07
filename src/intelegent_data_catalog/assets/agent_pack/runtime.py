@@ -16,11 +16,11 @@ from intelegent_data_catalog.storage.object_store import ObjectStore, StoredObje
 def render_skills(store: ObjectStore, pack: LoadedPack) -> str:
     """Host-invoke enabled skills. Describe stays one structured model call."""
     names: list[str] = pack.enabled_skill_names()
-    if pack.prefix is None or len(names) == 0:
+    if len(pack.layers) == 0 or len(names) == 0:
         return ""
     with tempfile.TemporaryDirectory() as directory:
         root: Path = Path(directory)
-        _stage(store, pack.prefix, root, pack.skills)
+        _stage_layers(store, pack, root)
         skills: Skills[object] = Skills(
             ".agents/skills",
             include=names,
@@ -59,12 +59,33 @@ def rules_capability(text: str | None) -> Capability[object] | None:
     return Capability(id="asset-rules", instructions=text)
 
 
-def _stage(store: ObjectStore, prefix: str, root: Path, skills: list[LoadedSkill]) -> None:
+def _stage_layers(store: ObjectStore, pack: LoadedPack, root: Path) -> None:
+    """Copy each layer onto ``root``. Later layers overwrite earlier files."""
+    base: str = pack.layers[0]
+    skipped: list[str] = []
+    layer: str
+    for layer in pack.layers[1:]:
+        if layer.startswith(base):
+            skipped.append(layer[len(base) :])
+    _stage(store, base, root, pack.skills, tuple(skipped))
+    for layer in pack.layers[1:]:
+        _stage(store, layer, root, pack.skills, ())
+
+
+def _stage(
+    store: ObjectStore,
+    prefix: str,
+    root: Path,
+    skills: list[LoadedSkill],
+    skip: tuple[str, ...] = (),
+) -> None:
     by_name: dict[str, LoadedSkill] = {skill.name: skill for skill in skills}
     stored: StoredObject
     for stored in store.list(prefix):
         relative: str = stored.key[len(prefix) :]
         if relative == "" or relative.endswith("/") or ".." in relative.split("/"):
+            continue
+        if any(relative == item or relative.startswith(item) for item in skip):
             continue
         target: Path = root.joinpath(*relative.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)

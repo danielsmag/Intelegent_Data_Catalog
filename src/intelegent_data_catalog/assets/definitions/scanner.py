@@ -69,6 +69,7 @@ class AssetDefinitionScanner:
                 errors += 1
         removed: int = self._remove_absent(seen_keys, now)
         retried: int = self._applier.retry_unresolved()
+        refreshed: int = self._applier.refresh_schemas()
         dropped: int = self._applier.drop_undeclared_assets()
         retried_work: list[OperatorWorkload] = self._applier.take_workloads()
         self._session.commit()
@@ -81,12 +82,14 @@ class AssetDefinitionScanner:
             retried=retried,
         )
         self._logger.info(
-            "asset definition scan seen=%s parsed=%s removed=%s errors=%s retried=%s dropped=%s",
+            "asset definition scan seen=%s parsed=%s removed=%s errors=%s retried=%s "
+            "refreshed=%s dropped=%s",
             result.seen,
             result.parsed,
             result.removed,
             result.errors,
             result.retried,
+            refreshed,
             dropped,
         )
         return result

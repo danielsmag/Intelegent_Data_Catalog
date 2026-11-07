@@ -70,7 +70,7 @@ class LoadedPack:
         self.rules: list[LoadedRule] = []
         self.skills: list[LoadedSkill] = []
         self.prompts: list[LoadedPrompt] = []
-        self.prefix: str | None = None
+        self.layers: list[str] = []
 
     def enabled_skill_names(self) -> list[str]:
         """Skill directory names the harness should expose."""
@@ -119,7 +119,7 @@ def scoped_pack(pack: LoadedPack, flags: dict[str, bool]) -> LoadedPack:
     scoped: LoadedPack = LoadedPack()
     scoped.agents = pack.agents
     scoped.prompts = list(pack.prompts)
-    scoped.prefix = pack.prefix
+    scoped.layers = list(pack.layers)
     scoped.rules = list(pack.rules) if use_rules else []
     scoped.skills = list(pack.skills) if use_skills else []
     return scoped
@@ -139,12 +139,16 @@ def compose_rules(rules: list[LoadedRule]) -> str | None:
 
 
 def active_task(prompts: list[LoadedPrompt]) -> str | None:
-    """Return the one active prompt body."""
-    prompt: LoadedPrompt
-    for prompt in prompts:
-        if prompt.enabled and prompt.active and prompt.body.strip() != "":
-            return prompt.body.strip()
-    return None
+    """Return enabled active prompt bodies, joined in name order."""
+    chosen: list[LoadedPrompt] = [
+        prompt
+        for prompt in prompts
+        if prompt.enabled and prompt.active and prompt.body.strip() != ""
+    ]
+    chosen.sort(key=lambda prompt: prompt.name)
+    if len(chosen) == 0:
+        return None
+    return "\n\n".join(prompt.body.strip() for prompt in chosen)
 
 
 def allowed_tools(

@@ -36,8 +36,8 @@ Open ``docs/_build/html/index.html``. Compose serves the same build:
    docker compose up -d --build catalog-docs
 
 Open http://localhost:8000. ``CATALOG_DOCS_PORT`` changes the host port.
-The service does not start the rest of the stack. The image build reads
-``../lumen-sales`` so the declare-assets snippets resolve.
+The service does not start the rest of the stack. Declare-assets snippets
+live under ``docs/examples/lumen-sales``.
 
 Checks:
 

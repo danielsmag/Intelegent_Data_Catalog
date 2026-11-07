@@ -16,6 +16,29 @@ ToolId = Literal[
 ]
 
 
+class PackLayerRead(BaseModel):
+    """One directory that contributes agent files, base first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    prefix: str
+
+
+class PackLimitsRead(BaseModel):
+    """Caps stored on the operator. One asset uses the defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_files: int
+    single_active_prompt: bool
+
+
+def _default_limits() -> PackLimitsRead:
+    """Limits used when the asset has no schema operator."""
+    return PackLimitsRead(max_files=40, single_active_prompt=True)
+
+
 class AgentCardRead(BaseModel):
     """``AGENTS.md`` in the asset directory. Empty when the file is absent."""
 
@@ -23,6 +46,7 @@ class AgentCardRead(BaseModel):
 
     path: str = "AGENTS.md"
     present: bool
+    layer: str = "asset"
     updated_at: datetime | None = None
 
 
@@ -36,6 +60,7 @@ class PromptRead(BaseModel):
     description: str
     enabled: bool
     active: bool
+    layer: str = "asset"
     updated_at: datetime | None = None
 
 
@@ -49,6 +74,7 @@ class RuleRead(BaseModel):
     description: str
     enabled: bool
     order: int
+    layer: str = "asset"
     updated_at: datetime | None = None
 
 
@@ -62,6 +88,7 @@ class SkillRead(BaseModel):
     description: str
     enabled: bool
     tools: list[str]
+    layer: str = "asset"
     updated_at: datetime | None = None
 
 
@@ -82,6 +109,8 @@ class AgentPackRead(BaseModel):
     prefix: str | None
     writable: bool
     message: str | None = None
+    layers: list[PackLayerRead] = Field(default_factory=list)
+    limits: PackLimitsRead = Field(default_factory=_default_limits)
     agent: AgentCardRead
     prompts: list[PromptRead]
     rules: list[RuleRead]

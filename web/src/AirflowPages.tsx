@@ -309,7 +309,7 @@ export function AirflowInstanceView(props: {
           <div className="catalog-hero-top">
             <div className="catalog-hero-copy">
               <p className="crumb">
-                <Link to="/assets?kind=AIRFLOW_INSTANCE">Assets</Link>
+                <Link to="/assets?service=airflow">Assets</Link>
               </p>
               <h1>{instance?.name ?? "Instance"}</h1>
             </div>
@@ -852,7 +852,7 @@ export function AirflowDagView(props: {
           <div className="catalog-hero-copy">
             <p className="crumb">
               {props.onBack === null ? (
-                <Link to="/assets?kind=AIRFLOW_DAG">Assets</Link>
+                <Link to="/assets?service=airflow">Assets</Link>
               ) : (
                 <button type="button" className="button secondary" onClick={props.onBack}>
                   Instance

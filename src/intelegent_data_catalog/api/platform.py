@@ -675,7 +675,13 @@ class _PlatformAgents(AssetAgentProvider):
         self._platform: RequestPlatform = platform
         self._options: AssetContextOptions = options
 
-    def for_table(self, table_id: UUID) -> TableAssetAgentAdapter:
+    def for_table(
+        self,
+        table_id: UUID,
+        asset_id: UUID,
+        *,
+        primary: bool,
+    ) -> TableAssetAgentAdapter:
         models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
         column_graph: ColumnSubgraphBuilder | None = None
         if self._platform._neo4j is not None and models.column is not None:
@@ -685,7 +691,13 @@ class _PlatformAgents(AssetAgentProvider):
                 writer=Neo4jColumnSubgraph(self._platform._neo4j),
             )
         agent: TableAgent = self._platform._table_factory(column_graph, models).create(table_id)
-        return TableAssetAgentAdapter(table_id, agent, self._platform._session)
+        return TableAssetAgentAdapter(
+            table_id,
+            asset_id,
+            agent,
+            self._platform._session,
+            save_table=primary,
+        )
 
     def for_instance(self, instance_id: UUID) -> InstanceAssetAgentAdapter:
         models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
