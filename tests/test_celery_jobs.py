@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.agents.sync import AgentSync
 from intelegent_data_catalog.api.container import AppContainer
-from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.models import KnowledgeBuildJobRead
@@ -20,10 +20,10 @@ from intelegent_data_catalog.jobs.publisher import SyncJobPublisher
 from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
-from intelegent_data_catalog.persistence.enums import AssetStatus, SyncRunStatus
+from intelegent_data_catalog.persistence.enums import AgentStatus, SyncRunStatus
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import (
-    AssetRow,
+    AgentRow,
     CatalogJobRow,
     CatalogTableRow,
     EntityConfigurationRow,
@@ -372,8 +372,8 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
         database.dispose()
 
 
-def test_due_table_configuration_queues_the_linked_asset(tmp_path: Path) -> None:
-    """A table schedule whose table now has an asset queues that asset."""
+def test_due_table_configuration_queues_the_linked_agent(tmp_path: Path) -> None:
+    """A table schedule whose table now has an agent queues that agent."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
@@ -394,23 +394,23 @@ def test_due_table_configuration_queues_the_linked_asset(tmp_path: Path) -> None
             },
         )
         assert saved.status_code == 200
-        asset_id: UUID = _link_table_asset(database, UUID(table_id))
+        agent_id: UUID = _link_table_agent(database, UUID(table_id))
         _age_catalog_table_configuration(database, UUID(table_id))
         publisher: _RecordingBuilds = _RecordingBuilds()
         jobs: CatalogJobs = CatalogJobs(database, publisher)
         claimed: int = _claim_context(database, jobs)
         assert claimed == 1
         stored: CatalogJobRow = _job(database, publisher.job_ids[0])
-        assert stored.kind == "asset"
-        assert stored.subject_id == asset_id
+        assert stored.kind == "agent"
+        assert stored.subject_id == agent_id
         waiting: int = _claim_context(database, jobs)
         assert waiting == 0
     finally:
         database.dispose()
 
 
-def test_disabled_asset_skips_context_rebuild(tmp_path: Path) -> None:
-    """A deprecated asset does not get a scheduled context rebuild."""
+def test_disabled_agent_skips_context_rebuild(tmp_path: Path) -> None:
+    """A deprecated agent does not get a scheduled context rebuild."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
@@ -431,8 +431,8 @@ def test_disabled_asset_skips_context_rebuild(tmp_path: Path) -> None:
             },
         )
         assert saved.status_code == 200
-        asset_id: UUID = _link_table_asset(database, UUID(table_id))
-        _set_asset_status(database, asset_id, AssetStatus.DEPRECATED.value)
+        agent_id: UUID = _link_table_agent(database, UUID(table_id))
+        _set_agent_status(database, agent_id, AgentStatus.DEPRECATED.value)
         _age_catalog_table_configuration(database, UUID(table_id))
         publisher: _RecordingBuilds = _RecordingBuilds()
         jobs: CatalogJobs = CatalogJobs(database, publisher)
@@ -443,25 +443,25 @@ def test_disabled_asset_skips_context_rebuild(tmp_path: Path) -> None:
         database.dispose()
 
 
-def _set_asset_status(database: CatalogDatabase, asset_id: UUID, status: str) -> None:
+def _set_agent_status(database: CatalogDatabase, agent_id: UUID, status: str) -> None:
     session: Session = database.session()
     try:
-        asset: AssetRow | None = session.get(AssetRow, asset_id)
-        assert asset is not None
-        asset.status = status
+        agent: AgentRow | None = session.get(AgentRow, agent_id)
+        assert agent is not None
+        agent.status = status
         session.commit()
     finally:
         session.close()
 
 
-def _link_table_asset(database: CatalogDatabase, table_id: UUID) -> UUID:
+def _link_table_agent(database: CatalogDatabase, table_id: UUID) -> UUID:
     session: Session = database.session()
     try:
         table: CatalogTableRow | None = session.get(CatalogTableRow, table_id)
         assert table is not None
-        asset_id: UUID = AssetSync(session).ensure_table(table).id
+        agent_id: UUID = AgentSync(session).ensure_table(table).id
         session.commit()
-        return asset_id
+        return agent_id
     finally:
         session.close()
 
@@ -494,8 +494,8 @@ def _age_table_configuration(database: CatalogDatabase, table_id: UUID) -> None:
     session: Session = database.session()
     try:
         table: CatalogTableRow | None = session.get(CatalogTableRow, table_id)
-        asset_id: UUID | None = None if table is None else table.asset_id
-        if asset_id is None:
+        agent_id: UUID | None = None if table is None else table.agent_id
+        if agent_id is None:
             row: EntityConfigurationRow | None = session.scalar(
                 select(EntityConfigurationRow).where(
                     EntityConfigurationRow.catalog_table_id == table_id,
@@ -503,7 +503,7 @@ def _age_table_configuration(database: CatalogDatabase, table_id: UUID) -> None:
             )
         else:
             row = session.scalar(
-                select(EntityConfigurationRow).where(EntityConfigurationRow.asset_id == asset_id),
+                select(EntityConfigurationRow).where(EntityConfigurationRow.agent_id == agent_id),
             )
         assert row is not None
         row.created_at = utc_now() - timedelta(hours=1)

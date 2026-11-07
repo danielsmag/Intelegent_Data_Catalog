@@ -1,4 +1,4 @@
-"""Saved refresh interval and build options for a table or asset."""
+"""Saved refresh interval and build options for a table or agent."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.assets.strategies.flags import (
+from intelegent_data_catalog.agents.strategies.flags import (
     DAG_FLAGS,
     FILE_FLAGS,
     INSTANCE_FLAGS,
@@ -23,14 +23,14 @@ from intelegent_data_catalog.core.settings import (
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
-    AssetKind,
-    AssetRefreshMode,
+    AgentKind,
+    AgentRefreshMode,
     CatalogJobKind,
     CatalogJobStatus,
     RefreshSubjectKind,
 )
 from intelegent_data_catalog.persistence.models import (
-    AssetRow,
+    AgentRow,
     CatalogJobRow,
     CatalogTableRow,
     EntityConfigurationRow,
@@ -40,12 +40,13 @@ _DEFAULT_INTERVAL_SECONDS: int = 600
 _DEFAULTS: dict[RefreshSubjectKind, dict[str, bool]] = {
     RefreshSubjectKind.TABLE: TABLE_FLAGS,
 }
-_ASSET_DEFAULTS: dict[AssetKind, dict[str, bool]] = {
-    AssetKind.TABLE: TABLE_FLAGS,
-    AssetKind.AIRFLOW_DAG: DAG_FLAGS,
-    AssetKind.AIRFLOW_INSTANCE: INSTANCE_FLAGS,
-    AssetKind.NOTEBOOK: FILE_FLAGS,
-    AssetKind.FILE: FILE_FLAGS,
+_ASSET_DEFAULTS: dict[AgentKind, dict[str, bool]] = {
+    AgentKind.TABLE: TABLE_FLAGS,
+    AgentKind.AIRFLOW_DAG: DAG_FLAGS,
+    AgentKind.AIRFLOW_INSTANCE: INSTANCE_FLAGS,
+    AgentKind.NOTEBOOK: FILE_FLAGS,
+    AgentKind.FILE: FILE_FLAGS,
+    AgentKind.SCHEMA: TABLE_FLAGS,
 }
 
 
@@ -58,7 +59,7 @@ class EntityConfigurationWrite(BaseModel):
     enabled: bool
     model: ModelId = "gpt-4.1"
     effort: ReasoningEffort = "low"
-    refresh_mode: AssetRefreshMode = AssetRefreshMode.INTERVAL
+    refresh_mode: AgentRefreshMode = AgentRefreshMode.INTERVAL
     options: dict[str, bool]
 
 
@@ -73,7 +74,7 @@ class EntityConfigurationRead(BaseModel):
     enabled: bool
     model: ModelId
     effort: ReasoningEffort
-    refresh_mode: AssetRefreshMode
+    refresh_mode: AgentRefreshMode
     options: dict[str, bool]
     next_run_at: datetime | None
 
@@ -103,7 +104,7 @@ class EntityConfigurationService:
             subject_id,
             row,
             next_rebuild_at(self._session, row),
-            self._asset_kind(stored_kind, stored_id),
+            self._agent_kind(stored_kind, stored_id),
         )
 
     def put(
@@ -118,7 +119,7 @@ class EntityConfigurationService:
         options: dict[str, bool] = _checked_options(
             stored_kind,
             body.options,
-            self._asset_kind(stored_kind, stored_id),
+            self._agent_kind(stored_kind, stored_id),
         )
         row: EntityConfigurationRow | None = self._find(stored_kind, stored_id)
         now: datetime = utc_now()
@@ -141,7 +142,7 @@ class EntityConfigurationService:
                 subject_id,
                 created,
                 next_rebuild_at(self._session, created),
-                self._asset_kind(stored_kind, stored_id),
+                self._agent_kind(stored_kind, stored_id),
             )
         row.interval_seconds = body.interval_seconds
         row.enabled = body.enabled
@@ -156,7 +157,7 @@ class EntityConfigurationService:
             subject_id,
             row,
             next_rebuild_at(self._session, row),
-            self._asset_kind(stored_kind, stored_id),
+            self._agent_kind(stored_kind, stored_id),
         )
 
     def _require(self, kind: RefreshSubjectKind, subject_id: UUID) -> None:
@@ -164,8 +165,8 @@ class EntityConfigurationService:
             if self._session.get(CatalogTableRow, subject_id) is None:
                 raise EntityNotFoundError("catalog table", str(subject_id))
             return
-        if self._session.get(AssetRow, subject_id) is None:
-            raise EntityNotFoundError("asset", str(subject_id))
+        if self._session.get(AgentRow, subject_id) is None:
+            raise EntityNotFoundError("agent", str(subject_id))
 
     def _stored_subject(
         self,
@@ -175,22 +176,22 @@ class EntityConfigurationService:
         if kind is not RefreshSubjectKind.TABLE:
             return kind, subject_id
         table: CatalogTableRow | None = self._session.get(CatalogTableRow, subject_id)
-        if table is None or table.asset_id is None:
+        if table is None or table.agent_id is None:
             return kind, subject_id
-        return RefreshSubjectKind.ASSET, table.asset_id
+        return RefreshSubjectKind.AGENT, table.agent_id
 
-    def _asset_kind(self, kind: RefreshSubjectKind, subject_id: UUID) -> str | None:
-        if kind is not RefreshSubjectKind.ASSET:
+    def _agent_kind(self, kind: RefreshSubjectKind, subject_id: UUID) -> str | None:
+        if kind is not RefreshSubjectKind.AGENT:
             return None
-        asset: AssetRow | None = self._session.get(AssetRow, subject_id)
-        if asset is None:
+        agent: AgentRow | None = self._session.get(AgentRow, subject_id)
+        if agent is None:
             return None
-        return asset.kind
+        return agent.kind
 
     def _find(self, kind: RefreshSubjectKind, subject_id: UUID) -> EntityConfigurationRow | None:
-        if kind is RefreshSubjectKind.ASSET:
+        if kind is RefreshSubjectKind.AGENT:
             statement = select(EntityConfigurationRow).where(
-                EntityConfigurationRow.asset_id == subject_id,
+                EntityConfigurationRow.agent_id == subject_id,
             )
         else:
             statement = select(EntityConfigurationRow).where(
@@ -227,7 +228,7 @@ class EntityConfigurationService:
             True,
             self._default_model,
             self._default_effort,
-            AssetRefreshMode.INTERVAL,
+            AgentRefreshMode.INTERVAL,
             self._default_options(kind, subject_id),
             now,
         )
@@ -243,11 +244,11 @@ class EntityConfigurationService:
         return created
 
     def _default_options(self, kind: RefreshSubjectKind, subject_id: UUID) -> dict[str, bool]:
-        if kind is RefreshSubjectKind.ASSET:
-            asset_kind: str | None = self._asset_kind(kind, subject_id)
-            if asset_kind is None:
+        if kind is RefreshSubjectKind.AGENT:
+            agent_kind: str | None = self._agent_kind(kind, subject_id)
+            if agent_kind is None:
                 return dict(TABLE_FLAGS)
-            return dict(_ASSET_DEFAULTS[AssetKind(asset_kind)])
+            return dict(_ASSET_DEFAULTS[AgentKind(agent_kind)])
         return dict(_DEFAULTS[kind])
 
     def _new_row(
@@ -258,14 +259,14 @@ class EntityConfigurationService:
         enabled: bool,
         model: ModelId,
         effort: ReasoningEffort,
-        refresh_mode: AssetRefreshMode,
+        refresh_mode: AgentRefreshMode,
         options: dict[str, bool],
         now: datetime,
     ) -> EntityConfigurationRow:
         return EntityConfigurationRow(
             id=uuid4(),
             catalog_table_id=subject_id if kind is RefreshSubjectKind.TABLE else None,
-            asset_id=subject_id if kind is RefreshSubjectKind.ASSET else None,
+            agent_id=subject_id if kind is RefreshSubjectKind.AGENT else None,
             refresh_mode=refresh_mode.value,
             interval_seconds=interval_seconds,
             enabled=enabled,
@@ -280,7 +281,7 @@ class EntityConfigurationService:
 def option_values(
     kind: RefreshSubjectKind,
     raw: dict[str, object],
-    asset_kind: str | None = None,
+    agent_kind: str | None = None,
 ) -> dict[str, bool]:
     """Merge stored flags with the defaults for this entity kind."""
     stored: dict[str, bool] = {}
@@ -289,12 +290,12 @@ def option_values(
     for key, value in raw.items():
         if isinstance(value, bool):
             stored[key] = value
-    return _checked_options(kind, stored, asset_kind)
+    return _checked_options(kind, stored, agent_kind)
 
 
 def next_rebuild_at(session: Session, row: EntityConfigurationRow) -> datetime | None:
     """Return when the next context rebuild is due. A disabled row has no deadline."""
-    if not row.enabled or row.refresh_mode != AssetRefreshMode.INTERVAL.value:
+    if not row.enabled or row.refresh_mode != AgentRefreshMode.INTERVAL.value:
         return None
     latest: CatalogJobRow | None = _latest_context_job(session, row)
     anchor: datetime = row.created_at if latest is None else latest.created_at
@@ -332,13 +333,13 @@ def _context_target(
     session: Session,
     row: EntityConfigurationRow,
 ) -> tuple[CatalogJobKind | None, UUID | None]:
-    """Job kind and subject this configuration rebuilds. A linked table uses its asset."""
-    if row.asset_id is not None:
-        return CatalogJobKind.ASSET, row.asset_id
+    """Job kind and subject this configuration rebuilds. A linked table uses its agent."""
+    if row.agent_id is not None:
+        return CatalogJobKind.AGENT, row.agent_id
     if row.catalog_table_id is not None:
         table: CatalogTableRow | None = session.get(CatalogTableRow, row.catalog_table_id)
-        if table is not None and table.asset_id is not None:
-            return CatalogJobKind.ASSET, table.asset_id
+        if table is not None and table.agent_id is not None:
+            return CatalogJobKind.AGENT, table.agent_id
         return CatalogJobKind.KNOWLEDGE, row.catalog_table_id
     return None, None
 
@@ -352,13 +353,13 @@ def _aware(value: datetime) -> datetime:
 def _checked_options(
     kind: RefreshSubjectKind,
     options: dict[str, bool],
-    asset_kind: str | None = None,
+    agent_kind: str | None = None,
 ) -> dict[str, bool]:
-    if kind is RefreshSubjectKind.ASSET:
-        if asset_kind is None:
+    if kind is RefreshSubjectKind.AGENT:
+        if agent_kind is None:
             allowed: dict[str, bool] = dict(TABLE_FLAGS)
         else:
-            allowed = dict(_ASSET_DEFAULTS[AssetKind(asset_kind)])
+            allowed = dict(_ASSET_DEFAULTS[AgentKind(agent_kind)])
     else:
         allowed = _DEFAULTS[kind]
     unknown: list[str] = sorted(set(options) - set(allowed))
@@ -378,10 +379,10 @@ def _read(
     subject_id: UUID,
     row: EntityConfigurationRow,
     next_run_at: datetime | None,
-    asset_kind: str | None = None,
+    agent_kind: str | None = None,
 ) -> EntityConfigurationRead:
     option_kind: RefreshSubjectKind = (
-        RefreshSubjectKind.ASSET if row.asset_id is not None else kind
+        RefreshSubjectKind.AGENT if row.agent_id is not None else kind
     )
     return EntityConfigurationRead(
         subject_kind=kind,
@@ -390,7 +391,7 @@ def _read(
         enabled=row.enabled,
         model=parse_model_id(row.model),
         effort=parse_effort(row.effort),
-        refresh_mode=AssetRefreshMode(row.refresh_mode),
-        options=option_values(option_kind, row.options, asset_kind),
+        refresh_mode=AgentRefreshMode(row.refresh_mode),
+        options=option_values(option_kind, row.options, agent_kind),
         next_run_at=next_run_at,
     )

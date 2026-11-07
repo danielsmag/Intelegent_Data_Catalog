@@ -10,13 +10,13 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
-from intelegent_data_catalog.persistence.enums import AirflowMappingOrigin, AssetStatus
+from intelegent_data_catalog.persistence.enums import AgentStatus, AirflowMappingOrigin
 from intelegent_data_catalog.persistence.models import (
+    AgentRow,
     AirflowDagRow,
     AirflowDagTableRow,
     AirflowInstanceRow,
     AirflowSyncRunRow,
-    AssetRow,
     CatalogTableRow,
 )
 
@@ -212,11 +212,11 @@ class AirflowRepository:
         for row in self.list_dags(instance_id):
             if row.dag_id in keep:
                 continue
-            if row.asset_id is not None:
-                asset: AssetRow | None = self._session.get(AssetRow, row.asset_id)
-                if asset is not None:
-                    asset.status = AssetStatus.MISSING.value
-                    asset.updated_at = utc_now()
+            if row.agent_id is not None:
+                agent: AgentRow | None = self._session.get(AgentRow, row.agent_id)
+                if agent is not None:
+                    agent.status = AgentStatus.MISSING.value
+                    agent.updated_at = utc_now()
             self._session.delete(row)
             removed += 1
         if removed > 0:
@@ -409,10 +409,10 @@ class AirflowRepository:
 
 
 
-    def dag_by_asset(self, asset_id: uuid.UUID) -> AirflowDagRow | None:
-        """Return the DAG snapshot linked to an asset."""
+    def dag_by_agent(self, agent_id: uuid.UUID) -> AirflowDagRow | None:
+        """Return the DAG snapshot linked to an agent."""
         statement: Select[tuple[AirflowDagRow]] = select(AirflowDagRow).where(
-            AirflowDagRow.asset_id == asset_id,
+            AirflowDagRow.agent_id == agent_id,
         )
         return self._session.scalar(statement)
 

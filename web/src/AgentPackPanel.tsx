@@ -18,7 +18,7 @@ import {
   type SkillReference,
 } from "./agentPackApi"
 
-export function AgentPackPanel(props: { assetId: string; assetKind: string }): ReactElement {
+export function AgentPackPanel(props: { agentId: string; agentKind: string }): ReactElement {
   const [pack, setPack] = useState<AgentPack | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -42,7 +42,7 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
     setPreview(null)
     setPreviewError(null)
     setFlagError(null)
-    void fetchAgentPack(props.assetId, controller.signal)
+    void fetchAgentPack(props.agentId, controller.signal)
       .then((loaded: AgentPack) => {
         if (controller.signal.aborted) {
           return
@@ -60,13 +60,13 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
     return () => {
       controller.abort()
     }
-  }, [props.assetId])
+  }, [props.agentId])
 
   useEffect(() => {
     const controller: AbortController = new AbortController()
     setMemoryFiles(null)
     setMemoryError(null)
-    void fetchMemory(props.assetId, controller.signal)
+    void fetchMemory(props.agentId, controller.signal)
       .then((loaded: MemoryFile[]) => {
         if (!controller.signal.aborted) {
           setMemoryFiles(loaded)
@@ -80,7 +80,7 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
     return () => {
       controller.abort()
     }
-  }, [props.assetId])
+  }, [props.agentId])
 
   useEffect(() => {
     if (section !== "memory" || memoryFiles === null || pack === null) {
@@ -113,7 +113,7 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
     let cancelled: boolean = false
     setPreview(null)
     setPreviewError(null)
-    void loadPreview(props.assetId, section, fileKey)
+    void loadPreview(props.agentId, section, fileKey)
       .then((loaded: Preview) => {
         if (!cancelled) {
           setPreview(loaded)
@@ -127,7 +127,7 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
     return () => {
       cancelled = true
     }
-  }, [props.assetId, section, fileKey])
+  }, [props.agentId, section, fileKey])
 
   const sections: readonly Tone[] = pack !== null && pack.writable ? SECTIONS : READONLY_SECTIONS
   const entries: readonly Entry[] = pack === null ? [] : sectionEntries(section, pack, memoryFiles)
@@ -166,8 +166,8 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
     setFlagError(null)
     const write: Promise<RuleFile | SkillFile> =
       tone === "rules"
-        ? fetchRule(props.assetId, slug).then((full: RuleFile) =>
-            saveRule(props.assetId, slug, {
+        ? fetchRule(props.agentId, slug).then((full: RuleFile) =>
+            saveRule(props.agentId, slug, {
               name: full.name,
               description: full.description,
               enabled,
@@ -175,8 +175,8 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
               body: full.body ?? "",
             }),
           )
-        : fetchSkill(props.assetId, slug).then((full: SkillFile) =>
-            saveSkill(props.assetId, slug, {
+        : fetchSkill(props.agentId, slug).then((full: SkillFile) =>
+            saveSkill(props.agentId, slug, {
               name: full.name,
               description: full.description,
               enabled,
@@ -215,7 +215,7 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
   }
 
   return (
-    <div className="asset-sheet">
+    <div className="agent-sheet">
       {error !== null ? <p className="error-text">{error}</p> : null}
       {pack === null && error === null ? <p className="catalog-lead">Loading agent files…</p> : null}
       {pack !== null ? (
@@ -379,7 +379,7 @@ type Preview = {
 function sectionLead(section: Tone, pack: AgentPack | null): string {
   if (section === "agent") {
     if (pack !== null && !pack.writable) {
-      return pack.message ?? "This asset has no definition folder yet."
+      return pack.message ?? "This agent has no definition folder yet."
     }
     return "AGENTS.md is loaded on every run."
   }
@@ -392,7 +392,7 @@ function sectionLead(section: Tone, pack: AgentPack | null): string {
   if (section === "skills") {
     return "Enabled skills name the tools a run may use."
   }
-  return "Written by the agent. Loaded on the next asset run."
+  return "Written by the agent. Loaded on the next agent run."
 }
 
 function emptyCopy(section: Tone, pack: AgentPack): string | null {
@@ -496,9 +496,9 @@ function entryPath(section: Tone, entry: Entry): string {
   return entry.key
 }
 
-function loadPreview(assetId: string, section: Tone, fileKey: string): Promise<Preview> {
+function loadPreview(agentId: string, section: Tone, fileKey: string): Promise<Preview> {
   if (section === "agent") {
-    return fetchAgentCard(assetId).then((card) => ({
+    return fetchAgentCard(agentId).then((card) => ({
       title: "AGENTS.md",
       tone: "agent",
       body: card.body ?? "",
@@ -506,7 +506,7 @@ function loadPreview(assetId: string, section: Tone, fileKey: string): Promise<P
     }))
   }
   if (section === "prompts") {
-    return fetchPrompt(assetId, fileKey).then((file: PromptFile) => ({
+    return fetchPrompt(agentId, fileKey).then((file: PromptFile) => ({
       title: file.name,
       tone: "prompts",
       body: file.body ?? "",
@@ -514,7 +514,7 @@ function loadPreview(assetId: string, section: Tone, fileKey: string): Promise<P
     }))
   }
   if (section === "rules") {
-    return fetchRule(assetId, fileKey).then((file: RuleFile) => ({
+    return fetchRule(agentId, fileKey).then((file: RuleFile) => ({
       title: file.name,
       tone: "rules",
       body: file.body ?? "",
@@ -522,14 +522,14 @@ function loadPreview(assetId: string, section: Tone, fileKey: string): Promise<P
     }))
   }
   if (section === "skills") {
-    return fetchSkill(assetId, fileKey).then((file: SkillFile) => ({
+    return fetchSkill(agentId, fileKey).then((file: SkillFile) => ({
       title: file.name,
       tone: "skills",
       body: file.body ?? "",
       references: file.references ?? [],
     }))
   }
-  return fetchMemoryFile(assetId, fileKey).then((loaded: MemoryFile) => ({
+  return fetchMemoryFile(agentId, fileKey).then((loaded: MemoryFile) => ({
     title: loaded.name,
     tone: "memory",
     body: loaded.body ?? "",

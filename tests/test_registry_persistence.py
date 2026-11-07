@@ -23,10 +23,10 @@ from intelegent_data_catalog.persistence.enums import (
     TableStatus,
 )
 from intelegent_data_catalog.persistence.migrate import upgrade_database
-from intelegent_data_catalog.persistence.models import AssetEngineBindingRow
+from intelegent_data_catalog.persistence.models import AgentEngineBindingRow
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
-    AssetBindingCreate,
+    AgentBindingCreate,
     CatalogTableCreate,
     CatalogTableRead,
     CatalogTableUpdate,
@@ -51,7 +51,7 @@ _CORE_TABLES: frozenset[str] = frozenset(
         "relationship_column_mappings",
         "engine_connections",
         "source_engine_bindings",
-        "asset_engine_bindings",
+        "agent_engine_bindings",
         "metadata_sync_runs",
     }
 )
@@ -325,18 +325,18 @@ def test_selected_query_binding_is_unique_and_role_matches_engine(tmp_path: Path
                 binding_key="polaris",
             )
         ).id
-        selected: UUID = service.bindings.create_asset_binding(
+        selected: UUID = service.bindings.create_agent_binding(
             table_id,
-            _asset_body(binding_id, "polaris.sales.orders", BindingRole.QUERY, True),
+            _agent_body(binding_id, "polaris.sales.orders", BindingRole.QUERY, True),
         ).id
         with pytest.raises(ConflictError, match="selected QUERY binding"):
-            service.bindings.create_asset_binding(
+            service.bindings.create_agent_binding(
                 table_id,
-                _asset_body(binding_id, "polaris.sales.orders_v2", BindingRole.QUERY, True),
+                _agent_body(binding_id, "polaris.sales.orders_v2", BindingRole.QUERY, True),
             )
         with pytest.raises(ConflictError):
-            repo.add_asset_binding(
-                AssetEngineBindingRow(
+            repo.add_agent_binding(
+                AgentEngineBindingRow(
                     id=UUID(int=9),
                     catalog_table_id=table_id,
                     data_source_id=source_id,
@@ -353,8 +353,8 @@ def test_selected_query_binding_is_unique_and_role_matches_engine(tmp_path: Path
                 )
             )
         with pytest.raises(ConflictError):
-            repo.add_asset_binding(
-                AssetEngineBindingRow(
+            repo.add_agent_binding(
+                AgentEngineBindingRow(
                     id=UUID(int=10),
                     catalog_table_id=table_id,
                     data_source_id=source_id,
@@ -421,13 +421,13 @@ def _table_body(
     )
 
 
-def _asset_body(
+def _agent_body(
     source_binding_id: UUID,
     engine_ref_key: str,
     role: BindingRole,
     is_selected: bool,
-) -> AssetBindingCreate:
-    return AssetBindingCreate(
+) -> AgentBindingCreate:
+    return AgentBindingCreate(
         source_engine_binding_id=source_binding_id,
         engine_ref=EngineRef(catalog="polaris", namespace="sales", table="orders"),
         engine_ref_key=engine_ref_key,

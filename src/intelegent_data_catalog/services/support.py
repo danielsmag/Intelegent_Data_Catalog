@@ -5,7 +5,7 @@ from uuid import UUID
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
 from intelegent_data_catalog.persistence.enums import ContextOrigin
 from intelegent_data_catalog.persistence.models import (
-    AssetRow,
+    AgentRow,
     CatalogTableRow,
     ColumnRow,
 )
@@ -19,7 +19,7 @@ def required[T](value: T | None, field: str) -> T:
 
 
 def apply_user_context(
-    row: CatalogTableRow | ColumnRow | AssetRow,
+    row: CatalogTableRow | ColumnRow | AgentRow,
     value: str | None,
 ) -> None:
     """Store a manual context edit. Blank text clears both the text and the origin."""

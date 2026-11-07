@@ -23,8 +23,8 @@ from intelegent_data_catalog.persistence.enums import (
 )
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
-    AssetBindingCreate,
-    AssetBindingRead,
+    AgentBindingCreate,
+    AgentBindingRead,
     CatalogTableRead,
     DataSourceCreate,
     DataSourceRead,
@@ -209,15 +209,15 @@ class SeedLakeRegistrar:
         for table in tables.list_tables():
             if table.physical_namespace != _SCHEMA:
                 continue
-            stored: list[AssetBindingRead] = bindings.list_asset_bindings(table.id)
+            stored: list[AgentBindingRead] = bindings.list_agent_bindings(table.id)
             selected: bool = any(
                 item.role is BindingRole.QUERY and item.is_selected for item in stored
             )
             if selected:
                 continue
-            bindings.create_asset_binding(
+            bindings.create_agent_binding(
                 table.id,
-                AssetBindingCreate(
+                AgentBindingCreate(
                     source_engine_binding_id=spark_binding_id,
                     engine_ref=EngineRef(
                         catalog=spark_catalog,

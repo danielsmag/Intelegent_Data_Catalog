@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from intelegent_data_catalog.assets.sync import AssetSync
+from intelegent_data_catalog.agents.sync import AgentSync
 from intelegent_data_catalog.exceptions import ConflictError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import TableStatus
@@ -123,9 +123,9 @@ class TableService:
         row: CatalogTableRow = self._table(table_id)
         if self._repo.count_relationships_for_table(table_id) > 0:
             raise ConflictError("table is used by a relationship")
-        self._repo.delete_asset_bindings_for_table(table_id)
+        self._repo.delete_agent_bindings_for_table(table_id)
         self._repo.delete_columns_for_table(table_id)
-        sync: AssetSync | None = AssetSync.for_row(row)
+        sync: AgentSync | None = AgentSync.for_row(row)
         if sync is not None:
             sync.delete_table(row)
         self._repo.delete(row)

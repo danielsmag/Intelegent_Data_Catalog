@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.assets.models import AssetContextOptions
+from intelegent_data_catalog.agents.models import AgentContextOptions
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import (
     ModelId,
@@ -24,9 +24,9 @@ from intelegent_data_catalog.entity_configuration import (
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
 from intelegent_data_catalog.knowledge.models import TableContextOptions
-from intelegent_data_catalog.persistence.enums import AssetStatus, RefreshSubjectKind, TableStatus
+from intelegent_data_catalog.persistence.enums import AgentStatus, RefreshSubjectKind, TableStatus
 from intelegent_data_catalog.persistence.models import (
-    AssetRow,
+    AgentRow,
     CatalogTableRow,
     EntityConfigurationRow,
 )
@@ -87,16 +87,16 @@ class ContextRefreshService:
 
     def _plan(self, row: EntityConfigurationRow) -> _QueuedRebuild | None:
         options: dict[str, object] = dict(row.options)
-        asset_id: UUID | None = row.asset_id
-        if asset_id is not None:
-            asset: AssetRow | None = self._session.get(AssetRow, asset_id)
-            if asset is None or asset.status != AssetStatus.ACTIVE.value:
+        agent_id: UUID | None = row.agent_id
+        if agent_id is not None:
+            agent: AgentRow | None = self._session.get(AgentRow, agent_id)
+            if agent is None or agent.status != AgentStatus.ACTIVE.value:
                 return None
-            flags: dict[str, bool] = option_values(RefreshSubjectKind.ASSET, options, asset.kind)
+            flags: dict[str, bool] = option_values(RefreshSubjectKind.AGENT, options, agent.kind)
             return _QueuedRebuild(
-                RefreshSubjectKind.ASSET,
-                asset.id,
-                asset.name,
+                RefreshSubjectKind.AGENT,
+                agent.id,
+                agent.name,
                 dict(flags),
                 parse_model_id(row.model),
                 parse_effort(row.effort),
@@ -106,20 +106,20 @@ class ContextRefreshService:
             table: CatalogTableRow | None = self._session.get(CatalogTableRow, table_id)
             if table is None or table.status != TableStatus.ACTIVE.value:
                 return None
-            if table.asset_id is not None:
-                linked: AssetRow | None = self._session.get(AssetRow, table.asset_id)
-                if linked is None or linked.status != AssetStatus.ACTIVE.value:
+            if table.agent_id is not None:
+                linked: AgentRow | None = self._session.get(AgentRow, table.agent_id)
+                if linked is None or linked.status != AgentStatus.ACTIVE.value:
                     return None
-                asset_flags: dict[str, bool] = option_values(
-                    RefreshSubjectKind.ASSET,
+                agent_flags: dict[str, bool] = option_values(
+                    RefreshSubjectKind.AGENT,
                     options,
                     linked.kind,
                 )
                 return _QueuedRebuild(
-                    RefreshSubjectKind.ASSET,
+                    RefreshSubjectKind.AGENT,
                     linked.id,
                     linked.name,
-                    dict(asset_flags),
+                    dict(agent_flags),
                     parse_model_id(row.model),
                     parse_effort(row.effort),
                 )
@@ -134,19 +134,19 @@ class ContextRefreshService:
         return None
 
     def _start(self, planned: _QueuedRebuild) -> None:
-        if planned.kind is RefreshSubjectKind.ASSET:
+        if planned.kind is RefreshSubjectKind.AGENT:
             flags: dict[str, bool] = {}
             key: str
             value: object
             for key, value in planned.options.items():
                 if isinstance(value, bool):
                     flags[key] = value
-            self._jobs.start_asset(
+            self._jobs.start_agent(
                 planned.subject_id,
                 planned.name,
-                AssetContextOptions(model=planned.model, effort=planned.effort, flags=flags),
+                AgentContextOptions(model=planned.model, effort=planned.effort, flags=flags),
             )
-            _LOGGER.info("queued asset context rebuild asset_id=%s", planned.subject_id)
+            _LOGGER.info("queued agent context rebuild agent_id=%s", planned.subject_id)
             return
         if planned.kind is RefreshSubjectKind.TABLE:
             self._jobs.start_knowledge(

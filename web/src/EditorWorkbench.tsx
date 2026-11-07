@@ -39,11 +39,11 @@ import {
 } from "./editorLayout"
 import { AppSideDock } from "./ConfigRail"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
-import { AssetDefinitionPage } from "./AssetDefinitionPage"
-import { AssetPage } from "./AssetPage"
-import { AssetsSidebar } from "./AssetsSidebar"
-import { AssetsTablePage } from "./AssetsTablePage"
-import { setAssetsSidebarOpen, useAssetsSidebarOpen } from "./assetsSidebarStore"
+import { AgentDefinitionPage } from "./AgentDefinitionPage"
+import { AgentPage } from "./AgentPage"
+import { AgentsSidebar } from "./AgentsSidebar"
+import { AgentsTablePage } from "./AgentsTablePage"
+import { setAgentsSidebarOpen, useAgentsSidebarOpen } from "./agentsSidebarStore"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { WorkspaceSidebar } from "./WorkspaceSidebarPanel"
 import { fetchCatalogTable } from "./registryApi"
@@ -110,7 +110,7 @@ export function EditorWorkbench(): ReactElement {
 function SecondSidebar(): ReactElement {
   const view: SidebarView = useSidebarView()
   const workspaceOpen: boolean = useWorkspaceSidebarOpen()
-  const assetsOpen: boolean = useAssetsSidebarOpen()
+  const agentsOpen: boolean = useAgentsSidebarOpen()
   if (view === "catalog") {
     return <CatalogSidebar />
   }
@@ -124,12 +124,12 @@ function SecondSidebar(): ReactElement {
       />
     )
   }
-  if (view === "assets") {
+  if (view === "agents") {
     return (
-      <AssetsSidebar
-        collapsed={!assetsOpen}
+      <AgentsSidebar
+        collapsed={!agentsOpen}
         onToggleCollapsed={() => {
-          setAssetsSidebarOpen(!assetsOpen)
+          setAgentsSidebarOpen(!agentsOpen)
         }}
       />
     )
@@ -340,16 +340,16 @@ function createGroupNavigator(groupId: string): Navigator {
   }
 }
 
-function TableAssetRedirect(): ReactElement {
+function TableAgentRedirect(): ReactElement {
   const tableId: string = useParams().tableId ?? ""
-  const [assetId, setAssetId] = useState<string | null>(null)
+  const [agentId, setAgentId] = useState<string | null>(null)
   const [missing, setMissing] = useState<boolean>(false)
   useEffect(() => {
     const controller: AbortController = new AbortController()
     void fetchCatalogTable(tableId, controller.signal)
       .then((table) => {
-        if (table.asset_id !== undefined && table.asset_id !== null && table.asset_id !== "") {
-          setAssetId(table.asset_id)
+        if (table.agent_id !== undefined && table.agent_id !== null && table.agent_id !== "") {
+          setAgentId(table.agent_id)
         } else {
           setMissing(true)
         }
@@ -363,13 +363,13 @@ function TableAssetRedirect(): ReactElement {
       controller.abort()
     }
   }, [tableId])
-  if (assetId !== null) {
-    return <Navigate to={`/assets/${assetId}`} replace />
+  if (agentId !== null) {
+    return <Navigate to={`/agents/${agentId}`} replace />
   }
   if (missing) {
     return <RegistryTablePage />
   }
-  return <p className="note">Opening asset...</p>
+  return <p className="note">Opening agent...</p>
 }
 
 function AirflowListRedirect(): ReactElement {
@@ -379,7 +379,7 @@ function AirflowListRedirect(): ReactElement {
   if (params.get("new") === "1") {
     next.set("new", "1")
   }
-  return <Navigate to={`/assets?${next.toString()}`} replace />
+  return <Navigate to={`/agents?${next.toString()}`} replace />
 }
 
 function AirflowInstanceRedirect(): ReactElement {
@@ -393,16 +393,16 @@ function AirflowInstanceRedirect(): ReactElement {
         if (controller.signal.aborted) {
           return
         }
-        if (instance.asset_id === null) {
-          setTarget("/assets?service=airflow")
+        if (instance.agent_id === null) {
+          setTarget("/agents?service=airflow")
           return
         }
         const dag: string = dagId === undefined ? "" : `?dag=${encodeURIComponent(dagId)}`
-        setTarget(`/assets/${instance.asset_id}${dag}`)
+        setTarget(`/agents/${instance.agent_id}${dag}`)
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          setTarget("/assets?service=airflow")
+          setTarget("/agents?service=airflow")
         }
       })
     return () => {
@@ -410,7 +410,7 @@ function AirflowInstanceRedirect(): ReactElement {
     }
   }, [instanceId, dagId])
   if (target === null) {
-    return <p className="note">Opening asset...</p>
+    return <p className="note">Opening agent...</p>
   }
   return <Navigate to={target} replace />
 }
@@ -423,24 +423,24 @@ function WorkspaceFileRoute(): ReactElement {
 function EditorRoutes(): ReactElement {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/assets" replace />} />
+      <Route path="/" element={<Navigate to="/agents" replace />} />
       <Route path="/airflow" element={<AirflowListRedirect />} />
       <Route path="/airflow/:instanceId" element={<AirflowInstanceRedirect />} />
       <Route path="/airflow/:instanceId/dags/:dagId" element={<AirflowInstanceRedirect />} />
       <Route path="/catalog" element={<CatalogPage />} />
       <Route path="/catalog/:source/:catalog/:namespace/:table" element={<CatalogPage />} />
-      <Route path="/spaces" element={<Navigate to="/assets" replace />} />
-      <Route path="/spaces/:spaceId" element={<Navigate to="/assets" replace />} />
+      <Route path="/spaces" element={<Navigate to="/agents" replace />} />
+      <Route path="/spaces/:spaceId" element={<Navigate to="/agents" replace />} />
       <Route path="/workspaces" element={<WorkspacesPage />} />
       <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
       <Route path="/workspace/nodes/:nodeId" element={<WorkspaceFileRoute />} />
-      <Route path="/workspace/assets" element={<Navigate to="/assets" replace />} />
-      <Route path="/scopes/:scopeId" element={<Navigate to="/assets" replace />} />
-      <Route path="/asset-definitions/text/:objectKey" element={<AssetDefinitionPage />} />
-      <Route path="/asset-definitions/:fileId/:fileName?" element={<AssetDefinitionPage />} />
-      <Route path="/assets" element={<AssetsTablePage />} />
-      <Route path="/assets/:assetId" element={<AssetPage />} />
-      <Route path="/registry/tables/:tableId" element={<TableAssetRedirect />} />
+      <Route path="/workspace/agents" element={<Navigate to="/agents" replace />} />
+      <Route path="/scopes/:scopeId" element={<Navigate to="/agents" replace />} />
+      <Route path="/agent-definitions/text/:objectKey" element={<AgentDefinitionPage />} />
+      <Route path="/agent-definitions/:fileId/:fileName?" element={<AgentDefinitionPage />} />
+      <Route path="/agents" element={<AgentsTablePage />} />
+      <Route path="/agents/:agentId" element={<AgentPage />} />
+      <Route path="/registry/tables/:tableId" element={<TableAgentRedirect />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />
       <Route path="/sources" element={<Navigate to="/catalog" replace />} />
       <Route path="/sources/*" element={<Navigate to="/catalog" replace />} />

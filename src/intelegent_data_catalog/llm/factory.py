@@ -17,6 +17,7 @@ from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
 from intelegent_data_catalog.llm.dag_context import DagContextAgent
 from intelegent_data_catalog.llm.file_context import FileContextAgent
+from intelegent_data_catalog.llm.schema_context import SchemaContextAgent
 
 
 def thinking_level(effort: ReasoningEffort) -> ThinkingLevel:
@@ -137,6 +138,14 @@ class CatalogModels:
             thinking=thinking,
         )
         self.dag_describer: DagContextAgent = DagContextAgent(
+            build_model(settings),
+            max_requests=settings.max_tool_steps,
+            temperature=settings.temperature,
+            max_tokens=settings.max_tokens,
+            timeout_seconds=timeout,
+            thinking=thinking,
+        )
+        self.schema_describer: SchemaContextAgent = SchemaContextAgent(
             build_model(settings),
             max_requests=settings.max_tool_steps,
             temperature=settings.temperature,

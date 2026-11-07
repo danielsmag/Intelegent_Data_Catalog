@@ -64,7 +64,7 @@ def test_publish_lists_seed_tables_and_spark_sql(tmp_path: Path) -> None:
                 table for table in tables if table.name == "customers"
             )
             preview: SparkQueryPreview = spark_preview(
-                service.bindings.list_asset_bindings(customers.id),
+                service.bindings.list_agent_bindings(customers.id),
                 100,
             )
             assert preview.sql == "SELECT * FROM catalog.sales.customers LIMIT 100"

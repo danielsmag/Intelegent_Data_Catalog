@@ -26,6 +26,8 @@ def upgrade() -> None:
     """Add definition file and item tables when they are not already present."""
     bind: Connection = op.get_bind()
     tables: set[str] = _tables(bind)
+    if "agent_definition_files" in tables or "agent_definition_items" in tables:
+        return
     if "asset_definition_files" not in tables:
         _create_files()
     if "asset_definition_items" not in tables:

@@ -14,7 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, ValidationError
 from redis import Redis
 
-from intelegent_data_catalog.assets.execution.runs import publish_run_event
+from intelegent_data_catalog.agents.execution.runs import publish_run_event
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import load_settings
 
@@ -24,7 +24,7 @@ _LIST_KEY: str = "catalog:build-trace"
 _SEQ_KEY: str = "catalog:build-trace:seq"
 _LIMIT: int = 400
 
-TraceKind = Literal["table", "scope", "space", "airflow", "asset"]
+TraceKind = Literal["table", "scope", "space", "airflow", "agent"]
 TraceStep = Literal[
     "started",
     "ask",
@@ -243,8 +243,8 @@ def trace_kind_for_job(kind: str, options: dict[str, object]) -> TraceKind:
         return "space"
     if kind == "airflow":
         return "airflow"
-    if kind == "asset":
-        return "asset"
+    if kind == "agent":
+        return "agent"
     if kind == "context":
         raw: object = options.get("kind")
         if raw == "space":
@@ -253,8 +253,8 @@ def trace_kind_for_job(kind: str, options: dict[str, object]) -> TraceKind:
             return "scope"
         if raw == "airflow":
             return "airflow"
-        if raw == "asset":
-            return "asset"
+        if raw == "agent":
+            return "agent"
         return "table"
     return "table"
 

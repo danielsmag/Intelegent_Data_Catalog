@@ -1,4 +1,4 @@
-"""Asset notebooks: object-store compare-and-swap, overlay, and the read API."""
+"""Agent notebooks: object-store compare-and-swap, overlay, and the read API."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -22,22 +22,22 @@ from pydantic_ai_harness.memory._store import (
 )
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.agents.agent_pack.memory_store import ObjectMemoryStore
+from intelegent_data_catalog.agents.agent_pack.models import MemoryFileDetail, MemoryFileRead
+from intelegent_data_catalog.agents.agent_pack.service import AgentPackService
 from intelegent_data_catalog.api.container import AppContainer
-from intelegent_data_catalog.assets.agent_pack.memory_store import ObjectMemoryStore
-from intelegent_data_catalog.assets.agent_pack.models import MemoryFileDetail, MemoryFileRead
-from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.bootstrap import create_app
-from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
+from intelegent_data_catalog.core.settings import AgentDefinitionsSettings
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
 from intelegent_data_catalog.llm.overlay import DescribeOverlay, current_memory, describe_overlay
 from intelegent_data_catalog.llm.run import ModelCall
 from intelegent_data_catalog.persistence.constants import SHARED_WORKSPACE_ID
 from intelegent_data_catalog.persistence.database import CatalogDatabase
-from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus
+from intelegent_data_catalog.persistence.enums import AgentKind, AgentStatus
 from intelegent_data_catalog.persistence.migrate import upgrade_database
-from intelegent_data_catalog.persistence.models import AssetRow
+from intelegent_data_catalog.persistence.models import AgentRow
 from intelegent_data_catalog.storage.object_store import MemoryObjectStore
 
 
@@ -61,7 +61,7 @@ def test_memory_write_rejects_a_stale_etag() -> None:
     store: ObjectMemoryStore = ObjectMemoryStore(MemoryObjectStore(), "agent-memory/")
     saved: MemoryMutation = asyncio.run(
         store.write_with_metadata(
-            "asset/main/MEMORY.md",
+            "agent/main/MEMORY.md",
             "orders are sales",
             expected_version=None,
             metadata={"updated_by": "agent"},
@@ -70,12 +70,12 @@ def test_memory_write_rejects_a_stale_etag() -> None:
     with pytest.raises(MemoryConflictError):
         asyncio.run(
             store.write(
-                "asset/main/MEMORY.md",
+                "agent/main/MEMORY.md",
                 "other",
                 expected_version="stale",
             ),
         )
-    current: MemoryFile | None = asyncio.run(store.read("asset/main/MEMORY.md", max_chars=100))
+    current: MemoryFile | None = asyncio.run(store.read("agent/main/MEMORY.md", max_chars=100))
     assert current is not None
     assert current.version == saved.version
     assert current.content == "orders are sales"
@@ -87,7 +87,7 @@ def test_replay_returns_the_first_write_and_hides_the_receipt() -> None:
     operation: MemoryOperation = MemoryOperation(id="a" * 64, fingerprint="b" * 64)
     saved: MemoryMutation = asyncio.run(
         store.write(
-            "asset/main/MEMORY.md",
+            "agent/main/MEMORY.md",
             "orders are sales",
             expected_version=None,
             operation=operation,
@@ -95,7 +95,7 @@ def test_replay_returns_the_first_write_and_hides_the_receipt() -> None:
     )
     replayed: MemoryMutation = asyncio.run(
         store.write(
-            "asset/main/MEMORY.md",
+            "agent/main/MEMORY.md",
             "other",
             expected_version=None,
             operation=operation,
@@ -103,11 +103,11 @@ def test_replay_returns_the_first_write_and_hides_the_receipt() -> None:
     )
     assert replayed.replayed is True
     assert replayed.version == saved.version
-    current: MemoryFile | None = asyncio.run(store.read("asset/main/MEMORY.md", max_chars=100))
+    current: MemoryFile | None = asyncio.run(store.read("agent/main/MEMORY.md", max_chars=100))
     assert current is not None
     assert current.content == "orders are sales"
     paths: list[str] = asyncio.run(store.list_paths("", limit=20))
-    assert paths == ["asset/main/MEMORY.md"]
+    assert paths == ["agent/main/MEMORY.md"]
     with pytest.raises(MemoryOperationConflictError):
         asyncio.run(
             store.get_operation(MemoryOperation(id="a" * 64, fingerprint="c" * 64)),
@@ -118,14 +118,14 @@ def test_search_finds_a_note_and_rejects_a_path_escape() -> None:
     store: ObjectMemoryStore = ObjectMemoryStore(MemoryObjectStore(), "agent-memory/")
     asyncio.run(
         store.write(
-            "asset/main/keys.md",
+            "agent/main/keys.md",
             "order_id is the business key",
             expected_version=None,
         ),
     )
     found: MemorySearchResult = asyncio.run(
         store.search(
-            "asset/main/",
+            "agent/main/",
             "business",
             limit=10,
             max_files=10,
@@ -134,19 +134,19 @@ def test_search_finds_a_note_and_rejects_a_path_escape() -> None:
         ),
     )
     assert len(found.matches) == 1
-    assert found.matches[0].path == "asset/main/keys.md"
+    assert found.matches[0].path == "agent/main/keys.md"
     with pytest.raises(MemoryPathEscapeError):
         asyncio.run(store.read("../secret.md", max_chars=10))
 
 
-def test_asset_overlay_attaches_memory_and_a_plain_call_does_not() -> None:
+def test_agent_overlay_attaches_memory_and_a_plain_call_does_not() -> None:
     objects: MemoryObjectStore = MemoryObjectStore()
-    asset_id: UUID = uuid4()
-    overlay: DescribeOverlay = DescribeOverlay(None, None, asset_id, objects)
+    agent_id: UUID = uuid4()
+    overlay: DescribeOverlay = DescribeOverlay(None, None, agent_id, objects)
     with describe_overlay(overlay):
         attached = current_memory()
     assert attached is not None
-    assert attached.namespace == str(asset_id)
+    assert attached.namespace == str(agent_id)
     assert attached.scanner is not None
     assert attached.write_metadata == {"updated_by": "agent"}
     assert current_memory() is None
@@ -161,11 +161,11 @@ def test_asset_overlay_attaches_memory_and_a_plain_call_does_not() -> None:
         timeout_seconds=5.0,
     )
     with describe_overlay(overlay), pytest.raises(_Stop):
-        call.run("describe the asset", object())
+        call.run("describe the agent", object())
     capabilities: object = bare.seen["capabilities"]
     assert isinstance(capabilities, list)
     assert len(capabilities) == 1
-    assert capabilities[0].namespace == str(asset_id)
+    assert capabilities[0].namespace == str(agent_id)
     limits: object = bare.seen["usage_limits"]
     assert getattr(limits, "request_limit", None) == 4
 
@@ -182,12 +182,12 @@ def test_api_lists_and_reads_a_note(tmp_path: Path) -> None:
     app, database, objects = _app(tmp_path)
     session: Session = database.session()
     try:
-        asset_id: UUID = uuid4()
-        _asset(session, asset_id, owner_user_id=None)
+        agent_id: UUID = uuid4()
+        _agent(session, agent_id, owner_user_id=None)
         session.commit()
         asyncio.run(
             ObjectMemoryStore(objects, "agent-memory/").write_with_metadata(
-                f"{asset_id}/main/MEMORY.md",
+                f"{agent_id}/main/MEMORY.md",
                 "orders are sales",
                 expected_version=None,
                 metadata={"updated_by": "agent"},
@@ -196,13 +196,13 @@ def test_api_lists_and_reads_a_note(tmp_path: Path) -> None:
         spec: dict[str, object] = app.openapi()
         paths: object = spec["paths"]
         assert isinstance(paths, dict)
-        listing: object = paths["/api/v1/assets/{asset_id}/agent-memory"]
-        detail: object = paths["/api/v1/assets/{asset_id}/agent-memory/{name}"]
+        listing: object = paths["/api/v1/agents/{agent_id}/agent-memory"]
+        detail: object = paths["/api/v1/agents/{agent_id}/agent-memory/{name}"]
         assert isinstance(listing, dict)
         assert isinstance(detail, dict)
         assert set(listing) == {"get"}
         assert set(detail) == {"get"}
-        listed: httpx.Response = _send(app, "GET", f"/api/v1/assets/{asset_id}/agent-memory")
+        listed: httpx.Response = _send(app, "GET", f"/api/v1/agents/{agent_id}/agent-memory")
         assert listed.status_code == 200
         body: object = listed.json()
         assert isinstance(body, list)
@@ -210,7 +210,7 @@ def test_api_lists_and_reads_a_note(tmp_path: Path) -> None:
         detail_response: httpx.Response = _send(
             app,
             "GET",
-            f"/api/v1/assets/{asset_id}/agent-memory/MEMORY.md",
+            f"/api/v1/agents/{agent_id}/agent-memory/MEMORY.md",
         )
         assert detail_response.status_code == 200
         note: dict[str, object] = detail_response.json()
@@ -221,18 +221,18 @@ def test_api_lists_and_reads_a_note(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_hidden_asset_memory_is_not_found(tmp_path: Path) -> None:
+def test_hidden_agent_memory_is_not_found(tmp_path: Path) -> None:
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
     try:
-        asset_id: UUID = uuid4()
-        _asset(session, asset_id, owner_user_id=None)
+        agent_id: UUID = uuid4()
+        _agent(session, agent_id, owner_user_id=None)
         session.commit()
         objects: MemoryObjectStore = MemoryObjectStore()
         asyncio.run(
             ObjectMemoryStore(objects, "agent-memory/").write(
-                f"{asset_id}/main/MEMORY.md",
+                f"{agent_id}/main/MEMORY.md",
                 "private",
                 expected_version=None,
             ),
@@ -245,22 +245,22 @@ def test_hidden_asset_memory_is_not_found(tmp_path: Path) -> None:
             members=frozenset(),
         )
         with pytest.raises(EntityNotFoundError):
-            service.list_memory(asset_id)
+            service.list_memory(agent_id)
         with pytest.raises(ValidationAppError):
-            _service(session, objects, admin=True, user_id=uuid4()).get_memory(asset_id, "nope")
+            _service(session, objects, admin=True, user_id=uuid4()).get_memory(agent_id, "nope")
         visible: list[MemoryFileRead] = _service(
             session,
             objects,
             admin=True,
             user_id=uuid4(),
-        ).list_memory(asset_id)
+        ).list_memory(agent_id)
         assert [item.name for item in visible] == ["MEMORY.md"]
         detail: MemoryFileDetail = _service(
             session,
             objects,
             admin=True,
             user_id=uuid4(),
-        ).get_memory(asset_id, "MEMORY.md")
+        ).get_memory(agent_id, "MEMORY.md")
         assert detail.body == "private"
     finally:
         session.close()
@@ -275,7 +275,7 @@ def _app(tmp_path: Path) -> tuple[FastAPI, CatalogDatabase, MemoryObjectStore]:
     objects: MemoryObjectStore = MemoryObjectStore()
     container: AppContainer = AppContainer()
     container.database.override(providers.Object(database))
-    container.asset_definition_store.override(providers.Object(objects))
+    container.agent_definition_store.override(providers.Object(objects))
     return create_app(container), database, objects
 
 
@@ -286,18 +286,18 @@ def _session(tmp_path: Path) -> tuple[CatalogDatabase, Session]:
     return database, database.session()
 
 
-def _asset(session: Session, asset_id: UUID, owner_user_id: UUID | None) -> None:
+def _agent(session: Session, agent_id: UUID, owner_user_id: UUID | None) -> None:
     now: datetime = datetime.now(UTC)
     session.add(
-        AssetRow(
-            id=asset_id,
-            kind=AssetKind.TABLE.value,
+        AgentRow(
+            id=agent_id,
+            kind=AgentKind.TABLE.value,
             name="orders",
             slug="orders",
             workspace_id=SHARED_WORKSPACE_ID,
             owner_user_id=owner_user_id,
             properties={},
-            status=AssetStatus.ACTIVE.value,
+            status=AgentStatus.ACTIVE.value,
             created_at=now,
             updated_at=now,
         ),
@@ -331,7 +331,7 @@ def _service(
     return AgentPackService(
         session,
         objects,
-        AssetDefinitionsSettings(enabled=True, prefix="asset-definitions/"),
+        AgentDefinitionsSettings(enabled=True, prefix="agent-definitions/"),
         access,
     )
 

@@ -89,7 +89,7 @@ class AirflowInstanceRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: UUID
-    asset_id: UUID | None = None
+    agent_id: UUID | None = None
     name: str
     slug: str
     base_url: str
@@ -263,7 +263,7 @@ class AirflowDagRead(BaseModel):
 
     id: UUID
     instance_id: UUID
-    asset_id: UUID | None = None
+    agent_id: UUID | None = None
     dag_id: str
     display_name: str | None
     description: str | None

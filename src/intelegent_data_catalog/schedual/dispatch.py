@@ -17,7 +17,7 @@ from intelegent_data_catalog.jobs.trace import RedisBuildTrace
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.schedual.context_refresh import ContextRefreshService
-from intelegent_data_catalog.schedual.operators import AssetOperatorSchedule
+from intelegent_data_catalog.schedual.operators import AgentOperatorSchedule
 from intelegent_data_catalog.schedual.reclaim import AbandonedJobReclaimer
 from intelegent_data_catalog.schedual.schedules import SyncScheduleService
 
@@ -37,7 +37,7 @@ def dispatch_due_syncs() -> int:
             session,
             CatalogJobs(database, publisher),
         ).claim_due(now)
-        operators = AssetOperatorSchedule(
+        operators = AgentOperatorSchedule(
             session,
             build_operator_executor(job_container().settings()),
         ).claim_due(now)

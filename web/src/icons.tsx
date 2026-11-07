@@ -140,7 +140,7 @@ export function TableIcon(): ReactElement {
   )
 }
 
-export function AssetIcon(): ReactElement {
+export function AgentIcon(): ReactElement {
   return (
     <Icon>
       <rect x="2.2" y="2" width="11.6" height="3.1" rx="0.7" fill="none" stroke="currentColor" strokeWidth="1" />

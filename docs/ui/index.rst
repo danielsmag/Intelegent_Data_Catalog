@@ -13,8 +13,8 @@ matching view on their own. ``/sources`` opens Catalog.
      - What it shows
    * - Workspace
      - Folder tree for the active workspace. ``Shared/`` and ``Users/<you>/`` live here. Files and notebooks open in the editor.
-   * - Assets
-     - Assets in the active workspace, and definition files under ``assets/``.
+   * - Agents
+     - Agents in the active workspace, and definition files under ``agents/``.
    * - Catalog
      - Physical catalogs, namespaces, and tables from the explorer.
    * - Search

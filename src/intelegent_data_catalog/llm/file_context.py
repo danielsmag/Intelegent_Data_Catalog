@@ -5,7 +5,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.settings import ThinkingLevel
 
-from intelegent_data_catalog.assets.models import FileCatalogContext, FileContextProposal
+from intelegent_data_catalog.agents.models import FileCatalogContext, FileContextProposal
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.overlay import current_task
 from intelegent_data_catalog.llm.run import ModelCall

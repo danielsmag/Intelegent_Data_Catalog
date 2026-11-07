@@ -29,7 +29,7 @@ export type RouteIds = {
   spaceId: string | null
   scopeId: string | null
   tableId: string | null
-  assetId: string | null
+  agentId: string | null
   instanceId: string | null
   dagId: string | null
   source: string | null
@@ -38,7 +38,7 @@ export type RouteIds = {
   explorerTable: string | null
 }
 
-export type SidebarKind = "assets" | "catalog" | "none"
+export type SidebarKind = "agents" | "catalog" | "none"
 
 type HistoryMode = "push" | "replace" | "none"
 
@@ -90,14 +90,14 @@ export function titleFromPath(path: string): string {
   const pathname: string = pathnameOf(normalizePath(path))
   const parts: string[] = pathname.split("/").filter((part: string) => part.length > 0)
   const head: string | undefined = parts[0]
-  if (head === undefined || head === "assets" || head === "spaces" || head === "scopes") {
-    return "Assets"
+  if (head === undefined || head === "agents" || head === "spaces" || head === "scopes") {
+    return "Agents"
   }
   if (head === "registry") {
     return "Table"
   }
   if (head === "airflow") {
-    return "Assets"
+    return "Agents"
   }
   if (head === "catalog") {
     const table: string | undefined = parts[4]
@@ -112,10 +112,10 @@ export function titleFromPath(path: string): string {
   if (head === "sources") {
     return "Catalog"
   }
-  if (head === "assets") {
-    return parts[1] === undefined ? "Assets" : "Asset"
+  if (head === "agents") {
+    return parts[1] === undefined ? "Agents" : "Agent"
   }
-  if (head === "asset-definitions") {
+  if (head === "agent-definitions") {
     if (parts[1] === "text") {
       const encodedKey: string | undefined = parts[2]
       if (encodedKey === undefined) {
@@ -127,8 +127,8 @@ export function titleFromPath(path: string): string {
     const fileName: string | undefined = parts[2]
     return fileName === undefined ? "Definition" : decodeURIComponent(fileName)
   }
-  if (head === "workspace" && parts[1] === "assets") {
-    return "Assets"
+  if (head === "workspace" && parts[1] === "agents") {
+    return "Agents"
   }
   if (head === "workspace") {
     return "File"
@@ -146,7 +146,7 @@ export function sidebarKind(pathname: string): SidebarKind {
   if (pathname.startsWith("/catalog")) {
     return "catalog"
   }
-  return "assets"
+  return "agents"
 }
 
 export function parseRouteIds(pathname: string): RouteIds {
@@ -155,7 +155,7 @@ export function parseRouteIds(pathname: string): RouteIds {
     spaceId: null,
     scopeId: null,
     tableId: null,
-    assetId: null,
+    agentId: null,
     instanceId: null,
     dagId: null,
     source: null,
@@ -168,8 +168,8 @@ export function parseRouteIds(pathname: string): RouteIds {
   if (head === "registry" && second === "tables" && parts[2] !== undefined) {
     ids.tableId = decodeURIComponent(parts[2])
   }
-  if (head === "assets" && second !== undefined) {
-    ids.assetId = decodeURIComponent(second)
+  if (head === "agents" && second !== undefined) {
+    ids.agentId = decodeURIComponent(second)
   }
   if (head === "airflow" && second !== undefined) {
     ids.instanceId = decodeURIComponent(second)

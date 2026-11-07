@@ -5,11 +5,11 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.agents.execution.runs import AgentRunRecorder, agent_run_log
+from intelegent_data_catalog.agents.execution.tasks import BUILD_CONTEXT, DESCRIBE
+from intelegent_data_catalog.agents.models import AgentContextOptions
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
-from intelegent_data_catalog.assets.execution.runs import AssetRunRecorder, asset_run_log
-from intelegent_data_catalog.assets.execution.tasks import BUILD_CONTEXT, DESCRIBE
-from intelegent_data_catalog.assets.models import AssetContextOptions
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.knowledge.models import (
@@ -70,8 +70,8 @@ class CatalogAirflowBuild:
             session.close()
 
 
-class CatalogAssetBuild:
-    """Adapter from the asset job queue to ``RequestPlatform``."""
+class CatalogAgentBuild:
+    """Adapter from the agent job queue to ``RequestPlatform``."""
 
     def __init__(self, container: AppContainer) -> None:
         self._container: AppContainer = container
@@ -79,17 +79,17 @@ class CatalogAssetBuild:
     def run(
         self,
         subject_id: UUID,
-        options: AssetContextOptions,
+        options: AgentContextOptions,
         catalog_job_id: UUID | None = None,
     ) -> None:
-        """Build and save an asset context. The request session is already closed."""
+        """Build and save an agent context. The request session is already closed."""
         database: CatalogDatabase = self._container.database()
         session: Session = database.session()
-        recorder: AssetRunRecorder = AssetRunRecorder(database)
+        recorder: AgentRunRecorder = AgentRunRecorder(database)
         logger: logging.Logger = logging.getLogger(LOGGER_NAME)
         try:
             recorder.open(
-                asset_id=subject_id,
+                agent_id=subject_id,
                 item_id=None,
                 catalog_job_id=catalog_job_id,
                 trigger=OperatorRunTrigger.MANUAL,
@@ -98,7 +98,7 @@ class CatalogAssetBuild:
                 skip=(DESCRIBE,),
             )
             recorder.attach(logger)
-            with asset_run_log(recorder):
+            with agent_run_log(recorder):
                 recorder.begin(BUILD_CONTEXT)
                 try:
                     platform: RequestPlatform = RequestPlatform(
@@ -106,18 +106,18 @@ class CatalogAssetBuild:
                         self._container.settings(),
                         self._container.query_service(),
                         self._container.object_store(),
-                        self._container.asset_definition_store(),
+                        self._container.agent_definition_store(),
                     )
-                    platform.build_asset_context(subject_id, options)
+                    platform.build_agent_context(subject_id, options)
                 except CatalogError as err:
                     session.rollback()
-                    message: str = str(err) if str(err) != "" else "asset context build failed"
+                    message: str = str(err) if str(err) != "" else "agent context build failed"
                     recorder.end(BUILD_CONTEXT, message)
                     recorder.finish(DefinitionRunStatus.FAILED, message)
                     raise
                 except Exception:
                     session.rollback()
-                    failed: str = "asset context build failed"
+                    failed: str = "agent context build failed"
                     recorder.end(BUILD_CONTEXT, failed)
                     recorder.finish(DefinitionRunStatus.FAILED, failed)
                     raise
@@ -144,7 +144,7 @@ class CatalogContextGeneration:
                 self._container.settings(),
                 self._container.query_service(),
                 self._container.object_store(),
-                self._container.asset_definition_store(),
+                self._container.agent_definition_store(),
             )
             platform.generate_context(subject_id, options)
         except Exception:

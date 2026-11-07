@@ -22,14 +22,14 @@ class KnowledgeBuildJobRead(BaseModel):
     error: str | None = None
 
 
-class AssetBuildJobRead(BaseModel):
-    """One background asset build. The saved context is a separate read."""
+class AgentBuildJobRead(BaseModel):
+    """One background agent build. The saved context is a separate read."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: UUID
-    asset_id: UUID
-    asset_name: str
+    agent_id: UUID
+    agent_name: str
     status: KnowledgeBuildState
     error: str | None = None
 

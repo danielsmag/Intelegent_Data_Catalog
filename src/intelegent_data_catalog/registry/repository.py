@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.models import (
-    AssetEngineBindingRow,
+    AgentEngineBindingRow,
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
@@ -149,10 +149,10 @@ class RegistryRepository:
         )
         return self._count(statement)
 
-    def delete_asset_bindings_for_table(self, table_id: uuid.UUID) -> None:
-        """Remove asset bindings owned by a table."""
+    def delete_agent_bindings_for_table(self, table_id: uuid.UUID) -> None:
+        """Remove agent bindings owned by a table."""
         self._session.execute(
-            delete(AssetEngineBindingRow).where(AssetEngineBindingRow.catalog_table_id == table_id)
+            delete(AgentEngineBindingRow).where(AgentEngineBindingRow.catalog_table_id == table_id)
         )
         self._flush()
 
@@ -311,12 +311,12 @@ class RegistryRepository:
         )
         return self._session.scalar(statement)
 
-    def count_asset_bindings_for_source(self, source_binding_id: uuid.UUID) -> int:
-        """Count asset bindings that use a source binding."""
+    def count_agent_bindings_for_source(self, source_binding_id: uuid.UUID) -> int:
+        """Count agent bindings that use a source binding."""
         statement: Select[int] = (
             select(func.count())
-            .select_from(AssetEngineBindingRow)
-            .where(AssetEngineBindingRow.source_engine_binding_id == source_binding_id)
+            .select_from(AgentEngineBindingRow)
+            .where(AgentEngineBindingRow.source_engine_binding_id == source_binding_id)
         )
         return self._count(statement)
 
@@ -329,41 +329,41 @@ class RegistryRepository:
         )
         return self._count(statement)
 
-    def add_asset_binding(self, row: AssetEngineBindingRow) -> AssetEngineBindingRow:
-        """Insert an asset engine binding."""
+    def add_agent_binding(self, row: AgentEngineBindingRow) -> AgentEngineBindingRow:
+        """Insert an agent engine binding."""
         return self._add(row)
 
-    def list_asset_bindings(self, table_id: uuid.UUID) -> list[AssetEngineBindingRow]:
-        """Return asset bindings for a table."""
-        statement: Select[AssetEngineBindingRow] = (
-            select(AssetEngineBindingRow)
-            .where(AssetEngineBindingRow.catalog_table_id == table_id)
-            .order_by(AssetEngineBindingRow.role, AssetEngineBindingRow.engine_ref_key)
+    def list_agent_bindings(self, table_id: uuid.UUID) -> list[AgentEngineBindingRow]:
+        """Return agent bindings for a table."""
+        statement: Select[AgentEngineBindingRow] = (
+            select(AgentEngineBindingRow)
+            .where(AgentEngineBindingRow.catalog_table_id == table_id)
+            .order_by(AgentEngineBindingRow.role, AgentEngineBindingRow.engine_ref_key)
         )
-        return list[AssetEngineBindingRow](self._session.scalars(statement))
+        return list[AgentEngineBindingRow](self._session.scalars(statement))
 
-    def get_asset_binding(self, binding_id: uuid.UUID) -> AssetEngineBindingRow | None:
-        """Return one asset binding or none."""
-        return self._session.get(AssetEngineBindingRow, binding_id)
+    def get_agent_binding(self, binding_id: uuid.UUID) -> AgentEngineBindingRow | None:
+        """Return one agent binding or none."""
+        return self._session.get(AgentEngineBindingRow, binding_id)
 
-    def find_asset_binding_by_key(
+    def find_agent_binding_by_key(
         self,
         source_binding_id: uuid.UUID,
         engine_ref_key: str,
-    ) -> AssetEngineBindingRow | None:
+    ) -> AgentEngineBindingRow | None:
         """Return an engine ref key on one source binding."""
-        statement: Select[AssetEngineBindingRow] = select(AssetEngineBindingRow).where(
-            AssetEngineBindingRow.source_engine_binding_id == source_binding_id,
-            AssetEngineBindingRow.engine_ref_key == engine_ref_key,
+        statement: Select[AgentEngineBindingRow] = select(AgentEngineBindingRow).where(
+            AgentEngineBindingRow.source_engine_binding_id == source_binding_id,
+            AgentEngineBindingRow.engine_ref_key == engine_ref_key,
         )
         return self._session.scalar(statement)
 
-    def find_selected_query(self, table_id: uuid.UUID) -> AssetEngineBindingRow | None:
+    def find_selected_query(self, table_id: uuid.UUID) -> AgentEngineBindingRow | None:
         """Return the selected QUERY binding for a table, if one is stored."""
-        statement: Select[AssetEngineBindingRow] = select(AssetEngineBindingRow).where(
-            AssetEngineBindingRow.catalog_table_id == table_id,
-            AssetEngineBindingRow.role == "QUERY",
-            AssetEngineBindingRow.is_selected.is_(True),
+        statement: Select[AgentEngineBindingRow] = select(AgentEngineBindingRow).where(
+            AgentEngineBindingRow.catalog_table_id == table_id,
+            AgentEngineBindingRow.role == "QUERY",
+            AgentEngineBindingRow.is_selected.is_(True),
         )
         return self._session.scalar(statement)
 
@@ -385,15 +385,15 @@ class RegistryRepository:
         """Return one sync run or none."""
         return self._session.get(MetadataSyncRunRow, sync_run_id)
 
-    def list_asset_bindings_for_source(
+    def list_agent_bindings_for_source(
         self,
         source_binding_id: uuid.UUID,
-    ) -> list[AssetEngineBindingRow]:
-        """Return asset bindings that use one source binding."""
-        statement: Select[AssetEngineBindingRow] = select(AssetEngineBindingRow).where(
-            AssetEngineBindingRow.source_engine_binding_id == source_binding_id
+    ) -> list[AgentEngineBindingRow]:
+        """Return agent bindings that use one source binding."""
+        statement: Select[AgentEngineBindingRow] = select(AgentEngineBindingRow).where(
+            AgentEngineBindingRow.source_engine_binding_id == source_binding_id
         )
-        return list[AssetEngineBindingRow](self._session.scalars(statement))
+        return list[AgentEngineBindingRow](self._session.scalars(statement))
 
     def list_relationships_for_column(self, column_id: uuid.UUID) -> list[RelationshipRow]:
         """Return relationships whose mappings use a column."""

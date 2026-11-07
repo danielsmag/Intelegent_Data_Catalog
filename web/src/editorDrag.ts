@@ -15,14 +15,14 @@ export type DropTarget =
   | { kind: "insert"; groupId: string; index: number; blankTabId: string | null }
   | { kind: "edge"; groupId: string; direction: SplitDirection }
   | { kind: "group"; groupId: string }
-  | { kind: "zone"; zoneId: string; accepts: "asset" }
+  | { kind: "zone"; zoneId: string; accepts: "agent" }
 
 export type DragSource =
   | { kind: "tab"; fromGroupId: string; tabId: string }
   | { kind: "path"; path: string }
-  | { kind: "asset"; assetIds: string[]; path: string; openAll: boolean }
+  | { kind: "agent"; agentIds: string[]; path: string; openAll: boolean }
 
-type DropHandler = (assetIds: string[]) => void
+type DropHandler = (agentIds: string[]) => void
 
 const dropZoneHandlers: Map<string, DropHandler> = new Map()
 
@@ -69,12 +69,12 @@ function targetAt(x: number, y: number): DropTarget | null {
   if (hit === null) {
     return null
   }
-  if (drag?.source.kind === "asset") {
+  if (drag?.source.kind === "agent") {
     const zone: Element | null = hit.closest("[data-drop-zone]")
     if (zone instanceof HTMLElement) {
       const zoneId: string | undefined = zone.dataset.dropZone
       if (zoneId !== undefined && zoneId !== "") {
-        return { kind: "zone", zoneId, accepts: "asset" }
+        return { kind: "zone", zoneId, accepts: "agent" }
       }
     }
   }
@@ -135,15 +135,15 @@ function swallowClick(): void {
 }
 
 function applyDrop(source: DragSource, target: DropTarget): void {
-  if (source.kind === "asset") {
+  if (source.kind === "agent") {
     if (target.kind === "zone") {
       const handler: DropHandler | undefined = dropZoneHandlers.get(target.zoneId)
       if (handler !== undefined) {
-        handler(source.assetIds)
+        handler(source.agentIds)
       }
       return
     }
-    openIncludedAssets(source, target)
+    openIncludedAgents(source, target)
     return
   }
   if (source.kind === "tab") {
@@ -159,12 +159,12 @@ function applyDrop(source: DragSource, target: DropTarget): void {
   applyPathDrop(source, target)
 }
 
-function openIncludedAssets(
-  source: { assetIds: string[]; path: string; openAll: boolean },
+function openIncludedAgents(
+  source: { agentIds: string[]; path: string; openAll: boolean },
   target: DropTarget,
 ): void {
   const paths: string[] = source.openAll
-    ? source.assetIds.map((id: string) => `/assets/${id}`)
+    ? source.agentIds.map((id: string) => `/agents/${id}`)
     : [source.path]
   const first: string | undefined = paths[0]
   if (first === undefined) {
@@ -275,21 +275,21 @@ export function watchTabDrag(event: { button: number; pointerId: number; clientX
   watchDrag(event, { kind: "tab", fromGroupId: source.groupId, tabId: source.tabId }, source.title)
 }
 
-export function watchAssetDrag(
+export function watchAgentDrag(
   event: { button: number; pointerId: number; clientX: number; clientY: number },
-  source: { assetIds: string[]; title: string; openAll?: boolean },
+  source: { agentIds: string[]; title: string; openAll?: boolean },
 ): void {
-  const first: string | undefined = source.assetIds[0]
+  const first: string | undefined = source.agentIds[0]
   if (first === undefined) {
     return
   }
-  const extra: string = source.assetIds.length > 1 ? ` +${source.assetIds.length - 1}` : ""
+  const extra: string = source.agentIds.length > 1 ? ` +${source.agentIds.length - 1}` : ""
   watchDrag(
     event,
     {
-      kind: "asset",
-      assetIds: source.assetIds,
-      path: `/assets/${first}`,
+      kind: "agent",
+      agentIds: source.agentIds,
+      path: `/agents/${first}`,
       openAll: source.openAll === true,
     },
     `${source.title}${extra}`,

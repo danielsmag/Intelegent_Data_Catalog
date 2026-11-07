@@ -457,11 +457,11 @@ class AuthSettings(BaseModel):
         return self
 
 
-class AssetDefinitionsSettings(BaseModel):
-    """S3 prefix of Python files that declare assets.
+class AgentDefinitionsSettings(BaseModel):
+    """S3 prefix of Python files that declare agents.
 
     Beat polls the prefix every ``poll_interval_seconds`` when ``enabled`` is true.
-    Each pass keeps only assets named by a file under ``assets_folder``. A script
+    Each pass keeps only agents named by a file under ``agents_folder``. A script
     that disappeared is removed on that pass, the same way Airflow drops a deleted DAG file.
     """
 
@@ -473,18 +473,18 @@ class AssetDefinitionsSettings(BaseModel):
     secret_key: SecretStr = Field(default=SecretStr(""))
     bucket: str = ""
     region: str = ""
-    prefix: str = "asset-definitions/"
-    assets_folder: str = Field(default="assets", min_length=1)
+    prefix: str = "agent-definitions/"
+    agents_folder: str = Field(default="agents", min_length=1)
     poll_interval_seconds: float = Field(default=10.0, gt=0)
     exec_timeout_seconds: float = Field(default=30.0, gt=0)
     max_file_bytes: int = Field(default=1024 * 1024, ge=1)
     executor: Literal["celery", "local"] = "celery"
 
     @model_validator(mode="after")
-    def _normalize_prefix_and_folders(self) -> AssetDefinitionsSettings:
+    def _normalize_prefix_and_folders(self) -> AgentDefinitionsSettings:
         prefix: str = self.prefix.strip().strip("/")
         self.prefix = f"{prefix}/" if prefix != "" else ""
-        folders: tuple[str, ...] = (self.assets_folder,)
+        folders: tuple[str, ...] = (self.agents_folder,)
         folder: str
         for folder in folders:
             if folder != folder.strip() or "/" in folder or folder in {"", ".", ".."}:
@@ -593,7 +593,7 @@ class AppSettings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     object_store: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
-    asset_definitions: AssetDefinitionsSettings = Field(default_factory=AssetDefinitionsSettings)
+    agent_definitions: AgentDefinitionsSettings = Field(default_factory=AgentDefinitionsSettings)
     notebook: NotebookSettings = Field(default_factory=NotebookSettings)
     credentials: dict[str, CredentialEntry] = Field(default_factory=dict)
 

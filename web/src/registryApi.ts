@@ -4,7 +4,7 @@ import { isAbortError } from "./api"
 
 export type CatalogTableRecord = {
   id: string
-  asset_id?: string | null
+  agent_id?: string | null
   data_source_id: string
   name: string
   display_name: string | null
@@ -92,7 +92,7 @@ export type SearchHitRecord = {
   description: string | null
 }
 
-export type AssetBindingRecord = {
+export type AgentBindingRecord = {
   id: string
   role: string
   engine_type: string
@@ -164,8 +164,8 @@ export async function fetchKnowledgeGraph(
 export async function fetchBindings(
   tableId: string,
   signal: AbortSignal,
-): Promise<AssetBindingRecord[]> {
-  return readJson<AssetBindingRecord[]>(`/api/v1/tables/${tableId}/bindings`, signal)
+): Promise<AgentBindingRecord[]> {
+  return readJson<AgentBindingRecord[]>(`/api/v1/tables/${tableId}/bindings`, signal)
 }
 
 export async function fetchTableTags(tableId: string, signal: AbortSignal): Promise<TagRecord[]> {
@@ -313,9 +313,9 @@ export async function cancelCatalogJob(jobId: string): Promise<CatalogJobCancel>
   return (await response.json()) as CatalogJobCancel
 }
 
-export type ContextSubjectKind = "table" | "table_columns" | "column" | "airflow" | "asset"
+export type ContextSubjectKind = "table" | "table_columns" | "column" | "airflow" | "agent"
 
-export type ContextEntityKind = "table" | "column" | "airflow" | "asset"
+export type ContextEntityKind = "table" | "column" | "airflow" | "agent"
 
 export type ContextGenerationJob = {
   id: string
@@ -385,8 +385,8 @@ function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
       return `/api/v1/columns/${id}/context/generate`
     case "airflow":
       return `/api/v1/airflow/instances/${id}/context/generate`
-    case "asset":
-      return `/api/v1/assets/${id}/context/generate`
+    case "agent":
+      return `/api/v1/agents/${id}/context/generate`
   }
 }
 
@@ -400,8 +400,8 @@ function contextLatestPath(kind: ContextSubjectKind, id: string): string {
       return `/api/v1/columns/${id}/context/generation`
     case "airflow":
       return `/api/v1/airflow/instances/${id}/context/generation`
-    case "asset":
-      return `/api/v1/assets/${id}/context/generation`
+    case "agent":
+      return `/api/v1/agents/${id}/context/generation`
   }
 }
 
@@ -413,8 +413,8 @@ function contextPatchPath(kind: ContextEntityKind, id: string): string {
       return `/api/v1/columns/${id}`
     case "airflow":
       return `/api/v1/airflow/instances/${id}`
-    case "asset":
-      return `/api/v1/assets/${id}`
+    case "agent":
+      return `/api/v1/agents/${id}`
   }
 }
 
@@ -427,7 +427,7 @@ export async function searchCatalog(query: string, signal: AbortSignal): Promise
   return body.hits
 }
 
-export type BuildTraceKind = "table" | "scope" | "space" | "airflow" | "asset"
+export type BuildTraceKind = "table" | "scope" | "space" | "airflow" | "agent"
 
 export type BuildTraceEvent = {
   id: string

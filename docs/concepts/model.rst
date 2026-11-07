@@ -15,16 +15,16 @@ in the MinIO bucket ``workspace``. Postgres stores the folder tree
 (``Shared/`` and ``Users/<you>/``). ``Users/<you>/`` is visible to that user
 and to platform admins.
 
-Asset
+Agent
 -----
 
-An asset is one catalog object with a stable ``key``: a table, an Airflow DAG,
+An agent is one catalog object with a stable ``key``: a table, an Airflow DAG,
 a notebook, or a file. The definition names an operator. The operator names
-the source. The asset belongs to a workspace.
+the source. The agent belongs to a workspace.
 
 ``context`` on the declaration is a manual override. Leave it unset and the
 operator writes the context when it runs. A later manual edit is kept.
-How that path works is in :doc:`assets` and :doc:`operators`.
+How that path works is in :doc:`agents` and :doc:`operators`.
 
 Physical table
 --------------

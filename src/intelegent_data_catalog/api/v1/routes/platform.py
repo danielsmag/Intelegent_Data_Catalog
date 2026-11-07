@@ -157,7 +157,7 @@ def create_marquez_mapping(body: MarquezMappingWrite, platform: PlatformDep) -> 
 def read_spark_query(table_id: UUID, platform: PlatformDep) -> SparkQueryResponse:
     """Return the Spark SELECT for a table, or an explicit unavailable state."""
     preview: SparkQueryPreview = spark_preview(
-        platform.bindings.list_asset_bindings(table_id),
+        platform.bindings.list_agent_bindings(table_id),
         platform.sample_limit,
     )
     return SparkQueryResponse(
@@ -172,7 +172,7 @@ def read_spark_query(table_id: UUID, platform: PlatformDep) -> SparkQueryRespons
 def run_spark_query(table_id: UUID, platform: PlatformDep) -> QueryResult:
     """Run the bounded Spark SELECT. A missing binding does not fall back to Trino."""
     preview: SparkQueryPreview = spark_preview(
-        platform.bindings.list_asset_bindings(table_id),
+        platform.bindings.list_agent_bindings(table_id),
         platform.sample_limit,
     )
     if not preview.available or preview.sql is None:
@@ -222,11 +222,11 @@ def build_knowledge_context(
     """Start a context build and return before the model finishes.
 
     When Neo4j is configured, the background build asks the model for a column subgraph.
-    PostgreSQL catalog rows stay unchanged. A table that has an asset is built there.
+    PostgreSQL catalog rows stay unchanged. A table that has an agent is built there.
     """
     table: CatalogTableRead = platform.tables.get_table(table_id)
-    if table.asset_id is not None:
-        raise ConflictError(f"table context is built on asset {table.asset_id}")
+    if table.agent_id is not None:
+        raise ConflictError(f"table context is built on agent {table.agent_id}")
     table_name: str = table.name
     selected: KnowledgeContextRequest = body if body is not None else KnowledgeContextRequest()
     options: TableContextOptions = TableContextOptions(

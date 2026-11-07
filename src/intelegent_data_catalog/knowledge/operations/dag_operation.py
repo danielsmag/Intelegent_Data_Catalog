@@ -4,10 +4,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from intelegent_data_catalog.assets.base import AssetAgent
-from intelegent_data_catalog.assets.models import (
-    AssetAnalysisContext,
-    AssetContextOptions,
+from intelegent_data_catalog.agents.base import ContextBuilder
+from intelegent_data_catalog.agents.models import (
+    AgentAnalysisContext,
+    AgentContextOptions,
     DagDescribeInput,
     FileContextProposal,
 )
@@ -16,7 +16,7 @@ from intelegent_data_catalog.knowledge.models import AirflowAnalysisContext, Air
 from intelegent_data_catalog.knowledge.operations.airflow_operation import AirflowInstanceAgent
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.persistence.clock import utc_now
-from intelegent_data_catalog.persistence.enums import AssetKind
+from intelegent_data_catalog.persistence.enums import AgentKind
 from intelegent_data_catalog.persistence.models import AirflowDagRow
 
 
@@ -31,7 +31,7 @@ class DagMetadata(BaseModel):
     description: str | None
 
 
-class AirflowDagAgent(AssetAgent):
+class AirflowDagAgent(ContextBuilder):
     """Build context for one DAG by asking the instance agent for that DAG only."""
 
     def __init__(
@@ -53,7 +53,7 @@ class AirflowDagAgent(AssetAgent):
             description=self._dag.description,
         )
 
-    def build_context(self, options: AssetContextOptions) -> AssetAnalysisContext:
+    def build_context(self, options: AgentContextOptions) -> AgentAnalysisContext:
         """Analyze this DAG. Other DAGs of the instance are left out of the call."""
         flags: dict[str, bool] = options.flags
         built: AirflowAnalysisContext = self._instance_agent.build_context(
@@ -75,12 +75,12 @@ class AirflowDagAgent(AssetAgent):
             text: str = finding.summary.strip()
             if text != "":
                 summary = text
-        asset_id: UUID | None = self._dag.asset_id
-        if asset_id is None:
-            raise LlmUnavailableError("dag has no asset")
-        return AssetAnalysisContext(
-            asset_id=asset_id,
-            kind=AssetKind.AIRFLOW_DAG,
+        agent_id: UUID | None = self._dag.agent_id
+        if agent_id is None:
+            raise LlmUnavailableError("dag has no agent")
+        return AgentAnalysisContext(
+            agent_id=agent_id,
+            kind=AgentKind.AIRFLOW_DAG,
             summary=summary,
             built_at=utc_now(),
             payload={
@@ -104,7 +104,7 @@ class AirflowDagAgent(AssetAgent):
                     task_ids.append(task_id)
         proposed: FileContextProposal = self._describer.propose(
             DagDescribeInput(
-                asset_id=self._dag.asset_id or self._dag.id,
+                agent_id=self._dag.agent_id or self._dag.id,
                 dag_id=self._dag.dag_id,
                 description=self._dag.description,
                 source_code=self._dag.source_code,

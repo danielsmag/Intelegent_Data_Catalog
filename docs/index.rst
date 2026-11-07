@@ -2,7 +2,7 @@ Intelegent Data Catalog
 ========================
 
 Python 3.13 or newer application for an intelligent data catalog. This manual covers
-install and Compose, the catalog model, asset definitions, the UI, the asset
+install and Compose, the catalog model, agent definitions, the UI, the agent
 DSL, and the HTTP API.
 
 .. grid:: 2
@@ -18,19 +18,19 @@ DSL, and the HTTP API.
       :link: concepts/index
       :link-type: doc
 
-      Workspaces, spaces, scopes, assets, operators, and operator runs.
+      Workspaces, spaces, scopes, agents, operators, and operator runs.
 
    .. grid-item-card:: How-to
       :link: howto/index
       :link-type: doc
 
-      Sign in, query tables, register Airflow, and declare assets.
+      Sign in, query tables, register Airflow, and declare agents.
 
    .. grid-item-card:: Reference
       :link: reference/index
       :link-type: doc
 
-      Asset DSL classes and the ``/api/v1`` schema.
+      Agent DSL classes and the ``/api/v1`` schema.
 
 .. toctree::
    :hidden:

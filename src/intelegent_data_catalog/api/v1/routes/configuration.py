@@ -1,4 +1,4 @@
-"""Saved refresh settings for tables and assets."""
+"""Saved refresh settings for tables and agents."""
 
 from uuid import UUID
 

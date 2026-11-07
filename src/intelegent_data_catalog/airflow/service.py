@@ -9,6 +9,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.agents.sync import AgentSync
 from intelegent_data_catalog.airflow.mapping import (
     AssetView,
     DagView,
@@ -50,7 +51,6 @@ from intelegent_data_catalog.airflow.schemas import (
     AirflowSyncRunRead,
     AirflowTableDagRead,
 )
-from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.core.settings import AirflowSettings
 from intelegent_data_catalog.exceptions import (
     AirflowUnavailableError,
@@ -129,7 +129,7 @@ class AirflowService:
             description=body.description,
             status=AirflowInstanceStatus.ACTIVE.value,
         )
-        AssetSync(self._repo.session).ensure_instance(row)
+        AgentSync(self._repo.session).ensure_instance(row)
         self._repo.commit()
         return instance_read(row, 0)
 
@@ -177,14 +177,14 @@ class AirflowService:
             status: AirflowInstanceStatus = _required(patch.status, "status")
             row.status = status.value
         row.updated_at = utc_now()
-        AssetSync(self._repo.session).ensure_instance(row)
+        AgentSync(self._repo.session).ensure_instance(row)
         self._repo.commit()
         return instance_read(row, self._repo.dag_counts().get(row.id, 0))
 
     def delete_instance(self, instance_id: UUID) -> None:
-        """Delete an instance, its snapshots, and the linked asset."""
+        """Delete an instance, its snapshots, and the linked agent."""
         row: AirflowInstanceRow = self._instance(instance_id)
-        AssetSync(self._repo.session).delete_instance(row)
+        AgentSync(self._repo.session).delete_instance(row)
         self._repo.delete(row)
         self._repo.commit()
 

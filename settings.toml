@@ -124,17 +124,17 @@ bucket = "workspace"
 region = "us-west-2"
 max_upload_bytes = 52428800
 
-# Python files under assets/. Beat polls only when enabled.
+# Python files under agents/. Beat polls only when enabled.
 # Host clients use localhost. Compose overrides the endpoint to http://minio:9000.
-[asset_definitions]
+[agent_definitions]
 enabled = true
 endpoint = "http://127.0.0.1:9000"
 access_key = "polaris_root"
 secret_key = "polaris_pass"
 bucket = "workspace"
 region = "us-west-2"
-prefix = "asset-definitions/"
-assets_folder = "assets"
+prefix = "agent-definitions/"
+agents_folder = "agents"
 poll_interval_seconds = 10
 exec_timeout_seconds = 30
 max_file_bytes = 1048576

@@ -19,7 +19,15 @@ depends_on: str | Sequence[str] | None = None
 _TABLE: str = "asset_definition_items"
 _RUN_CHECK: str = "run_status IS NULL OR run_status IN ('queued', 'running', 'succeeded', 'failed')"
 _RUN_CONSTRAINT: str = "ck_asset_definition_items_run_status"
+_RUN_CONSTRAINTS: tuple[str, ...] = (
+    "ck_asset_definition_items_run_status",
+    "ck_agent_definition_items_run_status",
+)
 _NEXT_INDEX: str = "ix_asset_definition_items_next_run"
+_NEXT_INDEXES: tuple[str, ...] = (
+    "ix_asset_definition_items_next_run",
+    "ix_agent_definition_items_next_run",
+)
 
 
 def upgrade() -> None:
@@ -56,12 +64,18 @@ def downgrade() -> None:
     bind: Connection = op.get_bind()
     if _TABLE not in _tables(bind):
         return
-    if _NEXT_INDEX in _index_names(bind, _TABLE):
-        op.drop_index(_NEXT_INDEX, table_name=_TABLE)
+    indexes: set[str] = _index_names(bind, _TABLE)
+    index_name: str
+    for index_name in _NEXT_INDEXES:
+        if index_name in indexes:
+            op.drop_index(index_name, table_name=_TABLE)
     present: set[str] = _column_names(bind, _TABLE)
+    checks: set[str] = _check_names(bind, _TABLE)
     with op.batch_alter_table(_TABLE) as batch:
-        if _RUN_CONSTRAINT in _check_names(bind, _TABLE):
-            batch.drop_constraint(_RUN_CONSTRAINT, type_="check")
+        constraint: str
+        for constraint in _RUN_CONSTRAINTS:
+            if constraint in checks:
+                batch.drop_constraint(constraint, type_="check")
         name: str
         for name in ("next_run_at", "schedule", "ran_at", "run_error", "run_status"):
             if name in present:

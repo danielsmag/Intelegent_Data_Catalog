@@ -4,7 +4,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.settings import ThinkingLevel
 
-from intelegent_data_catalog.assets.models import DagDescribeInput, FileContextProposal
+from intelegent_data_catalog.agents.models import DagDescribeInput, FileContextProposal
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.llm.run import ModelCall
 from intelegent_data_catalog.llm.structured import structured_output

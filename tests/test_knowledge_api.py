@@ -12,11 +12,11 @@ from fastapi import FastAPI
 from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.agents.models import AgentAnalysisContext
+from intelegent_data_catalog.agents.store import AgentKnowledgeStore
+from intelegent_data_catalog.agents.sync import AgentSync
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
-from intelegent_data_catalog.assets.models import AssetAnalysisContext
-from intelegent_data_catalog.assets.store import AssetKnowledgeStore
-from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AppSettings, load_settings
 from intelegent_data_catalog.knowledge.context.catalog import PostgresCatalogContextProvider
@@ -24,7 +24,7 @@ from intelegent_data_catalog.knowledge.models import TableAnalysisContext, Table
 from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
-from intelegent_data_catalog.persistence.enums import AssetKind
+from intelegent_data_catalog.persistence.enums import AgentKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import CatalogTableRow
 from intelegent_data_catalog.registry.repository import RegistryRepository
@@ -135,16 +135,16 @@ def test_built_context_is_saved_and_readable(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_asset_backed_table_stores_the_snapshot_on_the_asset(tmp_path: Path) -> None:
-    """A linked table refuses the table build. Reads prefer the asset snapshot."""
+def test_agent_backed_table_stores_the_snapshot_on_the_agent(tmp_path: Path) -> None:
+    """A linked table refuses the table build. Reads prefer the agent snapshot."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
     try:
         table_id: str = _table(app)
-        asset_id: str = _attach_asset(database, table_id)
+        agent_id: str = _attach_agent(database, table_id)
         _save_table_snapshot(database, table_id, "table row")
-        _save_asset_snapshot(database, table_id, asset_id, {"table_id": table_id, "columns": 0})
+        _save_agent_snapshot(database, table_id, agent_id, {"table_id": table_id, "columns": 0})
         held: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
         assert held.status_code == 200
         assert _nested(_object(held), "table")["description"] == "table row"
@@ -155,23 +155,23 @@ def test_asset_backed_table_stores_the_snapshot_on_the_asset(tmp_path: Path) -> 
             {},
         )
         assert refused.status_code == 409
-        assert asset_id in _text(_object(refused), "detail")
-        _save_asset_snapshot(database, table_id, asset_id, None)
+        assert agent_id in _text(_object(refused), "detail")
+        _save_agent_snapshot(database, table_id, agent_id, None)
         saved: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
         assert saved.status_code == 200
-        assert _nested(_object(saved), "table")["description"] == "asset row"
-        asset_saved: httpx.Response = _send(
+        assert _nested(_object(saved), "table")["description"] == "agent row"
+        agent_saved: httpx.Response = _send(
             app,
             "GET",
-            f"/api/v1/assets/{asset_id}/knowledge-context",
+            f"/api/v1/agents/{agent_id}/knowledge-context",
         )
-        assert asset_saved.status_code == 200
-        payload: object = _object(asset_saved)["payload"]
+        assert agent_saved.status_code == 200
+        payload: object = _object(agent_saved)["payload"]
         assert isinstance(payload, dict)
         table: object = payload["table"]
         assert isinstance(table, dict)
         assert table["name"] == "Orders"
-        assert table["description"] == "asset row"
+        assert table["description"] == "agent row"
     finally:
         database.dispose()
 
@@ -381,14 +381,14 @@ def _wait_for_build(app: FastAPI, job_id: str) -> dict[str, object]:
     raise AssertionError("knowledge build did not finish")
 
 
-def _attach_asset(database: CatalogDatabase, table_id: str) -> str:
+def _attach_agent(database: CatalogDatabase, table_id: str) -> str:
     session: Session = database.session()
     try:
         row: CatalogTableRow | None = session.get(CatalogTableRow, UUID(table_id))
         assert row is not None
-        asset_id: UUID = AssetSync(session).ensure_table(row).id
+        agent_id: UUID = AgentSync(session).ensure_table(row).id
         session.commit()
-        return str(asset_id)
+        return str(agent_id)
     finally:
         session.close()
 
@@ -401,10 +401,10 @@ def _save_table_snapshot(database: CatalogDatabase, table_id: str, description: 
         session.close()
 
 
-def _save_asset_snapshot(
+def _save_agent_snapshot(
     database: CatalogDatabase,
     table_id: str,
-    asset_id: str,
+    agent_id: str,
     thin: dict[str, object] | None,
 ) -> None:
     session: Session = database.session()
@@ -412,17 +412,17 @@ def _save_asset_snapshot(
         payload: dict[str, object]
         summary: str
         if thin is None:
-            built: TableAnalysisContext = _catalog_snapshot(session, table_id, "asset row")
+            built: TableAnalysisContext = _catalog_snapshot(session, table_id, "agent row")
             payload = built.model_dump(mode="json")
-            summary = "asset row"
+            summary = "agent row"
         else:
             payload = thin
             summary = "thin"
-        AssetKnowledgeStore(session).save(
-            AssetAnalysisContext.model_validate(
+        AgentKnowledgeStore(session).save(
+            AgentAnalysisContext.model_validate(
                 {
-                    "asset_id": asset_id,
-                    "kind": AssetKind.TABLE.value,
+                    "agent_id": agent_id,
+                    "kind": AgentKind.TABLE.value,
                     "summary": summary,
                     "built_at": utc_now().isoformat(),
                     "payload": payload,

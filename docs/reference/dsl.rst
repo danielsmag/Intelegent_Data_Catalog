@@ -1,25 +1,29 @@
-Asset DSL
+Agent DSL
 =========
 
-Import these names from ``intelegent_data_catalog.assets.dsl``.
-Constructing :class:`~intelegent_data_catalog.assets.dsl.nodes.Asset`
+Import these names from ``intelegent_data_catalog.agents.dsl``.
+Constructing :class:`~intelegent_data_catalog.agents.dsl.nodes.Agent`
 registers the declaration with the definition file that is executing.
 Operators record their fields at construction and run in
 :doc:`/concepts/execution`.
 
-.. currentmodule:: intelegent_data_catalog.assets.dsl
+.. currentmodule:: intelegent_data_catalog.agents.dsl
 
 .. autosummary::
    :toctree: _autosummary
    :nosignatures:
 
-   Asset
+   Agent
+   AgentPack
+   Source
+   IcebergTable
+   PostgresTable
+   Schema
+   AirflowDag
+   AirflowInstance
+   Page
    Operator
    OperatorContext
-   TableOperator
-   IcebergTableOperator
-   PostgresTableOperator
-   SchemaOperator
-   AirflowOperator
-   PageOperator
+   BuildContext
+   Describe
    operator_from_ref

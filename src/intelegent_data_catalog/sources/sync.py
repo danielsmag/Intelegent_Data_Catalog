@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.exceptions import TrinoUnavailableError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
-    AssetStatus,
+    AgentStatus,
     BindingRole,
     BindingState,
     CapabilitySupport,
@@ -22,8 +22,8 @@ from intelegent_data_catalog.persistence.enums import (
     TableStatus,
 )
 from intelegent_data_catalog.persistence.models import (
-    AssetEngineBindingRow,
-    AssetRow,
+    AgentEngineBindingRow,
+    AgentRow,
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
@@ -154,7 +154,7 @@ class MetadataSyncService:
             status = SyncRunStatus.FAILED
         elif batch.truncated:
             status = SyncRunStatus.PARTIAL
-            message = "scan stopped at the table limit; missing assets were left unchanged"
+            message = "scan stopped at the table limit; missing agents were left unchanged"
         finished: SyncRunRead = self._finish(
             run,
             status,
@@ -249,7 +249,7 @@ class MetadataSyncService:
         else:
             if existing.status == TableStatus.MISSING.value:
                 existing.status = TableStatus.ACTIVE.value
-                self._align_asset(existing, AssetStatus.ACTIVE.value)
+                self._align_agent(existing, AgentStatus.ACTIVE.value)
             existing.table_type = observed.table_type.value
             existing.physical_catalog = observed.catalog
             existing.physical_namespace = observed.namespace
@@ -321,7 +321,7 @@ class MetadataSyncService:
         now: datetime,
     ) -> None:
         engine_ref_key: str = _source_key(observed.catalog, observed.namespace, observed.name)
-        current: AssetEngineBindingRow | None = self._repo.find_asset_binding_by_key(
+        current: AgentEngineBindingRow | None = self._repo.find_agent_binding_by_key(
             binding.id,
             engine_ref_key,
         )
@@ -329,8 +329,8 @@ class MetadataSyncService:
             EngineRef(catalog=observed.catalog, namespace=observed.namespace, table=observed.name)
         )
         if current is None:
-            self._repo.add_asset_binding(
-                AssetEngineBindingRow(
+            self._repo.add_agent_binding(
+                AgentEngineBindingRow(
                     id=uuid4(),
                     catalog_table_id=table.id,
                     data_source_id=table.data_source_id,
@@ -510,28 +510,28 @@ class MetadataSyncService:
         return sync_run_read(run)
 
     def _mark_missing(self, binding: SourceEngineBindingRow, seen: set[str]) -> None:
-        asset: AssetEngineBindingRow
-        for asset in self._repo.list_asset_bindings_for_source(binding.id):
-            if asset.role != BindingRole.DISCOVERY.value:
+        agent: AgentEngineBindingRow
+        for agent in self._repo.list_agent_bindings_for_source(binding.id):
+            if agent.role != BindingRole.DISCOVERY.value:
                 continue
-            table: CatalogTableRow | None = self._repo.get_table(asset.catalog_table_id)
+            table: CatalogTableRow | None = self._repo.get_table(agent.catalog_table_id)
             if table is None or table.source_key in seen:
                 continue
             if table.status == TableStatus.DEPRECATED.value:
                 continue
             table.status = TableStatus.MISSING.value
             table.updated_at = utc_now()
-            self._align_asset(table, AssetStatus.MISSING.value)
+            self._align_agent(table, AgentStatus.MISSING.value)
 
-    def _align_asset(self, table: CatalogTableRow, status: str) -> None:
-        """Copy discovery status onto the asset. A user off switch stays off."""
-        if table.asset_id is None:
+    def _align_agent(self, table: CatalogTableRow, status: str) -> None:
+        """Copy discovery status onto the agent. A user off switch stays off."""
+        if table.agent_id is None:
             return
-        asset: AssetRow | None = self._session.get(AssetRow, table.asset_id)
-        if asset is None or asset.status == AssetStatus.DEPRECATED.value:
+        agent: AgentRow | None = self._session.get(AgentRow, table.agent_id)
+        if agent is None or agent.status == AgentStatus.DEPRECATED.value:
             return
-        asset.status = status
-        asset.updated_at = utc_now()
+        agent.status = status
+        agent.updated_at = utc_now()
 
     def _require_binding(self, source_binding_id: UUID) -> SourceEngineBindingRow:
         binding: SourceEngineBindingRow | None = self._repo.get_source_binding(source_binding_id)

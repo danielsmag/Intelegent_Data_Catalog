@@ -8,14 +8,14 @@ from fastapi import Depends, Request
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from intelegent_data_catalog.agents.agent_pack.service import AgentPackService
+from intelegent_data_catalog.agents.definitions.listing import AgentDefinitionListing
+from intelegent_data_catalog.agents.definitions.service import AgentDefinitionService
+from intelegent_data_catalog.agents.service import AgentService
+from intelegent_data_catalog.agents.triggers import AgentChangeTrigger
 from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
-from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
-from intelegent_data_catalog.assets.definitions.listing import AssetDefinitionListing
-from intelegent_data_catalog.assets.definitions.service import AssetDefinitionService
-from intelegent_data_catalog.assets.service import AssetService
-from intelegent_data_catalog.assets.triggers import AssetChangeTrigger
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.auth.service import AccessService
@@ -174,7 +174,7 @@ def get_platform(
         settings,
         query,
         container.object_store(),
-        container.asset_definition_store(),
+        container.agent_definition_store(),
     )
     try:
         yield platform
@@ -309,9 +309,9 @@ def get_workspace_files(
     database: CatalogDatabase = container.database()
     session: Session = database.session()
     jobs: object = getattr(request.app.state, "catalog_jobs", None)
-    changes: AssetChangeTrigger | None = None
+    changes: AgentChangeTrigger | None = None
     if isinstance(jobs, CatalogJobs):
-        changes = AssetChangeTrigger(session, jobs)
+        changes = AgentChangeTrigger(session, jobs)
     service: WorkspaceFileService = WorkspaceFileService(
         session,
         container.object_store(),
@@ -333,14 +333,14 @@ def get_workspace_files(
 WorkspaceFilesDep = Annotated[WorkspaceFileService, Depends(get_workspace_files)]
 
 
-def get_asset_service(
+def get_agent_service(
     container: Annotated[AppContainer, Depends(get_container)],
     access: Annotated[AccessContext, Depends(get_access)],
-) -> Iterator[AssetService]:
-    """Open one catalog session for asset reads and writes."""
+) -> Iterator[AgentService]:
+    """Open one catalog session for agent reads and writes."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
-    service: AssetService = AssetService(session, access)
+    service: AgentService = AgentService(session, access)
     try:
         yield service
     except SQLAlchemyError as err:
@@ -353,16 +353,16 @@ def get_asset_service(
         session.close()
 
 
-AssetServiceDep = Annotated[AssetService, Depends(get_asset_service)]
+AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
 
 
-def get_asset_definition_service(
+def get_agent_definition_service(
     container: Annotated[AppContainer, Depends(get_container)],
-) -> Iterator[AssetDefinitionService]:
+) -> Iterator[AgentDefinitionService]:
     """Open one catalog session for definition file reads."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
-    service: AssetDefinitionService = AssetDefinitionService(session)
+    service: AgentDefinitionService = AgentDefinitionService(session)
     try:
         yield service
     except SQLAlchemyError as err:
@@ -375,34 +375,34 @@ def get_asset_definition_service(
         session.close()
 
 
-AssetDefinitionServiceDep = Annotated[AssetDefinitionService, Depends(get_asset_definition_service)]
+AgentDefinitionServiceDep = Annotated[AgentDefinitionService, Depends(get_agent_definition_service)]
 
 
-def get_asset_definition_listing(
+def get_agent_definition_listing(
     container: Annotated[AppContainer, Depends(get_container)],
-) -> AssetDefinitionListing:
+) -> AgentDefinitionListing:
     """List definition objects from the definition object store."""
-    listing: AssetDefinitionListing = AssetDefinitionListing(
-        container.asset_definition_store(),
-        container.settings().asset_definitions,
+    listing: AgentDefinitionListing = AgentDefinitionListing(
+        container.agent_definition_store(),
+        container.settings().agent_definitions,
     )
     return listing
 
 
-AssetDefinitionListingDep = Annotated[AssetDefinitionListing, Depends(get_asset_definition_listing)]
+AgentDefinitionListingDep = Annotated[AgentDefinitionListing, Depends(get_agent_definition_listing)]
 
 
 def get_agent_pack(
     container: Annotated[AppContainer, Depends(get_container)],
     access: Annotated[AccessContext, Depends(get_access)],
 ) -> Iterator[AgentPackService]:
-    """Open one catalog session for agent markdown beside an asset declaration."""
+    """Open one catalog session for agent markdown beside an agent declaration."""
     database: CatalogDatabase = container.database()
     session: Session = database.session()
     service: AgentPackService = AgentPackService(
         session,
-        container.asset_definition_store(),
-        container.settings().asset_definitions,
+        container.agent_definition_store(),
+        container.settings().agent_definitions,
         access,
     )
     try:

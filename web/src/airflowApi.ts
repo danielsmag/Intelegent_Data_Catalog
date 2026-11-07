@@ -8,7 +8,7 @@ export type AirflowSyncStatus = "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED"
 
 export type AirflowInstance = {
   id: string
-  asset_id: string | null
+  agent_id: string | null
   name: string
   slug: string
   base_url: string
@@ -133,7 +133,7 @@ export type AirflowDagTable = {
 export type AirflowDag = {
   id: string
   instance_id: string
-  asset_id: string | null
+  agent_id: string | null
   dag_id: string
   display_name: string | null
   description: string | null

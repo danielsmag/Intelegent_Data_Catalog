@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react"
 import { errorMessage } from "./api"
 import { showPageAlert, type PageAlertTone } from "./pageAlertStack"
-import { fetchAssetBuild, startAssetBuild, type AssetBuildJob } from "./assetsApi"
+import { fetchAgentBuild, startAgentBuild, type AgentBuildJob } from "./agentsApi"
 import {
   fetchContextGeneration,
   fetchKnowledgeBuild,
@@ -180,19 +180,19 @@ export function onContextGenerationFinished(
   return contextGenerations.onFinished(handler)
 }
 
-const assetBuilds: BuildFollower<AssetBuildJob> = createFollower(
-  fetchAssetBuild,
-  (job: AssetBuildJob): string => outcome(job.asset_name, job.status, job.error),
-  (job: AssetBuildJob): string => `Build asset context for ${job.asset_name}`,
+const agentBuilds: BuildFollower<AgentBuildJob> = createFollower(
+  fetchAgentBuild,
+  (job: AgentBuildJob): string => outcome(job.agent_name, job.status, job.error),
+  (job: AgentBuildJob): string => `Build agent context for ${job.agent_name}`,
 )
 
-export function onAssetBuildFinished(handler: FinishedHandler<AssetBuildJob>): () => void {
-  return assetBuilds.onFinished(handler)
+export function onAgentBuildFinished(handler: FinishedHandler<AgentBuildJob>): () => void {
+  return agentBuilds.onFinished(handler)
 }
 
-export async function requestAssetBuild(assetId: string): Promise<AssetBuildJob> {
-  const job: AssetBuildJob = await startAssetBuild(assetId)
-  assetBuilds.follow(job)
+export async function requestAgentBuild(agentId: string): Promise<AgentBuildJob> {
+  const job: AgentBuildJob = await startAgentBuild(agentId)
+  agentBuilds.follow(job)
   return job
 }
 

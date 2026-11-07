@@ -65,10 +65,11 @@ def upgrade() -> None:
         "uq_workspace_nodes_asset",
     )
     _add_configuration_columns(bind)
-    if not _check_contains(bind, "catalog_jobs", _JOB_CONSTRAINT, "'asset'"):
-        _replace_check("catalog_jobs", _JOB_CONSTRAINT, _JOB_WITH_ASSET)
-    if not _check_contains(bind, "entity_configurations", _CONFIG_CONSTRAINT, "asset_id"):
-        _replace_check("entity_configurations", _CONFIG_CONSTRAINT, _ONE_CONFIGURATION)
+    if "agents" not in _tables(bind):
+        if not _check_contains(bind, "catalog_jobs", _JOB_CONSTRAINT, "'asset'"):
+            _replace_check("catalog_jobs", _JOB_CONSTRAINT, _JOB_WITH_ASSET)
+        if not _check_contains(bind, "entity_configurations", _CONFIG_CONSTRAINT, "asset_id"):
+            _replace_check("entity_configurations", _CONFIG_CONSTRAINT, _ONE_CONFIGURATION)
     _backfill_tables(bind)
     _backfill_dags(bind)
     _backfill_files(bind)
@@ -105,7 +106,10 @@ def downgrade() -> None:
 
 
 def _create_assets(bind: Connection) -> None:
-    if "assets" in _tables(bind):
+    tables: set[str] = _tables(bind)
+    # Revision 0001 creates the current models. After the agent rename those
+    # tables are already named agents, so this historical create must not run.
+    if "assets" in tables or "agents" in tables:
         return
     op.create_table(
         "assets",
@@ -152,9 +156,10 @@ def _create_assets(bind: Connection) -> None:
 
 
 def _create_memberships(bind: Connection) -> None:
-    if "asset_memberships" in _tables(bind):
+    tables: set[str] = _tables(bind)
+    if "asset_memberships" in tables or "agents" in tables or "assets" not in tables:
         return
-    if "spaces" not in _tables(bind) or "scopes" not in _tables(bind):
+    if "spaces" not in tables or "scopes" not in tables:
         return
     op.create_table(
         "asset_memberships",
@@ -189,7 +194,12 @@ def _create_memberships(bind: Connection) -> None:
 
 
 def _create_contexts(bind: Connection) -> None:
-    if "asset_knowledge_contexts" in _tables(bind):
+    tables: set[str] = _tables(bind)
+    if (
+        "asset_knowledge_contexts" in tables
+        or "agent_knowledge_contexts" in tables
+        or "assets" not in tables
+    ):
         return
     op.create_table(
         "asset_knowledge_contexts",
@@ -208,6 +218,8 @@ def _add_asset_column(bind: Connection, table: str, fk_name: str, index_name: st
     if table not in _tables(bind):
         return
     present: set[str] = _column_names(bind, table)
+    if "agent_id" in present:
+        return
     if "asset_id" not in present:
         with op.batch_alter_table(table) as batch:
             batch.add_column(sa.Column("asset_id", sa.Uuid(), nullable=True))
@@ -236,6 +248,8 @@ def _add_configuration_columns(bind: Connection) -> None:
     if "entity_configurations" not in _tables(bind):
         return
     present: set[str] = _column_names(bind, "entity_configurations")
+    if "agent_id" in present:
+        return
     uniques: set[str] = _unique_names(bind, "entity_configurations")
     checks: set[str] = _check_names(bind, "entity_configurations")
     needs_asset: bool = "asset_id" not in present

@@ -76,97 +76,97 @@ export type MemoryFile = {
   updated_by?: string | null
 }
 
-export function fetchMemory(assetId: string, signal?: AbortSignal): Promise<MemoryFile[]> {
-  return requestJson<MemoryFile[]>(`/api/v1/assets/${assetId}/agent-memory`, { signal })
+export function fetchMemory(agentId: string, signal?: AbortSignal): Promise<MemoryFile[]> {
+  return requestJson<MemoryFile[]>(`/api/v1/agents/${agentId}/agent-memory`, { signal })
 }
 
-export function fetchMemoryFile(assetId: string, name: string): Promise<MemoryFile> {
+export function fetchMemoryFile(agentId: string, name: string): Promise<MemoryFile> {
   return requestJson<MemoryFile>(
-    `/api/v1/assets/${assetId}/agent-memory/${encodeURIComponent(name)}`,
+    `/api/v1/agents/${agentId}/agent-memory/${encodeURIComponent(name)}`,
   )
 }
 
-export function fetchAgentPack(assetId: string, signal?: AbortSignal): Promise<AgentPack> {
-  return requestJson<AgentPack>(`/api/v1/assets/${assetId}/agent-pack`, { signal })
+export function fetchAgentPack(agentId: string, signal?: AbortSignal): Promise<AgentPack> {
+  return requestJson<AgentPack>(`/api/v1/agents/${agentId}/agent-pack`, { signal })
 }
 
-export function fetchAgentCard(assetId: string): Promise<AgentCard> {
-  return requestJson<AgentCard>(`/api/v1/assets/${assetId}/agent-pack/agent`)
+export function fetchAgentCard(agentId: string): Promise<AgentCard> {
+  return requestJson<AgentCard>(`/api/v1/agents/${agentId}/agent-pack/agent`)
 }
 
-export function saveAgentCard(assetId: string, body: string, layer?: string): Promise<AgentCard> {
-  return requestJson<AgentCard>(`/api/v1/assets/${assetId}/agent-pack/agent${layerQuery(layer)}`, {
+export function saveAgentCard(agentId: string, body: string, layer?: string): Promise<AgentCard> {
+  return requestJson<AgentCard>(`/api/v1/agents/${agentId}/agent-pack/agent${layerQuery(layer)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ body }),
   })
 }
 
-export function fetchPrompt(assetId: string, slug: string): Promise<PromptFile> {
-  return requestJson<PromptFile>(`/api/v1/assets/${assetId}/agent-pack/prompts/${slug}`)
+export function fetchPrompt(agentId: string, slug: string): Promise<PromptFile> {
+  return requestJson<PromptFile>(`/api/v1/agents/${agentId}/agent-pack/prompts/${slug}`)
 }
 
 export function savePrompt(
-  assetId: string,
+  agentId: string,
   slug: string,
   file: Pick<PromptFile, "name" | "description" | "enabled" | "active" | "body">,
   layer?: string,
 ): Promise<PromptFile> {
-  return requestJson<PromptFile>(`/api/v1/assets/${assetId}/agent-pack/prompts/${slug}${layerQuery(layer)}`, {
+  return requestJson<PromptFile>(`/api/v1/agents/${agentId}/agent-pack/prompts/${slug}${layerQuery(layer)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(file),
   })
 }
 
-export function deletePrompt(assetId: string, slug: string, layer?: string): Promise<void> {
-  return requestJson<void>(`/api/v1/assets/${assetId}/agent-pack/prompts/${slug}${layerQuery(layer)}`, {
+export function deletePrompt(agentId: string, slug: string, layer?: string): Promise<void> {
+  return requestJson<void>(`/api/v1/agents/${agentId}/agent-pack/prompts/${slug}${layerQuery(layer)}`, {
     method: "DELETE",
   })
 }
 
-export function fetchRule(assetId: string, slug: string): Promise<RuleFile> {
-  return requestJson<RuleFile>(`/api/v1/assets/${assetId}/agent-pack/rules/${slug}`)
+export function fetchRule(agentId: string, slug: string): Promise<RuleFile> {
+  return requestJson<RuleFile>(`/api/v1/agents/${agentId}/agent-pack/rules/${slug}`)
 }
 
 export function saveRule(
-  assetId: string,
+  agentId: string,
   slug: string,
   file: Pick<RuleFile, "name" | "description" | "enabled" | "order" | "body">,
   layer?: string,
 ): Promise<RuleFile> {
-  return requestJson<RuleFile>(`/api/v1/assets/${assetId}/agent-pack/rules/${slug}${layerQuery(layer)}`, {
+  return requestJson<RuleFile>(`/api/v1/agents/${agentId}/agent-pack/rules/${slug}${layerQuery(layer)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(file),
   })
 }
 
-export function deleteRule(assetId: string, slug: string, layer?: string): Promise<void> {
-  return requestJson<void>(`/api/v1/assets/${assetId}/agent-pack/rules/${slug}${layerQuery(layer)}`, {
+export function deleteRule(agentId: string, slug: string, layer?: string): Promise<void> {
+  return requestJson<void>(`/api/v1/agents/${agentId}/agent-pack/rules/${slug}${layerQuery(layer)}`, {
     method: "DELETE",
   })
 }
 
-export function fetchSkill(assetId: string, slug: string): Promise<SkillFile> {
-  return requestJson<SkillFile>(`/api/v1/assets/${assetId}/agent-pack/skills/${slug}`)
+export function fetchSkill(agentId: string, slug: string): Promise<SkillFile> {
+  return requestJson<SkillFile>(`/api/v1/agents/${agentId}/agent-pack/skills/${slug}`)
 }
 
 export function saveSkill(
-  assetId: string,
+  agentId: string,
   slug: string,
   file: Pick<SkillFile, "name" | "description" | "enabled" | "tools" | "body">,
   layer?: string,
 ): Promise<SkillFile> {
-  return requestJson<SkillFile>(`/api/v1/assets/${assetId}/agent-pack/skills/${slug}${layerQuery(layer)}`, {
+  return requestJson<SkillFile>(`/api/v1/agents/${agentId}/agent-pack/skills/${slug}${layerQuery(layer)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(file),
   })
 }
 
-export function deleteSkill(assetId: string, slug: string, layer?: string): Promise<void> {
-  return requestJson<void>(`/api/v1/assets/${assetId}/agent-pack/skills/${slug}${layerQuery(layer)}`, {
+export function deleteSkill(agentId: string, slug: string, layer?: string): Promise<void> {
+  return requestJson<void>(`/api/v1/agents/${agentId}/agent-pack/skills/${slug}${layerQuery(layer)}`, {
     method: "DELETE",
   })
 }

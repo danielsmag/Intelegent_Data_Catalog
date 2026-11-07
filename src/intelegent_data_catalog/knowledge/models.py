@@ -1,4 +1,4 @@
-"""Context objects for catalog tables, columns, assets, and Airflow. Identifiers are catalog ids."""
+"""Context objects for catalog tables, columns, agents, and Airflow. Identifiers are catalog ids."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -643,7 +643,7 @@ ContextSubjectKind = Literal[
     "table_columns",
     "column",
     "airflow",
-    "asset",
+    "agent",
 ]
 
 _CONTEXT_LIMIT: int = 1200
@@ -714,6 +714,45 @@ class TableColumnsContextProposal(BaseModel):
 
 class AirflowContextProposal(_ContextText):
     """Business meaning the model wrote for one Airflow instance."""
+
+
+class SchemaColumnFact(BaseModel):
+    """One column inside a schema snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    data_type: str | None = None
+
+
+class SchemaTableFact(BaseModel):
+    """One table inside a schema snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    source_key: str
+    description: str | None = None
+    columns: list[SchemaColumnFact] = Field(default_factory=list)
+    neighbors: list[str] = Field(default_factory=list)
+    lineage: list[str] = Field(default_factory=list)
+    data_profile: str | None = None
+
+
+class SchemaCatalogContext(BaseModel):
+    """Facts the schema describer sees. One context covers every matching table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: UUID
+    catalog: str
+    namespace: str
+    tables: list[SchemaTableFact] = Field(default_factory=list)
+    existing_context: str | None = None
+
+
+class SchemaContextProposal(_ContextText):
+    """Business meaning the model wrote for one schema."""
 
 
 class TableContextInput(BaseModel):

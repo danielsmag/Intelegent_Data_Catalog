@@ -41,7 +41,7 @@ function writeExpandAll(open: boolean): void {
 const FILTERS = [
   { id: "all", label: "All", empty: "No builds are in this window." },
   { id: "table", label: "Tables", empty: "No table builds are in this window." },
-  { id: "asset", label: "Assets", empty: "No asset builds are in this window." },
+  { id: "agent", label: "Agents", empty: "No agent builds are in this window." },
   { id: "airflow", label: "Airflow", empty: "No Airflow builds are in this window." },
 ] as const satisfies readonly FilterChoice[]
 

@@ -3,8 +3,8 @@ import { ContextEditor } from "./ContextEditor"
 import { KnowledgeContextPanel } from "./KnowledgeContextPanel"
 import { SubgraphView } from "./SubgraphView"
 import { errorMessage, isAbortError } from "./api"
-import { type AssetRecord } from "./assetsApi"
-import { onAssetBuildFinished, onContextGenerationFinished, requestContextGeneration } from "./knowledgeBuild"
+import { type AgentRecord } from "./agentsApi"
+import { onAgentBuildFinished, onContextGenerationFinished, requestContextGeneration } from "./knowledgeBuild"
 import {
   fetchBindings,
   fetchCatalogColumns,
@@ -16,7 +16,7 @@ import {
   fetchRelationships,
   fetchSparkQuery,
   fetchTableTags,
-  type AssetBindingRecord,
+  type AgentBindingRecord,
   type CatalogColumnRecord,
   type CatalogTableRecord,
   type GraphViewRecord,
@@ -29,19 +29,19 @@ import { setPendingQuerySql, setSidebarView } from "./sidebarView"
 
 const EMPTY_GRAPH: GraphViewRecord = { nodes: [], edges: [], truncated: false }
 
-export type TableAssetTab = "overview" | "columns" | "relationships" | "lineage" | "graph" | "source"
+export type TableAgentTab = "overview" | "columns" | "relationships" | "lineage" | "graph" | "source"
 
-export function TableAssetView(props: {
-  asset: AssetRecord
+export function TableAgentView(props: {
+  agent: AgentRecord
   tableId: string
-  tab: TableAssetTab
-  onAssetChanged: () => void
+  tab: TableAgentTab
+  onAgentChanged: () => void
 }): ReactElement {
   const [table, setTable] = useState<CatalogTableRecord | null>(null)
   const [columns, setColumns] = useState<CatalogColumnRecord[]>([])
   const [relationships, setRelationships] = useState<TableRelationships | null>(null)
   const [spark, setSpark] = useState<SparkQueryAvailability | null>(null)
-  const [bindings, setBindings] = useState<AssetBindingRecord[]>([])
+  const [bindings, setBindings] = useState<AgentBindingRecord[]>([])
   const [tags, setTags] = useState<TagRecord[]>([])
   const [lineage, setLineage] = useState<GraphViewRecord | null>(null)
   const [relationGraph, setRelationGraph] = useState<GraphViewRecord | null>(null)
@@ -52,13 +52,13 @@ export function TableAssetView(props: {
   const [columnsBuilding, setColumnsBuilding] = useState<boolean>(false)
   const [reloadToken, setReloadToken] = useState<number>(0)
   useEffect(() => {
-    return onAssetBuildFinished((job) => {
-      if (job.asset_id !== props.asset.id || job.status !== "succeeded") {
+    return onAgentBuildFinished((job) => {
+      if (job.agent_id !== props.agent.id || job.status !== "succeeded") {
         return
       }
       setReloadToken((current: number) => current + 1)
     })
-  }, [props.asset.id])
+  }, [props.agent.id])
   useEffect(() => {
     return onContextGenerationFinished((job) => {
       if (job.subject_kind !== "table_columns" || job.subject_id !== props.tableId) {
@@ -128,17 +128,17 @@ export function TableAssetView(props: {
     return () => {
       controller.abort()
     }
-  }, [props.asset.id, props.tableId, reloadToken])
-  const qualified: string = table?.source_key ?? props.asset.name
+  }, [props.agent.id, props.tableId, reloadToken])
+  const qualified: string = table?.source_key ?? props.agent.name
   const relationshipCount: number =
     (relationships?.incoming.length ?? 0) + (relationships?.outgoing.length ?? 0)
   const description: string | null = table?.description ?? table?.source_description ?? null
   return (
-    <div className="asset-sheet">
-      {error !== null ? <p className="error-text asset-alert">{error}</p> : null}
+    <div className="agent-sheet">
+      {error !== null ? <p className="error-text agent-alert">{error}</p> : null}
       {props.tab === "overview" ? (
-        <div className="asset-overview">
-          <ul className="asset-stats">
+        <div className="agent-overview">
+          <ul className="agent-stats">
             <li>
               <span>Columns</span>
               <strong>{table === null ? "—" : String(columns.length)}</strong>
@@ -156,24 +156,24 @@ export function TableAssetView(props: {
               <strong>{table === null ? "—" : String(tags.length)}</strong>
             </li>
           </ul>
-          <div className="asset-overview-grid">
-            <div className="asset-overview-main">
+          <div className="agent-overview-grid">
+            <div className="agent-overview-main">
               {description !== null && description !== "" ? (
-                <section className="asset-card">
+                <section className="agent-card">
                   <h2>Description</h2>
-                  <p className="asset-prose">{description}</p>
+                  <p className="agent-prose">{description}</p>
                 </section>
               ) : null}
-              <section className="asset-card">
+              <section className="agent-card">
                 <ContextEditor
-                  kind="asset"
-                  id={props.asset.id}
-                  name={props.asset.name}
-                  context={props.asset.context}
-                  origin={props.asset.context_origin}
-                  onChanged={props.onAssetChanged}
+                  kind="agent"
+                  id={props.agent.id}
+                  name={props.agent.name}
+                  context={props.agent.context}
+                  origin={props.agent.context_origin}
+                  onChanged={props.onAgentChanged}
                 />
-                <div className="asset-card-foot">
+                <div className="agent-card-foot">
                   <button
                     className="button secondary"
                     type="button"
@@ -192,9 +192,9 @@ export function TableAssetView(props: {
                 </div>
               </section>
             </div>
-            <aside className="asset-card asset-properties" aria-label="Table properties">
+            <aside className="agent-card agent-properties" aria-label="Table properties">
               <h2>Properties</h2>
-              <dl className="facts asset-facts">
+              <dl className="facts agent-facts">
                 <dt>Qualified name</dt>
                 <dd className="mono">{qualified}</dd>
                 <dt>Physical</dt>
@@ -209,12 +209,12 @@ export function TableAssetView(props: {
                 <dd>{formatWhen(table?.last_synced_at ?? null)}</dd>
               </dl>
               <h3>Tags</h3>
-              <div className="asset-tags">
+              <div className="agent-tags">
                 {tags.length === 0 ? (
                   <span className="comment">No tags</span>
                 ) : (
                   tags.map((tag: TagRecord) => (
-                    <span key={tag.id} className="asset-chip">
+                    <span key={tag.id} className="agent-chip">
                       {tag.name}
                     </span>
                   ))
@@ -225,15 +225,15 @@ export function TableAssetView(props: {
           {knowledge !== null ? (
             <KnowledgeContextPanel context={knowledge} />
           ) : (
-            <section className="asset-empty" aria-label="Built context">
-              <p className="asset-empty-title">No built context</p>
+            <section className="agent-empty" aria-label="Built context">
+              <p className="agent-empty-title">No built context</p>
               <p>Build context to keep a summary of columns, relationships, and lineage.</p>
             </section>
           )}
         </div>
       ) : null}
       {props.tab === "columns" ? (
-        <section className="asset-card asset-table-card">
+        <section className="agent-card agent-table-card">
           <ColumnTable
             columns={columns}
             onContextChanged={() => {
@@ -246,7 +246,7 @@ export function TableAssetView(props: {
         <RelationshipLists relationships={relationships} graph={relationGraph} />
       ) : null}
       {props.tab === "lineage" ? (
-        <section className="asset-card">
+        <section className="agent-card">
           <h2>Lineage</h2>
           <GraphList graph={lineage} empty="No lineage recorded." />
         </section>
@@ -309,16 +309,16 @@ export function RelationshipLists(props: {
   graph: GraphViewRecord | null
 }): ReactElement {
   return (
-    <div className="asset-stack">
-      <section className="asset-card">
+    <div className="agent-stack">
+      <section className="agent-card">
         <h2>Outgoing</h2>
         <RelationshipItems items={props.relationships.outgoing} empty="No outgoing relationships." />
       </section>
-      <section className="asset-card">
+      <section className="agent-card">
         <h2>Incoming</h2>
         <RelationshipItems items={props.relationships.incoming} empty="No incoming relationships." />
       </section>
-      <section className="asset-card">
+      <section className="agent-card">
         <h2>Graph</h2>
         <GraphList graph={props.graph} empty="No relationship graph." />
       </section>
@@ -371,20 +371,20 @@ export function GraphList(props: { graph: GraphViewRecord | null; empty: string 
 
 export function SourceTab(props: {
   table: CatalogTableRecord
-  bindings: AssetBindingRecord[]
+  bindings: AgentBindingRecord[]
   spark: SparkQueryAvailability | null
 }): ReactElement {
-  const discovery: AssetBindingRecord | undefined = props.bindings.find(
-    (binding: AssetBindingRecord) => binding.role === "DISCOVERY",
+  const discovery: AgentBindingRecord | undefined = props.bindings.find(
+    (binding: AgentBindingRecord) => binding.role === "DISCOVERY",
   )
-  const query: AssetBindingRecord | undefined = props.bindings.find(
-    (binding: AssetBindingRecord) => binding.role === "QUERY" && binding.is_selected,
+  const query: AgentBindingRecord | undefined = props.bindings.find(
+    (binding: AgentBindingRecord) => binding.role === "QUERY" && binding.is_selected,
   )
   const sql: string | null = props.spark?.sql ?? null
   return (
-    <section className="asset-card">
+    <section className="agent-card">
       <h2>Source</h2>
-      <dl className="facts asset-facts">
+      <dl className="facts agent-facts">
         <dt>Qualified name</dt>
         <dd className="mono">{props.table.source_key}</dd>
         <dt>Physical</dt>
@@ -400,7 +400,7 @@ export function SourceTab(props: {
         <dt>Last synced</dt>
         <dd>{formatWhen(props.table.last_synced_at)}</dd>
       </dl>
-      <div className="asset-card-foot">
+      <div className="agent-card-foot">
         {props.spark?.available && sql !== null ? (
           <button
             type="button"

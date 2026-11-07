@@ -1,7 +1,7 @@
 """Canonical catalog tables.
 
 ``description`` columns are user overrides. ``source_description`` columns are imported
-text. Spark query addresses live on asset bindings and are not derived from Trino keys.
+text. Spark query addresses live on agent bindings and are not derived from Trino keys.
 """
 
 import uuid
@@ -26,12 +26,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from intelegent_data_catalog.persistence.enums import (
+    AgentKind,
+    AgentRefreshMode,
+    AgentStatus,
     AirflowInstanceStatus,
     AirflowMappingDirection,
     AirflowMappingOrigin,
-    AssetKind,
-    AssetRefreshMode,
-    AssetStatus,
     BindingRole,
     BindingState,
     CatalogJobKind,
@@ -68,20 +68,20 @@ def _enum_check(column: str, values: tuple[str, ...], name: str) -> CheckConstra
     return CheckConstraint(f"{column} IN ({listed})", name=name)
 
 
-class AssetRow(Base):
+class AgentRow(Base):
     """One catalog object. Detail lives on the matching source row."""
 
-    __tablename__: str = "assets"
+    __tablename__: str = "agents"
     __table_args__: tuple[CheckConstraint | Index, ...] = (
-        _enum_check("kind", tuple(item.value for item in AssetKind), "ck_assets_kind"),
-        _enum_check("status", tuple(item.value for item in AssetStatus), "ck_assets_status"),
+        _enum_check("kind", tuple(item.value for item in AgentKind), "ck_agents_kind"),
+        _enum_check("status", tuple(item.value for item in AgentStatus), "ck_agents_status"),
         _enum_check(
             "context_origin",
             tuple(item.value for item in ContextOrigin),
-            "ck_assets_context_origin",
+            "ck_agents_context_origin",
         ),
         Index(
-            "uq_assets_owner_slug",
+            "uq_agents_owner_slug",
             "workspace_id",
             "owner_user_id",
             "slug",
@@ -90,16 +90,16 @@ class AssetRow(Base):
             postgresql_where=text("owner_user_id IS NOT NULL"),
         ),
         Index(
-            "uq_assets_shared_slug",
+            "uq_agents_shared_slug",
             "workspace_id",
             "slug",
             unique=True,
             sqlite_where=text("owner_user_id IS NULL"),
             postgresql_where=text("owner_user_id IS NULL"),
         ),
-        Index("ix_assets_kind", "kind"),
-        Index("ix_assets_workspace_owner", "workspace_id", "owner_user_id"),
-        Index("ix_assets_updated_at", "updated_at"),
+        Index("ix_agents_kind", "kind"),
+        Index("ix_agents_workspace_owner", "workspace_id", "owner_user_id"),
+        Index("ix_agents_updated_at", "updated_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -131,18 +131,18 @@ class AssetRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class AssetKnowledgeContextRow(Base):
-    """Latest built analysis context for one asset. Table assets store the table snapshot."""
+class AgentKnowledgeContextRow(Base):
+    """Latest built analysis context for one agent. Table agents store the table snapshot."""
 
-    __tablename__: str = "asset_knowledge_contexts"
+    __tablename__: str = "agent_knowledge_contexts"
     __table_args__: tuple[UniqueConstraint, ...] = (
-        UniqueConstraint("asset_id", name="uq_asset_knowledge_contexts_asset"),
+        UniqueConstraint("agent_id", name="uq_agent_knowledge_contexts_agent"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID] = mapped_column(
+    agent_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="CASCADE"),
+        ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -202,18 +202,18 @@ class CatalogTableRow(Base):
             postgresql_where=text("source_native_id IS NOT NULL"),
         ),
         Index(
-            "uq_catalog_tables_asset",
-            "asset_id",
+            "uq_catalog_tables_agent",
+            "agent_id",
             unique=True,
-            sqlite_where=text("asset_id IS NOT NULL"),
-            postgresql_where=text("asset_id IS NOT NULL"),
+            sqlite_where=text("agent_id IS NOT NULL"),
+            postgresql_where=text("agent_id IS NOT NULL"),
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="SET NULL"),
+        ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
     data_source_id: Mapped[uuid.UUID] = mapped_column(
@@ -431,10 +431,10 @@ class SourceEngineBindingRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class AssetEngineBindingRow(Base):
-    """Per-asset engine address. Query keys are stored explicitly."""
+class AgentEngineBindingRow(Base):
+    """Per-agent engine address. Query keys are stored explicitly."""
 
-    __tablename__: str = "asset_engine_bindings"
+    __tablename__: str = "agent_engine_bindings"
     __table_args__: tuple[
         UniqueConstraint | CheckConstraint | ForeignKeyConstraint | Index,
         ...,
@@ -442,27 +442,27 @@ class AssetEngineBindingRow(Base):
         UniqueConstraint(
             "source_engine_binding_id",
             "engine_ref_key",
-            name="uq_asset_bindings_ref_key",
+            name="uq_agent_bindings_ref_key",
         ),
         CheckConstraint(
             "(role = 'DISCOVERY' AND engine_type = 'TRINO') "
             "OR (role = 'QUERY' AND engine_type = 'SPARK_SQL')",
-            name="ck_asset_bindings_role_engine",
+            name="ck_agent_bindings_role_engine",
         ),
         CheckConstraint(
             "(NOT is_selected) OR (role = 'QUERY')",
-            name="ck_asset_bindings_selected_query",
+            name="ck_agent_bindings_selected_query",
         ),
-        _enum_check("role", tuple(item.value for item in BindingRole), "ck_asset_bindings_role"),
+        _enum_check("role", tuple(item.value for item in BindingRole), "ck_agent_bindings_role"),
         _enum_check(
             "state",
             tuple(item.value for item in BindingState),
-            "ck_asset_bindings_state",
+            "ck_agent_bindings_state",
         ),
         ForeignKeyConstraint(
             ["catalog_table_id", "data_source_id"],
             ["catalog_tables.id", "catalog_tables.data_source_id"],
-            name="fk_asset_bindings_table_source",
+            name="fk_agent_bindings_table_source",
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
@@ -472,11 +472,11 @@ class AssetEngineBindingRow(Base):
                 "source_engine_bindings.data_source_id",
                 "source_engine_bindings.engine_type",
             ],
-            name="fk_asset_bindings_source_engine",
+            name="fk_agent_bindings_source_engine",
             ondelete="RESTRICT",
         ),
         Index(
-            "uq_asset_bindings_one_selected_query",
+            "uq_agent_bindings_one_selected_query",
             "catalog_table_id",
             unique=True,
             sqlite_where=text("role = 'QUERY' AND is_selected"),
@@ -626,18 +626,18 @@ class AirflowInstanceRow(Base):
             "ck_airflow_instances_context_origin",
         ),
         Index(
-            "uq_airflow_instances_asset",
-            "asset_id",
+            "uq_airflow_instances_agent",
+            "agent_id",
             unique=True,
-            sqlite_where=text("asset_id IS NOT NULL"),
-            postgresql_where=text("asset_id IS NOT NULL"),
+            sqlite_where=text("agent_id IS NOT NULL"),
+            postgresql_where=text("agent_id IS NOT NULL"),
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="SET NULL"),
+        ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -670,18 +670,18 @@ class AirflowDagRow(Base):
     __table_args__: tuple[UniqueConstraint | Index, ...] = (
         UniqueConstraint("instance_id", "dag_id", name="uq_airflow_dags_instance_dag"),
         Index(
-            "uq_airflow_dags_asset",
-            "asset_id",
+            "uq_airflow_dags_agent",
+            "agent_id",
             unique=True,
-            sqlite_where=text("asset_id IS NOT NULL"),
-            postgresql_where=text("asset_id IS NOT NULL"),
+            sqlite_where=text("agent_id IS NOT NULL"),
+            postgresql_where=text("agent_id IS NOT NULL"),
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="SET NULL"),
+        ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
     instance_id: Mapped[uuid.UUID] = mapped_column(
@@ -894,18 +894,18 @@ class CatalogJobRow(Base):
 
 
 _ONE_CONFIGURATION: str = (
-    "(catalog_table_id IS NOT NULL AND asset_id IS NULL) OR "
-    "(catalog_table_id IS NULL AND asset_id IS NOT NULL)"
+    "(catalog_table_id IS NOT NULL AND agent_id IS NULL) OR "
+    "(catalog_table_id IS NULL AND agent_id IS NOT NULL)"
 )
 
 
 class EntityConfigurationRow(Base):
-    """Saved refresh interval and build options for one table or asset."""
+    """Saved refresh interval and build options for one table or agent."""
 
     __tablename__: str = "entity_configurations"
     __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
         UniqueConstraint("catalog_table_id", name="uq_entity_configurations_table"),
-        UniqueConstraint("asset_id", name="uq_entity_configurations_asset"),
+        UniqueConstraint("agent_id", name="uq_entity_configurations_agent"),
         CheckConstraint(_ONE_CONFIGURATION, name="ck_entity_configurations_one_subject"),
         CheckConstraint("interval_seconds >= 1", name="ck_entity_configurations_interval"),
         CheckConstraint(
@@ -918,7 +918,7 @@ class EntityConfigurationRow(Base):
         ),
         _enum_check(
             "refresh_mode",
-            tuple(item.value for item in AssetRefreshMode),
+            tuple(item.value for item in AgentRefreshMode),
             "ck_entity_configurations_refresh_mode",
         ),
     )
@@ -929,15 +929,15 @@ class EntityConfigurationRow(Base):
         ForeignKey("catalog_tables.id", ondelete="CASCADE"),
         nullable=True,
     )
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="CASCADE"),
+        ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=True,
     )
     refresh_mode: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        default=AssetRefreshMode.INTERVAL.value,
+        default=AgentRefreshMode.INTERVAL.value,
         server_default=text("'INTERVAL'"),
     )
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -1029,18 +1029,18 @@ class WorkspaceNodeRow(Base):
         CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_workspace_nodes_size"),
         Index("ix_workspace_nodes_parent", "workspace_id", "parent_id"),
         Index(
-            "uq_workspace_nodes_asset",
-            "asset_id",
+            "uq_workspace_nodes_agent",
+            "agent_id",
             unique=True,
-            sqlite_where=text("asset_id IS NOT NULL"),
-            postgresql_where=text("asset_id IS NOT NULL"),
+            sqlite_where=text("agent_id IS NOT NULL"),
+            postgresql_where=text("agent_id IS NOT NULL"),
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="SET NULL"),
+        ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -1073,25 +1073,25 @@ class WorkspaceNodeRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class AssetDefinitionFileRow(Base):
-    """One Python file scanned from the asset-definition prefix."""
+class AgentDefinitionFileRow(Base):
+    """One Python file scanned from the agent-definition prefix."""
 
-    __tablename__: str = "asset_definition_files"
+    __tablename__: str = "agent_definition_files"
     __table_args__: tuple[CheckConstraint | Index | UniqueConstraint, ...] = (
-        UniqueConstraint("key", name="uq_asset_definition_files_key"),
+        UniqueConstraint("key", name="uq_agent_definition_files_key"),
         _enum_check(
             "folder_kind",
             tuple(item.value for item in DefinitionKind),
-            "ck_asset_definition_files_kind",
+            "ck_agent_definition_files_kind",
         ),
         _enum_check(
             "status",
             tuple(item.value for item in DefinitionFileStatus),
-            "ck_asset_definition_files_status",
+            "ck_agent_definition_files_status",
         ),
-        CheckConstraint("size_bytes >= 0", name="ck_asset_definition_files_size"),
-        CheckConstraint("item_count >= 0", name="ck_asset_definition_files_items"),
-        Index("ix_asset_definition_files_status", "status"),
+        CheckConstraint("size_bytes >= 0", name="ck_agent_definition_files_size"),
+        CheckConstraint("item_count >= 0", name="ck_agent_definition_files_items"),
+        Index("ix_agent_definition_files_status", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
@@ -1109,32 +1109,32 @@ class AssetDefinitionFileRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class AssetDefinitionItemRow(Base):
-    """One asset declared by a definition file."""
+class AgentDefinitionItemRow(Base):
+    """One agent declared by a definition file."""
 
-    __tablename__: str = "asset_definition_items"
+    __tablename__: str = "agent_definition_items"
     __table_args__: tuple[CheckConstraint | Index | UniqueConstraint, ...] = (
-        UniqueConstraint("file_id", "item_key", name="uq_asset_definition_items_file_key"),
+        UniqueConstraint("file_id", "item_key", name="uq_agent_definition_items_file_key"),
         _enum_check(
             "kind",
             tuple(item.value for item in DefinitionKind),
-            "ck_asset_definition_items_kind",
+            "ck_agent_definition_items_kind",
         ),
         _enum_check(
             "status",
             tuple(item.value for item in DefinitionItemStatus),
-            "ck_asset_definition_items_status",
+            "ck_agent_definition_items_status",
         ),
         CheckConstraint(
             "run_status IS NULL OR run_status IN ("
             + ", ".join(f"'{item.value}'" for item in DefinitionRunStatus)
             + ")",
-            name="ck_asset_definition_items_run_status",
+            name="ck_agent_definition_items_run_status",
         ),
-        Index("ix_asset_definition_items_status", "status"),
-        Index("ix_asset_definition_items_asset", "asset_id"),
+        Index("ix_agent_definition_items_status", "status"),
+        Index("ix_agent_definition_items_agent", "agent_id"),
         Index(
-            "ix_asset_definition_items_next_run",
+            "ix_agent_definition_items_next_run",
             "next_run_at",
             sqlite_where=text("next_run_at IS NOT NULL"),
             postgresql_where=text("next_run_at IS NOT NULL"),
@@ -1144,16 +1144,16 @@ class AssetDefinitionItemRow(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     file_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("asset_definition_files.id", ondelete="CASCADE"),
+        ForeignKey("agent_definition_files.id", ondelete="CASCADE"),
         nullable=False,
     )
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     item_key: Mapped[str] = mapped_column(String(512), nullable=False)
     declaration: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="SET NULL"),
+        ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -1167,34 +1167,34 @@ class AssetDefinitionItemRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class AssetOperatorRunRow(Base):
-    """One execution of an asset operator or a manual asset context build."""
+class AgentOperatorRunRow(Base):
+    """One execution of an agent operator or a manual agent context build."""
 
-    __tablename__: str = "asset_operator_runs"
+    __tablename__: str = "agent_operator_runs"
     __table_args__: tuple[CheckConstraint | Index, ...] = (
         _enum_check(
             "status",
             tuple(item.value for item in DefinitionRunStatus),
-            "ck_asset_operator_runs_status",
+            "ck_agent_operator_runs_status",
         ),
         _enum_check(
             "trigger",
             tuple(item.value for item in OperatorRunTrigger),
-            "ck_asset_operator_runs_trigger",
+            "ck_agent_operator_runs_trigger",
         ),
-        CheckConstraint("try_number >= 1", name="ck_asset_operator_runs_try"),
-        Index("ix_asset_operator_runs_asset", "asset_id", "queued_at"),
+        CheckConstraint("try_number >= 1", name="ck_agent_operator_runs_try"),
+        Index("ix_agent_operator_runs_agent", "agent_id", "queued_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID] = mapped_column(
+    agent_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="CASCADE"),
+        ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
     item_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("asset_definition_items.id", ondelete="SET NULL"),
+        ForeignKey("agent_definition_items.id", ondelete="SET NULL"),
         nullable=True,
     )
     catalog_job_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -1213,24 +1213,24 @@ class AssetOperatorRunRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class AssetOperatorRunTaskRow(Base):
-    """One step of an asset operator run. ``build_context`` then ``describe``."""
+class AgentOperatorRunTaskRow(Base):
+    """One step of an agent operator run. ``build_context`` then ``describe``."""
 
-    __tablename__: str = "asset_operator_run_tasks"
+    __tablename__: str = "agent_operator_run_tasks"
     __table_args__: tuple[CheckConstraint | UniqueConstraint | Index, ...] = (
-        UniqueConstraint("run_id", "task_id", name="uq_asset_operator_run_tasks_run_task"),
+        UniqueConstraint("run_id", "task_id", name="uq_agent_operator_run_tasks_run_task"),
         _enum_check(
             "state",
             tuple(item.value for item in OperatorTaskState),
-            "ck_asset_operator_run_tasks_state",
+            "ck_agent_operator_run_tasks_state",
         ),
-        Index("ix_asset_operator_run_tasks_run", "run_id"),
+        Index("ix_agent_operator_run_tasks_run", "run_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("asset_operator_runs.id", ondelete="CASCADE"),
+        ForeignKey("agent_operator_runs.id", ondelete="CASCADE"),
         nullable=False,
     )
     task_id: Mapped[str] = mapped_column(String(32), nullable=False)

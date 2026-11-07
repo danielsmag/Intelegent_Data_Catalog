@@ -41,6 +41,8 @@ def upgrade() -> None:
     if "airflow_instances" not in _tables(bind):
         return
     present: set[str] = _column_names(bind, "airflow_instances")
+    if "agent_id" in present:
+        return
     if "asset_id" not in present:
         with op.batch_alter_table("airflow_instances") as batch:
             batch.add_column(sa.Column("asset_id", sa.Uuid(), nullable=True))

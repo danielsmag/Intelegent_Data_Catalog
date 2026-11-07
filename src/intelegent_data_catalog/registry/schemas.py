@@ -274,7 +274,7 @@ class CatalogTableRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: UUID
-    asset_id: UUID | None = None
+    agent_id: UUID | None = None
     data_source_id: UUID
     name: str
     display_name: str | None
@@ -596,7 +596,7 @@ class SourceBindingRead(BaseModel):
     updated_at: datetime
 
 
-class AssetBindingCreate(BaseModel):
+class AgentBindingCreate(BaseModel):
     """Attach an explicit engine address to a catalog table."""
 
     model_config = ConfigDict(extra="forbid")
@@ -615,8 +615,8 @@ class AssetBindingCreate(BaseModel):
         return exact_identifier(value)
 
 
-class AssetBindingUpdate(BaseModel):
-    """Patch an asset binding. Role and source binding stay fixed."""
+class AgentBindingUpdate(BaseModel):
+    """Patch an agent binding. Role and source binding stay fixed."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -634,8 +634,8 @@ class AssetBindingUpdate(BaseModel):
         return exact_identifier(value)
 
 
-class AssetBindingRead(BaseModel):
-    """Asset binding returned by the API."""
+class AgentBindingRead(BaseModel):
+    """Agent binding returned by the API."""
 
     model_config = ConfigDict(extra="forbid")
 

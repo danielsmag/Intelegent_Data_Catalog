@@ -14,9 +14,9 @@ from intelegent_data_catalog.api.dependencies import (
     TableServiceDep,
 )
 from intelegent_data_catalog.registry.schemas import (
-    AssetBindingCreate,
-    AssetBindingRead,
-    AssetBindingUpdate,
+    AgentBindingCreate,
+    AgentBindingRead,
+    AgentBindingUpdate,
     CatalogTableCreate,
     CatalogTableRead,
     CatalogTableUpdate,
@@ -288,47 +288,47 @@ def patch_source_binding(
 
 @router.delete("/source-bindings/{source_binding_id}", status_code=204)
 def remove_source_binding(source_binding_id: UUID, service: BindingServiceDep) -> Response:
-    """Delete a source binding that has no asset bindings or sync runs."""
+    """Delete a source binding that has no agent bindings or sync runs."""
     service.delete_source_binding(source_binding_id)
     return Response(status_code=204)
 
 
-@router.get("/tables/{table_id}/bindings", response_model=list[AssetBindingRead])
-def list_asset_bindings(table_id: UUID, service: BindingServiceDep) -> list[AssetBindingRead]:
+@router.get("/tables/{table_id}/bindings", response_model=list[AgentBindingRead])
+def list_agent_bindings(table_id: UUID, service: BindingServiceDep) -> list[AgentBindingRead]:
     """List discovery and query bindings for a table."""
-    return service.list_asset_bindings(table_id)
+    return service.list_agent_bindings(table_id)
 
 
-@router.post("/tables/{table_id}/bindings", response_model=AssetBindingRead, status_code=201)
-def create_asset_binding(
+@router.post("/tables/{table_id}/bindings", response_model=AgentBindingRead, status_code=201)
+def create_agent_binding(
     table_id: UUID,
-    body: AssetBindingCreate,
+    body: AgentBindingCreate,
     service: BindingServiceDep,
-) -> AssetBindingRead:
+) -> AgentBindingRead:
     """Store an explicit engine address for a table."""
-    return service.create_asset_binding(table_id, body)
+    return service.create_agent_binding(table_id, body)
 
 
-@router.get("/bindings/{binding_id}", response_model=AssetBindingRead)
-def read_asset_binding(binding_id: UUID, service: BindingServiceDep) -> AssetBindingRead:
-    """Return one asset binding."""
-    return service.get_asset_binding(binding_id)
+@router.get("/bindings/{binding_id}", response_model=AgentBindingRead)
+def read_agent_binding(binding_id: UUID, service: BindingServiceDep) -> AgentBindingRead:
+    """Return one agent binding."""
+    return service.get_agent_binding(binding_id)
 
 
-@router.patch("/bindings/{binding_id}", response_model=AssetBindingRead)
-def patch_asset_binding(
+@router.patch("/bindings/{binding_id}", response_model=AgentBindingRead)
+def patch_agent_binding(
     binding_id: UUID,
-    body: AssetBindingUpdate,
+    body: AgentBindingUpdate,
     service: BindingServiceDep,
-) -> AssetBindingRead:
-    """Patch an asset binding address or selection."""
-    return service.update_asset_binding(binding_id, body)
+) -> AgentBindingRead:
+    """Patch an agent binding address or selection."""
+    return service.update_agent_binding(binding_id, body)
 
 
 @router.delete("/bindings/{binding_id}", status_code=204)
-def remove_asset_binding(binding_id: UUID, service: BindingServiceDep) -> Response:
-    """Delete one asset binding."""
-    service.delete_asset_binding(binding_id)
+def remove_agent_binding(binding_id: UUID, service: BindingServiceDep) -> Response:
+    """Delete one agent binding."""
+    service.delete_agent_binding(binding_id)
     return Response(status_code=204)
 
 

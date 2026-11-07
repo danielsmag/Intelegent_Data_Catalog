@@ -213,7 +213,7 @@ function skillDirectory(objectKey: string): string {
 }
 
 function displayPath(objectKey: string): string {
-  const marker: string = "assets/"
+  const marker: string = "agents/"
   const index: number = objectKey.indexOf(marker)
   if (index < 0) {
     return objectKey

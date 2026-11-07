@@ -23,7 +23,7 @@ from intelegent_data_catalog.persistence.enums import (
     TableStatus,
 )
 from intelegent_data_catalog.persistence.models import (
-    AssetEngineBindingRow,
+    AgentEngineBindingRow,
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
@@ -34,7 +34,7 @@ from intelegent_data_catalog.persistence.models import (
     SourceEngineBindingRow,
 )
 from intelegent_data_catalog.registry.schemas import (
-    AssetBindingRead,
+    AgentBindingRead,
     CatalogTableRead,
     ColumnMappingRead,
     ColumnRead,
@@ -94,7 +94,7 @@ def table_read(row: CatalogTableRow) -> CatalogTableRead:
     """Map a catalog table row."""
     return CatalogTableRead(
         id=row.id,
-        asset_id=row.asset_id,
+        agent_id=row.agent_id,
         data_source_id=row.data_source_id,
         name=row.name,
         display_name=row.display_name,
@@ -206,9 +206,9 @@ def source_binding_read(row: SourceEngineBindingRow) -> SourceBindingRead:
     )
 
 
-def asset_binding_read(row: AssetEngineBindingRow) -> AssetBindingRead:
-    """Map an asset engine binding row."""
-    return AssetBindingRead(
+def agent_binding_read(row: AgentEngineBindingRow) -> AgentBindingRead:
+    """Map an agent engine binding row."""
+    return AgentBindingRead(
         id=row.id,
         catalog_table_id=row.catalog_table_id,
         data_source_id=row.data_source_id,

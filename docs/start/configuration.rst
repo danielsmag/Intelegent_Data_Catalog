@@ -39,7 +39,7 @@ Sections you set most often:
      - OIDC issuer, JWKS URL, and audience. Disabled uses the dev principal.
    * - ``object_store``
      - S3-compatible store for workspace files. An empty endpoint keeps files in memory.
-   * - ``asset_definitions``
+   * - ``agent_definitions``
      - Bucket, prefix, and poll interval for definition files. See :doc:`/concepts/definitions`.
    * - ``celery``
      - Redis broker for background work.

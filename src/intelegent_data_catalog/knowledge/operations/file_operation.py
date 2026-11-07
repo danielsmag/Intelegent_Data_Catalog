@@ -6,20 +6,20 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.assets.base import AssetAgent
-from intelegent_data_catalog.assets.extract import FileText, extract_document
-from intelegent_data_catalog.assets.models import (
-    AssetAnalysisContext,
-    AssetContextOptions,
+from intelegent_data_catalog.agents.base import ContextBuilder
+from intelegent_data_catalog.agents.extract import FileText, extract_document
+from intelegent_data_catalog.agents.models import (
+    AgentAnalysisContext,
+    AgentContextOptions,
     FileCatalogContext,
     FileContextProposal,
 )
 from intelegent_data_catalog.exceptions import LlmUnavailableError, ValidationAppError
 from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.persistence.clock import utc_now
-from intelegent_data_catalog.persistence.enums import AssetKind
+from intelegent_data_catalog.persistence.enums import AgentKind
 from intelegent_data_catalog.persistence.models import (
-    AssetRow,
+    AgentRow,
     CatalogTableRow,
     WorkspaceNodeRow,
 )
@@ -31,23 +31,23 @@ class FileMetadata(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    asset_id: UUID
+    agent_id: UUID
     name: str
     path: str
     content_type: str | None
 
 
-class FileAgent(AssetAgent):
+class FileAgent(ContextBuilder):
     """Read a workspace file and ask for a summary and business context."""
 
     def __init__(
         self,
-        asset: AssetRow,
+        agent: AgentRow,
         session: Session,
         objects: ObjectStore | None,
         describer: ProposalAgent[FileCatalogContext, FileContextProposal] | None = None,
     ) -> None:
-        self._asset: AssetRow = asset
+        self._agent: AgentRow = agent
         self._session: Session = session
         self._objects: ObjectStore | None = objects
         self._describer: ProposalAgent[FileCatalogContext, FileContextProposal] | None = describer
@@ -56,13 +56,13 @@ class FileAgent(AssetAgent):
         """Return the file name and path."""
         node: WorkspaceNodeRow = self._node()
         return FileMetadata(
-            asset_id=self._asset.id,
+            agent_id=self._agent.id,
             name=node.name,
             path=node.path,
             content_type=node.content_type,
         )
 
-    def build_context(self, options: AssetContextOptions) -> AssetAnalysisContext:
+    def build_context(self, options: AgentContextOptions) -> AgentAnalysisContext:
         """Extract text, link named tables, and optionally ask the model for a summary."""
         loaded: FileCatalogContext = self._context(options.flags.get("include_outputs", False))
         linked: list[str] = []
@@ -73,9 +73,9 @@ class FileAgent(AssetAgent):
             proposed: FileContextProposal = self._describer.propose(loaded)
             if proposed.summary.strip() != "":
                 summary = proposed.summary.strip()
-        return AssetAnalysisContext(
-            asset_id=self._asset.id,
-            kind=AssetKind(self._asset.kind),
+        return AgentAnalysisContext(
+            agent_id=self._agent.id,
+            kind=AgentKind(self._agent.kind),
             summary=summary,
             built_at=utc_now(),
             payload={
@@ -86,7 +86,7 @@ class FileAgent(AssetAgent):
         )
 
     def describe(self) -> str:
-        """Ask for business context and return the text. The asset stores it."""
+        """Ask for business context and return the text. The agent stores it."""
         if self._describer is None:
             raise LlmUnavailableError("context generation is not configured")
         loaded: FileCatalogContext = self._context(include_outputs=True)
@@ -108,19 +108,19 @@ class FileAgent(AssetAgent):
             include_outputs=include_outputs,
         )
         return FileCatalogContext(
-            asset_id=self._asset.id,
+            agent_id=self._agent.id,
             name=node.name,
-            kind=AssetKind(self._asset.kind),
+            kind=AgentKind(self._agent.kind),
             content_type=node.content_type,
             text=extracted.text,
             referenced_tables=extracted.referenced_tables,
         )
 
     def _node(self) -> WorkspaceNodeRow:
-        statement = select(WorkspaceNodeRow).where(WorkspaceNodeRow.asset_id == self._asset.id)
+        statement = select(WorkspaceNodeRow).where(WorkspaceNodeRow.agent_id == self._agent.id)
         node: WorkspaceNodeRow | None = self._session.scalar(statement)
         if node is None:
-            raise ValidationAppError("asset has no workspace file", field="asset_id")
+            raise ValidationAppError("agent has no workspace file", field="agent_id")
         return node
 
     def _linked_tables(self, names: list[str]) -> list[str]:

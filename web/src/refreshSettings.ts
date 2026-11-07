@@ -331,8 +331,8 @@ async function saveEntityConfiguration(
 }
 
 function configurationPath(kind: string, id: string): string {
-  if (kind === "asset") {
-    return `/api/v1/assets/${id}/configuration`
+  if (kind === "agent") {
+    return `/api/v1/agents/${id}/configuration`
   }
   return `/api/v1/tables/${id}/configuration`
 }

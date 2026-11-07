@@ -23,7 +23,7 @@ from intelegent_data_catalog.persistence.models import MarquezMappingRow
 from intelegent_data_catalog.query.spark_bridge import NOT_CONFIGURED, spark_preview
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations, TagWrite
 from intelegent_data_catalog.registry.schemas import (
-    AssetBindingCreate,
+    AgentBindingCreate,
     CatalogTableRead,
     ColumnRead,
     DataSourceCreate,
@@ -109,7 +109,7 @@ def test_sync_is_idempotent_and_keeps_user_text(tmp_path: Path) -> None:
 
 
 def test_partial_scan_does_not_mark_tables_missing(tmp_path: Path) -> None:
-    """A truncated scan leaves assets that were not visited."""
+    """A truncated scan leaves agents that were not visited."""
     database: CatalogDatabase
     session: Session
     database, session = _session(tmp_path)
@@ -208,7 +208,7 @@ def test_spark_preview_uses_the_selected_query_binding(tmp_path: Path) -> None:
         orders: CatalogTableRead = next(
             table for table in _tables(service) if table.name == "orders"
         )
-        missing = spark_preview(service.bindings.list_asset_bindings(orders.id), 100)
+        missing = spark_preview(service.bindings.list_agent_bindings(orders.id), 100)
         assert missing.available is False
         assert missing.message == NOT_CONFIGURED
         spark_id: UUID = service.engines.create_engine_connection(
@@ -225,9 +225,9 @@ def test_spark_preview_uses_the_selected_query_binding(tmp_path: Path) -> None:
                 binding_key="catalog",
             )
         ).id
-        service.bindings.create_asset_binding(
+        service.bindings.create_agent_binding(
             orders.id,
-            AssetBindingCreate(
+            AgentBindingCreate(
                 source_engine_binding_id=query_binding,
                 engine_ref=EngineRef(catalog="catalog", namespace="sales", table="orders"),
                 engine_ref_key="catalog.sales.orders",
@@ -235,7 +235,7 @@ def test_spark_preview_uses_the_selected_query_binding(tmp_path: Path) -> None:
                 is_selected=True,
             ),
         )
-        preview = spark_preview(service.bindings.list_asset_bindings(orders.id), 100)
+        preview = spark_preview(service.bindings.list_agent_bindings(orders.id), 100)
         assert preview.sql == "SELECT * FROM catalog.sales.orders LIMIT 100"
         assert preview.engine_ref_key == "catalog.sales.orders"
         assert "lakehouse" not in (preview.sql or "")

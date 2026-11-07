@@ -6,8 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.airflow.repository import AirflowRepository
-from intelegent_data_catalog.assets.agent_pack.compose import (
+from intelegent_data_catalog.agents.agent_pack.compose import (
     LoadedPack,
     active_task,
     allowed_tools,
@@ -17,14 +16,16 @@ from intelegent_data_catalog.assets.agent_pack.compose import (
     narrow_flags,
     scoped_pack,
 )
-from intelegent_data_catalog.assets.agent_pack.runtime import render_skills
-from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
-from intelegent_data_catalog.assets.base import Asset, AssetAgentProvider
-from intelegent_data_catalog.assets.models import AssetAnalysisContext, AssetContextOptions
-from intelegent_data_catalog.assets.registry import AssetRegistry
-from intelegent_data_catalog.assets.store import AssetKnowledgeStore
-from intelegent_data_catalog.assets.strategies.instance import InstanceAssetAgentAdapter
-from intelegent_data_catalog.assets.strategies.table import TableAssetAgentAdapter
+from intelegent_data_catalog.agents.agent_pack.runtime import render_skills
+from intelegent_data_catalog.agents.agent_pack.service import AgentPackService
+from intelegent_data_catalog.agents.base import Agent, ContextBuilderProvider
+from intelegent_data_catalog.agents.models import AgentAnalysisContext, AgentContextOptions
+from intelegent_data_catalog.agents.registry import AgentRegistry
+from intelegent_data_catalog.agents.store import AgentKnowledgeStore
+from intelegent_data_catalog.agents.strategies.instance import InstanceContextBuilder
+from intelegent_data_catalog.agents.strategies.schema import SchemaContextBuilder
+from intelegent_data_catalog.agents.strategies.table import TableContextBuilder
+from intelegent_data_catalog.airflow.repository import AirflowRepository
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.catalog.services.query_service import QueryService
@@ -80,11 +81,11 @@ from intelegent_data_catalog.knowledge.store import (
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.factory import CatalogModels, thinking_level
 from intelegent_data_catalog.llm.overlay import DescribeOverlay, describe_overlay
-from intelegent_data_catalog.persistence.enums import AssetKind, RefreshSubjectKind
+from intelegent_data_catalog.persistence.enums import AgentKind, RefreshSubjectKind
 from intelegent_data_catalog.persistence.models import (
+    AgentRow,
     AirflowDagRow,
     AirflowInstanceRow,
-    AssetRow,
     ColumnRow,
     EntityConfigurationRow,
 )
@@ -220,7 +221,7 @@ class RequestPlatform:
 
 
     def generate_context(self, subject_id: UUID, options: ContextGenerationOptions) -> None:
-        """Ask the table, column, asset, or Airflow agent for business context."""
+        """Ask the table, column, agent, or Airflow agent for business context."""
         logger.info("generate context start kind=%s subject_id=%s", options.kind, subject_id)
         models: CatalogModels = self._models(options.model, options.effort)
         match options.kind:
@@ -235,32 +236,32 @@ class RequestPlatform:
                 if row is None:
                     raise EntityNotFoundError("column", str(subject_id))
                 self._table_factory(None, models).create(row.table_id).describe_column(subject_id)
-            case "asset":
+            case "agent":
                 with describe_overlay(self._pack_overlay(subject_id)):
-                    AssetRegistry(
+                    AgentRegistry(
                         self._session,
                         _PlatformAgents(
                             self,
-                            AssetContextOptions(model=options.model, effort=options.effort),
+                            AgentContextOptions(model=options.model, effort=options.effort),
                         ),
                     ).load(subject_id).describe()
         logger.info("generate context done kind=%s subject_id=%s", options.kind, subject_id)
 
-    def build_asset_context(
+    def build_agent_context(
         self,
-        asset_id: UUID,
-        options: AssetContextOptions,
-    ) -> AssetAnalysisContext:
-        """Build one asset context with the agent for its kind and store the snapshot."""
-        logger.info("build asset context start asset_id=%s", asset_id)
-        selected: AssetContextOptions = self._narrow_pack_flags(asset_id, options)
-        with describe_overlay(self._pack_overlay(asset_id, selected.flags)):
-            asset: Asset = AssetRegistry(
+        agent_id: UUID,
+        options: AgentContextOptions,
+    ) -> AgentAnalysisContext:
+        """Build one agent context with the agent for its kind and store the snapshot."""
+        logger.info("build agent context start agent_id=%s", agent_id)
+        selected: AgentContextOptions = self._narrow_pack_flags(agent_id, options)
+        with describe_overlay(self._pack_overlay(agent_id, selected.flags)):
+            agent: Agent = AgentRegistry(
                 self._session,
                 _PlatformAgents(self, selected),
-            ).load(asset_id)
-            built: AssetAnalysisContext = asset.build_context(selected)
-        logger.info("build asset context done asset_id=%s kind=%s", asset_id, built.kind.value)
+            ).load(agent_id)
+            built: AgentAnalysisContext = agent.build_context(selected)
+        logger.info("build agent context done agent_id=%s kind=%s", agent_id, built.kind.value)
         return built
 
     def _pack_service(self) -> AgentPackService | None:
@@ -269,20 +270,20 @@ class RequestPlatform:
         return AgentPackService(
             self._session,
             self._definitions,
-            self._settings.asset_definitions,
+            self._settings.agent_definitions,
             _job_access(),
         )
 
     def _pack_overlay(
         self,
-        asset_id: UUID,
+        agent_id: UUID,
         flags: dict[str, bool] | None = None,
     ) -> DescribeOverlay | None:
         service: AgentPackService | None = self._pack_service()
         if service is None or self._definitions is None:
             return None
-        pack: LoadedPack = service.load(asset_id)
-        chosen: dict[str, bool] = self._asset_flags(asset_id)
+        pack: LoadedPack = service.load(agent_id)
+        chosen: dict[str, bool] = self._agent_flags(agent_id)
         if flags is not None:
             chosen.update(flags)
         chosen = apply_explicit_pack_flags(chosen)
@@ -294,49 +295,49 @@ class RequestPlatform:
             rendered,
         )
         task: str | None = active_task(scoped.prompts)
-        return DescribeOverlay(instructions, task, asset_id, self._definitions)
+        return DescribeOverlay(instructions, task, agent_id, self._definitions)
 
-    def _asset_flags(self, asset_id: UUID) -> dict[str, bool]:
+    def _agent_flags(self, agent_id: UUID) -> dict[str, bool]:
         """Saved build flags. Missing pack switches stay on, and the row is not written."""
-        asset: AssetRow | None = self._session.get(AssetRow, asset_id)
-        kind: str | None = None if asset is None else asset.kind
+        agent: AgentRow | None = self._session.get(AgentRow, agent_id)
+        kind: str | None = None if agent is None else agent.kind
         row: EntityConfigurationRow | None = self._session.scalar(
-            select(EntityConfigurationRow).where(EntityConfigurationRow.asset_id == asset_id),
+            select(EntityConfigurationRow).where(EntityConfigurationRow.agent_id == agent_id),
         )
         raw: dict[str, object] = {} if row is None else dict(row.options)
-        return option_values(RefreshSubjectKind.ASSET, raw, kind)
+        return option_values(RefreshSubjectKind.AGENT, raw, kind)
 
     def _narrow_pack_flags(
         self,
-        asset_id: UUID,
-        options: AssetContextOptions,
-    ) -> AssetContextOptions:
+        agent_id: UUID,
+        options: AgentContextOptions,
+    ) -> AgentContextOptions:
         service: AgentPackService | None = self._pack_service()
         if service is None:
             return options
-        row: AssetRow | None = self._session.get(AssetRow, asset_id)
+        row: AgentRow | None = self._session.get(AgentRow, agent_id)
         if row is None:
             return options
-        pack: LoadedPack = service.load(asset_id)
-        chosen: dict[str, bool] = self._asset_flags(asset_id)
+        pack: LoadedPack = service.load(agent_id)
+        chosen: dict[str, bool] = self._agent_flags(agent_id)
         chosen.update(options.flags)
         chosen = apply_explicit_pack_flags(chosen)
         scoped: LoadedPack = scoped_pack(pack, chosen)
-        allowed: set[str] | None = allowed_tools(scoped.skills, chosen, AssetKind(row.kind))
+        allowed: set[str] | None = allowed_tools(scoped.skills, chosen, AgentKind(row.kind))
         return options.model_copy(update={"flags": narrow_flags(options.flags, allowed)})
 
-    def read_asset_context(self, asset_id: UUID) -> AssetAnalysisContext:
-        """Return the last context saved for this asset."""
-        saved: AssetAnalysisContext | None = AssetKnowledgeStore(self._session).get(asset_id)
+    def read_agent_context(self, agent_id: UUID) -> AgentAnalysisContext:
+        """Return the last context saved for this agent."""
+        saved: AgentAnalysisContext | None = AgentKnowledgeStore(self._session).get(agent_id)
         if saved is None:
-            raise EntityNotFoundError("knowledge context", str(asset_id))
+            raise EntityNotFoundError("knowledge context", str(agent_id))
         return saved
 
-    def asset_name(self, asset_id: UUID) -> str:
-        """Return the asset name, or raise when the id is unknown."""
-        row: AssetRow | None = self._session.get(AssetRow, asset_id)
+    def agent_name(self, agent_id: UUID) -> str:
+        """Return the agent name, or raise when the id is unknown."""
+        row: AgentRow | None = self._session.get(AgentRow, agent_id)
         if row is None:
-            raise EntityNotFoundError("asset", str(asset_id))
+            raise EntityNotFoundError("agent", str(agent_id))
         return row.name
 
     def _models(self, key: ModelId, effort: ReasoningEffort) -> CatalogModels:
@@ -431,20 +432,20 @@ class RequestPlatform:
 
 
 
-class _PlatformAgents(AssetAgentProvider):
+class _PlatformAgents(ContextBuilderProvider):
     """Opens the agent for the model and effort stored on one build."""
 
-    def __init__(self, platform: RequestPlatform, options: AssetContextOptions) -> None:
+    def __init__(self, platform: RequestPlatform, options: AgentContextOptions) -> None:
         self._platform: RequestPlatform = platform
-        self._options: AssetContextOptions = options
+        self._options: AgentContextOptions = options
 
     def for_table(
         self,
         table_id: UUID,
-        asset_id: UUID,
+        agent_id: UUID,
         *,
         primary: bool,
-    ) -> TableAssetAgentAdapter:
+    ) -> TableContextBuilder:
         models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
         column_graph: ColumnSubgraphBuilder | None = None
         if self._platform._neo4j is not None and models.column is not None:
@@ -454,20 +455,20 @@ class _PlatformAgents(AssetAgentProvider):
                 writer=Neo4jColumnSubgraph(self._platform._neo4j),
             )
         agent: TableAgent = self._platform._table_factory(column_graph, models).create(table_id)
-        return TableAssetAgentAdapter(
+        return TableContextBuilder(
             table_id,
-            asset_id,
+            agent_id,
             agent,
             self._platform._session,
             save_table=primary,
         )
 
-    def for_instance(self, instance_id: UUID) -> InstanceAssetAgentAdapter:
+    def for_instance(self, instance_id: UUID) -> InstanceContextBuilder:
         models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
         repository: AirflowRepository = AirflowRepository(self._platform._session)
         builder: AirflowGraphBuilder = AirflowGraphBuilder(models.airflow_proposer, repository)
         factory: AirflowAgentFactory = self._platform._airflow_factory(builder, models)
-        return InstanceAssetAgentAdapter(
+        return InstanceContextBuilder(
             instance_id,
             factory.create(instance_id),
             self._platform._session,
@@ -484,14 +485,22 @@ class _PlatformAgents(AssetAgentProvider):
             raise EntityNotFoundError("airflow dag", str(dag_row_id))
         return AirflowDagAgent(dag, instance_agent, models.dag_describer)
 
-    def for_file(self, asset_id: UUID, notebook: bool) -> FileAgent:
+    def for_schema(self, agent_id: UUID) -> SchemaContextBuilder:
+        models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
+        return SchemaContextBuilder(
+            self._platform._session,
+            agent_id,
+            models.schema_describer,
+        )
+
+    def for_file(self, agent_id: UUID, notebook: bool) -> FileAgent:
         del notebook
         models: CatalogModels = self._platform._models(self._options.model, self._options.effort)
-        asset: AssetRow | None = self._platform._session.get(AssetRow, asset_id)
-        if asset is None:
-            raise EntityNotFoundError("asset", str(asset_id))
+        agent: AgentRow | None = self._platform._session.get(AgentRow, agent_id)
+        if agent is None:
+            raise EntityNotFoundError("agent", str(agent_id))
         return FileAgent(
-            asset,
+            agent,
             self._platform._session,
             self._platform._objects,
             models.file_describer,

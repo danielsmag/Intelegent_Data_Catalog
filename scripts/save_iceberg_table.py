@@ -15,7 +15,7 @@ from intelegent_data_catalog.exceptions import CatalogError
 NAMESPACE: str = "catalog"
 CUSTOMERS_TABLE: str = f"{NAMESPACE}.customers"
 ORDERS_TABLE: str = f"{NAMESPACE}.orders"
-ASSET_CATALOG_TABLE: str = f"{NAMESPACE}.assets"
+ASSET_CATALOG_TABLE: str = f"{NAMESPACE}.agents"
 
 
 class IcebergSaveError(CatalogError):
@@ -56,7 +56,7 @@ class LocalIcebergStore:
         warehouse: Path = self._prepare_dirs()
         catalog: Catalog = self._open_catalog(warehouse)
         catalog.create_namespace_if_not_exists(NAMESPACE)
-        self._purge_asset_catalog(catalog)
+        self._purge_agent_catalog(catalog)
         customer_count: int = self._save_table(
             catalog,
             CUSTOMERS_TABLE,
@@ -93,7 +93,7 @@ class LocalIcebergStore:
             existing = table.scan().to_arrow()
         return existing.num_rows
 
-    def _purge_asset_catalog(self, catalog: Catalog) -> None:
+    def _purge_agent_catalog(self, catalog: Catalog) -> None:
         try:
             catalog.purge_table(ASSET_CATALOG_TABLE)
         except NoSuchTableError:

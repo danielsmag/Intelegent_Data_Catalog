@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from redis import Redis
 
-ASSET_DEFINITION_SCAN_LOCK: str = "asset-definitions:scan"
+ASSET_DEFINITION_SCAN_LOCK: str = "agent-definitions:scan"
 
 
 class ScanLock(Protocol):

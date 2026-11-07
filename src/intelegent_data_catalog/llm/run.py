@@ -43,7 +43,7 @@ logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.llm")
 
 
 def _merge_instructions(instructions: str | None) -> str | None:
-    """Keep caller instructions and append the asset pack when a describe is active."""
+    """Keep caller instructions and append the agent pack when a describe is active."""
     extra: str | None = current_instructions()
     if extra is None or extra.strip() == "":
         return instructions

@@ -35,7 +35,7 @@ import {
   fetchSparkQuery,
   fetchTableTags,
   searchCatalog,
-  type AssetBindingRecord,
+  type AgentBindingRecord,
   type CatalogColumnRecord,
   type CatalogTableRecord,
   type ContextGenerationJob,
@@ -78,7 +78,7 @@ export function RegistryTablePage(): ReactElement {
   const [columns, setColumns] = useState<CatalogColumnRecord[]>([])
   const [relationships, setRelationships] = useState<TableRelationships | null>(null)
   const [spark, setSpark] = useState<SparkQueryAvailability | null>(null)
-  const [bindings, setBindings] = useState<AssetBindingRecord[]>([])
+  const [bindings, setBindings] = useState<AgentBindingRecord[]>([])
   const [tags, setTags] = useState<TagRecord[]>([])
   const [lineage, setLineage] = useState<GraphViewRecord | null>(null)
   const [relationGraph, setRelationGraph] = useState<GraphViewRecord | null>(null)
@@ -322,19 +322,19 @@ export function RegistryTablePage(): ReactElement {
       })
   }
   const qualified: string = table?.source_key ?? "Table"
-  const linkedAssetId: string | null = table?.asset_id ?? null
+  const linkedAgentId: string | null = table?.agent_id ?? null
   useEditorTitle(table?.display_name ?? table?.name ?? null)
   useEditorStatus("Catalog", qualified)
-  if (linkedAssetId !== null && linkedAssetId !== "") {
+  if (linkedAgentId !== null && linkedAgentId !== "") {
     return (
       <section>
         <p className="crumb">
           <Link to="/catalog">Catalog</Link>
         </p>
         <h1>{table?.display_name ?? table?.name ?? "Table"}</h1>
-        <p className="note">Context for this table is on the asset.</p>
+        <p className="note">Context for this table is on the agent.</p>
         <p>
-          <WorkbenchLink to={`/assets/${linkedAssetId}`}>Open asset</WorkbenchLink>
+          <WorkbenchLink to={`/agents/${linkedAgentId}`}>Open agent</WorkbenchLink>
         </p>
       </section>
     )

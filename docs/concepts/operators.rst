@@ -1,41 +1,41 @@
 Operators
 =========
 
-An operator is the object an asset file constructs. Construction records
+An operator is the object an agent file constructs. Construction records
 the fields. It does not read the catalog, and it does not build context.
 
 ``to_source`` is the lookup key stored with the declaration. ``to_ref`` is
 the class name plus those fields. An executor rebuilds the class with
-:func:`~intelegent_data_catalog.assets.dsl.operators.registry.operator_from_ref`
+:func:`~intelegent_data_catalog.agents.dsl.operators.registry.operator_from_ref`
 and calls ``execute``. Unknown class names and invalid fields fail the run.
 
 ``execute`` always does the same two steps: ``build_context`` with this
 operator's flags, then ``describe``. ``describe`` keeps a context a person
-already wrote. The lifecycle around that call is in :doc:`assets`.
+already wrote. The lifecycle around that call is in :doc:`agents`.
 
-Import the names from ``intelegent_data_catalog.assets.dsl``. Class pages
+Import the names from ``intelegent_data_catalog.agents.dsl``. Class pages
 are in :doc:`/reference/dsl`.
 
 .. code-block:: python
 
-   from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator
+   from intelegent_data_catalog.agents.dsl import Agent, BuildContext, Describe, IcebergTable
 
-   asset = Asset(
+   agent = Agent(
        key="orders",
-       operator=IcebergTableOperator(
+       source=IcebergTable(
            source_key="polaris.sales.orders",
            data_source="Polaris",
-           include_lineage=True,
        ),
+       operators=[BuildContext(include_lineage=True), Describe()],
        schedule="0 2 * * *",
    )
 
 Table operators
 ---------------
 
-:class:`~intelegent_data_catalog.assets.dsl.IcebergTableOperator`
+:class:`~intelegent_data_catalog.agents.dsl.IcebergTable`
 and
-:class:`~intelegent_data_catalog.assets.dsl.PostgresTableOperator`
+:class:`~intelegent_data_catalog.agents.dsl.PostgresTable`
 share one field set. Both store a table source. The resolver loads
 ``CatalogTableRow`` rows whose ``source_key`` matches.
 
@@ -49,68 +49,64 @@ the table you mean. The stored operator name is that class.
 
 .. code-block:: python
 
-   from intelegent_data_catalog.assets.dsl import Asset, PostgresTableOperator
+   from intelegent_data_catalog.agents.dsl import Agent, BuildContext, Describe, PostgresTable
 
-   asset = Asset(
+   agent = Agent(
        key="customers",
-       operator=PostgresTableOperator(
+       source=PostgresTable(
            source_key="app.public.customers",
            data_source="App",
        ),
+       operators=[BuildContext(), Describe()],
    )
 
 Schema
 ------
 
-:class:`~intelegent_data_catalog.assets.dsl.SchemaOperator` names every
+:class:`~intelegent_data_catalog.agents.dsl.Schema` names every
 catalog table in one physical catalog and namespace. The applier keeps one
-parent item with no asset, plus one child item per table. The child key is
-``<key>/<table name>``. Each child is its own ``TABLE`` asset. It does not
-take ``catalog_tables.asset_id``, so an explicit table declaration for the
-same table stays a separate asset with its own context, runs, and agent files.
+``SCHEMA`` agent. It does not take ``catalog_tables.agent_id``, so an explicit
+table declaration for the same table stays a separate agent. One run writes
+one context on the schema agent.
 
 .. code-block:: python
 
-   from intelegent_data_catalog.assets.dsl import Asset, SchemaOperator
+   from intelegent_data_catalog.agents.dsl import Agent, BuildContext, Describe, Schema
 
-   asset = Asset(
+   agent = Agent(
        key="sales",
-       operator=SchemaOperator(
+       source=Schema(
            catalog="iceberg",
            namespace="sales",
            data_source="lakehouse",
            include=["orders"],
            exclude=["returns"],
        ),
+       operators=[BuildContext(), Describe()],
        schedule="0 2 * * *",
    )
 
 ``include`` limits the names. ``None`` and an empty list mean the whole
 schema. ``exclude`` drops names after ``include``. A blank name or a repeated
 name is rejected. ``data_source`` is optional and works like the table
-operators. Zero matches, or an unknown data source, leave the parent
-``UNRESOLVED``. A later scan tries again. An applied schema is resolved again
-on every scan, so a new table becomes a child and a removed table drops its
-child.
+sources. Zero matches, or an unknown data source, leave the agent
+``UNRESOLVED``. A later scan tries again. Adding or removing a table does not
+add or remove agents.
 
-``describe`` defaults to true. ``skip_described`` defaults to true, so a child
-that already has context skips the model call. The run still records the
-describe step.
+``Describe(skip_described=True)`` skips the model call when the agent already
+has context. The run still records the describe step.
 
-``pack_max_files`` (default 40, from 1 to 200) caps agent files in each layer.
-``pack_single_active_prompt`` (default true) rejects a second active prompt in
-the same layer. Set it false and every enabled active prompt is sent, joined
-in name order.
+``AgentPack(max_files=40, single_active_prompt=True)`` caps agent files in
+each layer. ``max_files`` is from 1 to 200. ``single_active_prompt`` false
+sends every enabled active prompt, joined in name order.
 
-Agent files for a schema live beside ``asset_<key>.py``. Each child can add
-``asset_<table>/`` in that same directory. The ``asset_`` marker is required.
-A folder without it is ignored. The folder is not created until something is
-written there. Files merge by slug: the table file replaces the schema file.
-An overlay rule with ``enabled: false`` turns that schema rule off for that
-table only. An overlay ``AGENTS.md`` replaces the schema card. Writes from a
-child go to ``asset_<table>/`` unless the request names ``layer=schema``.
+Agent files live in the directory named like the declaration file, for
+example ``agents/sales/agent_sales/`` next to ``agent_sales.py``. ``AGENTS.md``
+in the parent directory is the outer layer. The sidecar file wins on the
+same slug. Writes go to the sidecar unless the request names
+``layer=directory``.
 
-``IcebergTableOperator`` and ``PostgresTableOperator`` default to the table build flags:
+``BuildContext`` on a table or schema uses these flags when the file sets them:
 
 .. list-table::
    :header-rows: 1
@@ -135,21 +131,22 @@ The flags add graph, lineage, and profile on top of that.
 Airflow
 -------
 
-:class:`~intelegent_data_catalog.assets.dsl.AirflowOperator`
+:class:`~intelegent_data_catalog.agents.dsl.AirflowDag`
 links one synced DAG. ``instance`` is the instance slug from the Airflow
 page. ``dag_id`` is the DAG id. Register and sync the instance first. A
 missing instance or DAG stays unresolved. See :doc:`/howto/airflow`.
 
 .. code-block:: python
 
-   from intelegent_data_catalog.assets.dsl import AirflowOperator, Asset
+   from intelegent_data_catalog.agents.dsl import Agent, AirflowDag, BuildContext, Describe
 
-   asset = Asset(
+   agent = Agent(
        key="orders-dag",
-       operator=AirflowOperator(
+       source=AirflowDag(
            instance="warehouse",
            dag_id="orders",
        ),
+       operators=[BuildContext(), Describe()],
    )
 
 The build asks the instance agent about this DAG only.
@@ -169,31 +166,31 @@ The build asks the instance agent about this DAG only.
      - Findings already saved for this DAG.
 
 ``describe`` sends the DAG id, description, source, and task ids, and stores
-the business context on the asset.
+the business context on the agent.
 
 Page
 ----
 
-:class:`~intelegent_data_catalog.assets.dsl.PageOperator`
+:class:`~intelegent_data_catalog.agents.dsl.Page`
 links a workspace file. ``path`` is the tree path, such as
 ``Shared/notebooks/orders.ipynb`` or ``Users/<subject>/notes.md``.
 ``workspace`` is the workspace slug. It defaults to ``shared``.
 
 The node must already exist and must be a file. A missing workspace or path
 stays unresolved. A folder is an error. A file whose name ends in ``.ipynb``
-becomes a ``NOTEBOOK`` asset. Any other file becomes a ``FILE`` asset.
+becomes a ``NOTEBOOK`` agent. Any other file becomes a ``FILE`` agent.
 
 .. code-block:: python
 
-   from intelegent_data_catalog.assets.dsl import Asset, PageOperator
+   from intelegent_data_catalog.agents.dsl import Agent, BuildContext, Describe, Page
 
-   asset = Asset(
+   agent = Agent(
        key="orders-notebook",
-       operator=PageOperator(
+       source=Page(
            path="Shared/notebooks/orders.ipynb",
            workspace="shared",
-           include_outputs=True,
        ),
+       operators=[BuildContext(include_outputs=True), Describe()],
    )
 
 The build reads the object bytes and extracts text. Notebooks contribute

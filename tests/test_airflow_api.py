@@ -16,9 +16,9 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.persistence.database import CatalogDatabase
-from intelegent_data_catalog.persistence.enums import AssetKind
+from intelegent_data_catalog.persistence.enums import AgentKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
-from intelegent_data_catalog.persistence.models import AirflowInstanceRow, AssetRow
+from intelegent_data_catalog.persistence.models import AgentRow, AirflowInstanceRow
 
 _PASSWORD: str = "s3cret-airflow"
 _DAG_ID: str = "append_sales_customer"
@@ -44,17 +44,17 @@ def test_instance_crud_hides_the_password(tmp_path: Path) -> None:
         assert body["has_credentials"] is True
         assert body["slug"] == "local"
         assert body["dag_count"] == 0
-        asset_id: str = _text(body, "asset_id")
+        agent_id: str = _text(body, "agent_id")
         session: Session = database.session()
         try:
             instance_id: UUID = UUID(str(body["id"]))
             linked: AirflowInstanceRow | None = session.get(AirflowInstanceRow, instance_id)
             assert linked is not None
-            assert linked.asset_id is not None
-            assert str(linked.asset_id) == asset_id
-            stored: AssetRow | None = session.get(AssetRow, linked.asset_id)
+            assert linked.agent_id is not None
+            assert str(linked.agent_id) == agent_id
+            stored: AgentRow | None = session.get(AgentRow, linked.agent_id)
             assert stored is not None
-            assert stored.kind == AssetKind.AIRFLOW_INSTANCE.value
+            assert stored.kind == AgentKind.AIRFLOW_INSTANCE.value
         finally:
             session.close()
         duplicate: httpx.Response = _send(
@@ -92,7 +92,7 @@ def test_instance_crud_hides_the_password(tmp_path: Path) -> None:
         assert removed.status_code == 204
         after: Session = database.session()
         try:
-            assert after.get(AssetRow, UUID(asset_id)) is None
+            assert after.get(AgentRow, UUID(agent_id)) is None
         finally:
             after.close()
     finally:

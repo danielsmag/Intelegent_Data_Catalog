@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-export type SidebarView = "catalog" | "search" | "query" | "workspace" | "assets"
+export type SidebarView = "catalog" | "search" | "query" | "workspace" | "agents"
 
 type PendingSql = {
   sql: string
@@ -21,7 +21,7 @@ function isSidebarView(value: string | null): value is SidebarView {
     value === "search" ||
     value === "query" ||
     value === "workspace" ||
-    value === "assets"
+    value === "agents"
   )
 }
 
@@ -47,12 +47,12 @@ export function sidebarViewForPath(path: string): SidebarView | null {
 
 function readStored(): SidebarView {
   if (typeof window === "undefined") {
-    return "assets"
+    return "agents"
   }
   try {
     const stored: string | null = window.sessionStorage.getItem(STORAGE_KEY)
     if (stored === "airflow" || stored === "spaces") {
-      return "assets"
+      return "agents"
     }
     if (stored === "sources") {
       return "catalog"
@@ -61,9 +61,9 @@ function readStored(): SidebarView {
       return stored
     }
   } catch {
-    return "assets"
+    return "agents"
   }
-  return "assets"
+  return "agents"
 }
 
 function readInitialView(): SidebarView {
@@ -129,7 +129,7 @@ export function setSidebarView(next: SidebarView): void {
 }
 
 export function useSidebarView(): SidebarView {
-  return useSyncExternalStore(subscribe, getSidebarView, () => "assets")
+  return useSyncExternalStore(subscribe, getSidebarView, () => "agents")
 }
 
 export function getPendingQuerySql(): PendingSql | null {

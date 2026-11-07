@@ -20,26 +20,27 @@ class TableKind(StrEnum):
     VIEW = "VIEW"
 
 
-class AssetKind(StrEnum):
-    """Kind of catalog asset. Detail rows live in the matching source table."""
+class AgentKind(StrEnum):
+    """Kind of catalog agent. Detail rows live in the matching source table."""
 
     TABLE = "TABLE"
     AIRFLOW_DAG = "AIRFLOW_DAG"
     AIRFLOW_INSTANCE = "AIRFLOW_INSTANCE"
     NOTEBOOK = "NOTEBOOK"
     FILE = "FILE"
+    SCHEMA = "SCHEMA"
 
 
-class AssetStatus(StrEnum):
-    """Observation state of an asset. Missing means the source no longer lists it."""
+class AgentStatus(StrEnum):
+    """Observation state of an agent. Missing means the source no longer lists it."""
 
     ACTIVE = "ACTIVE"
     MISSING = "MISSING"
     DEPRECATED = "DEPRECATED"
 
 
-class AssetRefreshMode(StrEnum):
-    """When an asset rebuilds its context."""
+class AgentRefreshMode(StrEnum):
+    """When an agent rebuilds its context."""
 
     INTERVAL = "INTERVAL"
     ON_CHANGE = "ON_CHANGE"
@@ -131,7 +132,7 @@ class BindingState(StrEnum):
 
 
 class SyncRunStatus(StrEnum):
-    """Metadata sync run outcome. PARTIAL and FAILED do not prove assets are gone."""
+    """Metadata sync run outcome. PARTIAL and FAILED do not prove agents are gone."""
 
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
@@ -169,7 +170,7 @@ class CatalogJobKind(StrEnum):
     KNOWLEDGE = "knowledge"
     CONTEXT = "context"
     AIRFLOW = "airflow"
-    ASSET = "asset"
+    AGENT = "agent"
 
 
 class CatalogJobStatus(StrEnum):
@@ -184,7 +185,7 @@ class RefreshSubjectKind(StrEnum):
     """Which catalog entity a saved configuration row belongs to."""
 
     TABLE = "table"
-    ASSET = "asset"
+    AGENT = "agent"
 
 
 class WorkspaceRole(StrEnum):
@@ -204,7 +205,7 @@ class WorkspaceNodeKind(StrEnum):
 class DefinitionKind(StrEnum):
     """Object a definition file is allowed to declare."""
 
-    ASSET = "ASSET"
+    AGENT = "AGENT"
 
 
 class DefinitionFileStatus(StrEnum):
@@ -234,7 +235,7 @@ class DefinitionRunStatus(StrEnum):
 
 
 class OperatorRunTrigger(StrEnum):
-    """Why an asset operator run started."""
+    """Why an agent operator run started."""
 
     APPLY = "apply"
     SCHEDULE = "schedule"
@@ -242,7 +243,7 @@ class OperatorRunTrigger(StrEnum):
 
 
 class OperatorTaskState(StrEnum):
-    """State of one task inside an asset operator run."""
+    """State of one task inside an agent operator run."""
 
     QUEUED = "queued"
     RUNNING = "running"

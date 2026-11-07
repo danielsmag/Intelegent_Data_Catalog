@@ -7,9 +7,9 @@ from intelegent_data_catalog.api.dependencies import (
     require_auth,
 )
 from intelegent_data_catalog.api.v1.routes import (
+    agent_definitions,
+    agents,
     airflow,
-    asset_definitions,
-    assets,
     catalog,
     configuration,
     health,
@@ -32,10 +32,10 @@ router.include_router(airflow.router, tags=["airflow"], dependencies=_signed_in)
 router.include_router(schedules.router, tags=["schedules"], dependencies=_signed_in)
 router.include_router(configuration.router, tags=["configuration"], dependencies=_signed_in)
 router.include_router(registry.router, tags=["registry"], dependencies=_signed_in)
-router.include_router(assets.router, tags=["assets"], dependencies=_signed_in)
+router.include_router(agents.router, tags=["agents"], dependencies=_signed_in)
 router.include_router(
-    asset_definitions.router,
-    tags=["asset-definitions"],
+    agent_definitions.router,
+    tags=["agent-definitions"],
     dependencies=_signed_in,
 )
 router.include_router(workspaces.router, tags=["workspaces"], dependencies=_signed_in)

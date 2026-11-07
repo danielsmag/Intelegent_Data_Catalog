@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.assets.sync import AssetSync
-from intelegent_data_catalog.assets.triggers import AssetChangeTrigger
+from intelegent_data_catalog.agents.sync import AgentSync
+from intelegent_data_catalog.agents.triggers import AgentChangeTrigger
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
@@ -38,13 +38,13 @@ class WorkspaceFileService:
         session: Session,
         objects: ObjectStore,
         max_upload_bytes: int,
-        changes: AssetChangeTrigger | None = None,
+        changes: AgentChangeTrigger | None = None,
     ) -> None:
         self._session: Session = session
         self._store: WorkspaceStore = WorkspaceStore(session)
         self._objects: ObjectStore = objects
         self._max_upload_bytes: int = max_upload_bytes
-        self._changes: AssetChangeTrigger | None = changes
+        self._changes: AgentChangeTrigger | None = changes
 
     def list_nodes(
         self,
@@ -173,9 +173,9 @@ class WorkspaceFileService:
         self._objects.put(node.object_key, payload, content_type)
         node.size_bytes = len(payload)
         node.updated_at = utc_now()
-        asset_id: UUID | None = self._touch_file(node)
+        agent_id: UUID | None = self._touch_file(node)
         self._store.commit()
-        self._notify_change(asset_id)
+        self._notify_change(agent_id)
         return self._read(node)
 
     def update_node(
@@ -231,7 +231,7 @@ class WorkspaceFileService:
         for item in self._subtree(node):
             if item.object_key is not None:
                 keys.append(item.object_key)
-            sync: AssetSync | None = AssetSync.for_row(item)
+            sync: AgentSync | None = AgentSync.for_row(item)
             if sync is not None:
                 sync.delete_file(item)
         self._store.delete(node)
@@ -281,13 +281,13 @@ class WorkspaceFileService:
         return self._read(row)
 
     def _touch_file(self, row: WorkspaceNodeRow) -> UUID | None:
-        """Return the asset an operator already linked. Saving a file does not create one."""
-        return row.asset_id
+        """Return the agent an operator already linked. Saving a file does not create one."""
+        return row.agent_id
 
-    def _notify_change(self, asset_id: UUID | None) -> None:
-        if asset_id is None or self._changes is None:
+    def _notify_change(self, agent_id: UUID | None) -> None:
+        if agent_id is None or self._changes is None:
             return
-        self._changes.changed(asset_id)
+        self._changes.changed(agent_id)
 
     def _ensure_roots(self, workspace_id: UUID, access: AccessContext) -> None:
         shared: WorkspaceNodeRow = self._ensure_folder(

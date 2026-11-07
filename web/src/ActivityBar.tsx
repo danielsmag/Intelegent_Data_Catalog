@@ -1,7 +1,7 @@
 import type { ReactElement } from "react"
 import { signOut, useAuthState } from "./auth"
 import {
-  AssetIcon,
+  AgentIcon,
   BrandMark,
   CatalogIcon,
   GearIcon,
@@ -11,7 +11,7 @@ import {
 } from "./icons"
 import { openInFocusedGroup } from "./editorLayout"
 import { setSidebarView, useSidebarView, type SidebarView } from "./sidebarView"
-import { setAssetsSidebarOpen } from "./assetsSidebarStore"
+import { setAgentsSidebarOpen } from "./agentsSidebarStore"
 import { setWorkspaceSidebarOpen } from "./workspaceSidebar"
 import { useMe } from "./workspaceApi"
 
@@ -34,7 +34,7 @@ export function ActivityBar(): ReactElement {
   const current: SidebarView = useSidebarView()
   const items: Item[] = [
     { view: "workspace", label: "Workspace", icon: <TableIcon /> },
-    { view: "assets", label: "Assets", icon: <AssetIcon /> },
+    { view: "agents", label: "Agents", icon: <AgentIcon /> },
     { view: "catalog", label: "Catalog", icon: <CatalogIcon /> },
     { view: "search", label: "Search", icon: <QueryIcon />, gap: true },
     { view: "query", label: "Query", icon: <TableIcon /> },
@@ -58,9 +58,9 @@ export function ActivityBar(): ReactElement {
               if (item.view === "workspace") {
                 setWorkspaceSidebarOpen(true)
               }
-              if (item.view === "assets") {
-                setAssetsSidebarOpen(true)
-                openInFocusedGroup("/assets")
+              if (item.view === "agents") {
+                setAgentsSidebarOpen(true)
+                openInFocusedGroup("/agents")
               }
             }}
           >

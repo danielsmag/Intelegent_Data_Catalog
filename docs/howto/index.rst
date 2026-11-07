@@ -9,4 +9,4 @@ Short tasks. The model behind them is in :doc:`/concepts/index`.
    sign-in
    query
    airflow
-   declare-assets
+   declare-agents

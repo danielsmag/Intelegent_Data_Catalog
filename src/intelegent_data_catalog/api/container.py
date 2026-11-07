@@ -19,8 +19,8 @@ from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.catalog.sql_guard import SqlGuard
 from intelegent_data_catalog.core.logger import configure_logging
 from intelegent_data_catalog.core.settings import (
+    AgentDefinitionsSettings,
     AppSettings,
-    AssetDefinitionsSettings,
     ObjectStoreSettings,
     load_settings,
     resolve_project_root,
@@ -142,9 +142,9 @@ def build_kernel_gateway(settings: AppSettings) -> KernelGatewayClient:
     )
 
 
-def build_asset_definition_store(settings: AppSettings) -> ObjectStore:
-    """Object store for asset definition files. Blank fields use the workspace store."""
-    pages: AssetDefinitionsSettings = settings.asset_definitions
+def build_agent_definition_store(settings: AppSettings) -> ObjectStore:
+    """Object store for agent definition files. Blank fields use the workspace store."""
+    pages: AgentDefinitionsSettings = settings.agent_definitions
     store_settings: ObjectStoreSettings = definition_store_settings(
         settings.object_store,
         endpoint=pages.endpoint,
@@ -224,8 +224,8 @@ class AppContainer(containers.DeclarativeContainer):
         build_object_store,
         settings.provided.object_store,
     )
-    asset_definition_store: providers.Singleton[ObjectStore] = providers.Singleton(
-        build_asset_definition_store,
+    agent_definition_store: providers.Singleton[ObjectStore] = providers.Singleton(
+        build_agent_definition_store,
         settings,
     )
     kernel_gateway: providers.Singleton[KernelGatewayClient] = providers.Singleton(

@@ -27,6 +27,8 @@ def upgrade() -> None:
     """Add run history tables when a database was created before this revision."""
     bind: Connection = op.get_bind()
     tables: set[str] = _tables(bind)
+    if "agent_operator_runs" in tables or "agent_operator_run_tasks" in tables:
+        return
     if "asset_operator_runs" not in tables:
         _create_runs()
     if "asset_operator_run_tasks" not in tables:

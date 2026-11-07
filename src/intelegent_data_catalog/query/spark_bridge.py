@@ -3,7 +3,7 @@
 import re
 
 from intelegent_data_catalog.persistence.enums import BindingRole
-from intelegent_data_catalog.registry.schemas import AssetBindingRead, EngineRef
+from intelegent_data_catalog.registry.schemas import AgentBindingRead, EngineRef
 
 NOT_CONFIGURED: str = "Not configured for Spark queries"
 _IDENT: re.Pattern[str] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -25,9 +25,9 @@ class SparkQueryPreview:
         self.engine_ref_key: str | None = engine_ref_key
 
 
-def spark_preview(bindings: list[AssetBindingRead], limit: int) -> SparkQueryPreview:
+def spark_preview(bindings: list[AgentBindingRead], limit: int) -> SparkQueryPreview:
     """Use the selected QUERY binding. Missing bindings stay unavailable."""
-    selected: list[AssetBindingRead] = [
+    selected: list[AgentBindingRead] = [
         binding for binding in bindings if binding.role is BindingRole.QUERY and binding.is_selected
     ]
     if not selected:
@@ -37,7 +37,7 @@ def spark_preview(bindings: list[AssetBindingRead], limit: int) -> SparkQueryPre
             sql=None,
             engine_ref_key=None,
         )
-    binding: AssetBindingRead = selected[0]
+    binding: AgentBindingRead = selected[0]
     ref: EngineRef = binding.engine_ref
     sql: str = (
         "SELECT * FROM "

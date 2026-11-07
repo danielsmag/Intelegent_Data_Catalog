@@ -39,16 +39,16 @@ import {
   type AirflowSyncRun,
   type AirflowTask,
 } from "./airflowApi"
-import { AssetRuns } from "./AssetRuns"
-import { type AssetBuildJob } from "./assetsApi"
+import { AgentRuns } from "./AgentRuns"
+import { type AgentBuildJob } from "./agentsApi"
 import { ContextEditor } from "./ContextEditor"
 import { useEditorStatus, useEditorTitle } from "./editorSlots"
 import {
   followAirflowBuild,
   isCancelledBuild,
   onAirflowBuildFinished,
-  onAssetBuildFinished,
-  requestAssetBuild,
+  onAgentBuildFinished,
+  requestAgentBuild,
 } from "./knowledgeBuild"
 import { AirflowConfigRail, optionsFromFields, type ConfigOption } from "./ConfigRail"
 import { bumpAirflowRevision, useAirflowRevision } from "./airflowSidebarStore"
@@ -104,14 +104,14 @@ type InstanceTab = "overview" | "dags" | "mappings" | "runs" | "agent" | "config
 
 export function AirflowInstanceView(props: {
   instanceId: string
-  assetId: string
+  agentId: string
   onDeleted: () => void
 }): ReactElement {
   const instanceId: string = props.instanceId
   const revision: number = useAirflowRevision()
   const [params, setParams] = useSearchParams()
   const openDag: string | null = params.get("dag")
-  const config = useEntityConfig("asset", props.assetId, [
+  const config = useEntityConfig("agent", props.agentId, [
     { key: "include_source", label: "Include source", defaultValue: true },
     { key: "include_previous", label: "Keep previous findings", defaultValue: true },
   ])
@@ -222,19 +222,19 @@ export function AirflowInstanceView(props: {
     })
   }, [instanceId])
   useEffect(() => {
-    return onAssetBuildFinished((job: AssetBuildJob) => {
-      if (job.asset_id !== props.assetId) {
+    return onAgentBuildFinished((job: AgentBuildJob) => {
+      if (job.agent_id !== props.agentId) {
         return
       }
       setBuilding(false)
       setBuildJobId(null)
       if (job.status === "failed") {
-        setKnowledgeError(job.error ?? "Asset context build failed.")
+        setKnowledgeError(job.error ?? "Agent context build failed.")
         return
       }
       bumpAirflowRevision()
     })
-  }, [props.assetId])
+  }, [props.agentId])
 
   function runStatus(next: AirflowInstanceStatus): void {
     if (instance === null || savingStatus) {
@@ -287,7 +287,7 @@ export function AirflowInstanceView(props: {
 
   const mappings: AirflowDagTable[] = (dags ?? []).flatMap((dag: AirflowDag) => dag.tables)
   useEditorTitle(instance?.name ?? null)
-  useEditorStatus("Assets", instance?.name ?? "Instance")
+  useEditorStatus("Agents", instance?.name ?? "Instance")
   if (openDag !== null && openDag !== "") {
     return (
       <AirflowDagView
@@ -309,7 +309,7 @@ export function AirflowInstanceView(props: {
           <div className="catalog-hero-top">
             <div className="catalog-hero-copy">
               <p className="crumb">
-                <Link to="/assets?service=airflow">Assets</Link>
+                <Link to="/agents?service=airflow">Agents</Link>
               </p>
               <h1>{instance?.name ?? "Instance"}</h1>
             </div>
@@ -322,8 +322,8 @@ export function AirflowInstanceView(props: {
                   setBuilding(true)
                   setBuildJobId(null)
                   setKnowledgeError(null)
-                  void requestAssetBuild(props.assetId)
-                    .then((job: AssetBuildJob) => {
+                  void requestAgentBuild(props.agentId)
+                    .then((job: AgentBuildJob) => {
                       setBuilding(job.status === "running")
                       setBuildJobId(job.status === "running" ? job.id : null)
                     })
@@ -477,14 +477,14 @@ export function AirflowInstanceView(props: {
         ) : null}
         {tab === "dags" ? <DagRows instanceId={instanceId} dags={dags} /> : null}
         {tab === "mappings" ? <MappingRows instanceId={instanceId} mappings={mappings} /> : null}
-        {tab === "runs" ? <AssetRuns assetId={props.assetId} /> : null}
-        {tab === "agent" ? <AgentPackPanel assetId={props.assetId} assetKind="AIRFLOW_INSTANCE" /> : null}
+        {tab === "runs" ? <AgentRuns agentId={props.agentId} /> : null}
+        {tab === "agent" ? <AgentPackPanel agentId={props.agentId} agentKind="AIRFLOW_INSTANCE" /> : null}
         {tab === "config" ? (
-          <div className="asset-sheet">
-            <section className="asset-card asset-config">
+          <div className="agent-sheet">
+            <section className="agent-card agent-config">
               <h2>Refresh</h2>
-              <p className="catalog-lead">Choose when this asset rebuilds its context.</p>
-              <label className="asset-field">
+              <p className="catalog-lead">Choose when this agent rebuilds its context.</p>
+              <label className="agent-field">
                 <span>Mode</span>
                 <select
                   value={config.refreshMode}
@@ -844,7 +844,7 @@ export function AirflowDagView(props: {
   }
 
   useEditorTitle(dag?.dag_id ?? dagId)
-  useEditorStatus("Assets", dag?.dag_id ?? dagId)
+  useEditorStatus("Agents", dag?.dag_id ?? dagId)
   return (
     <>
       <section className="catalog-page">
@@ -852,7 +852,7 @@ export function AirflowDagView(props: {
           <div className="catalog-hero-copy">
             <p className="crumb">
               {props.onBack === null ? (
-                <Link to="/assets?service=airflow">Assets</Link>
+                <Link to="/agents?service=airflow">Agents</Link>
               ) : (
                 <button type="button" className="button secondary" onClick={props.onBack}>
                   Instance
@@ -921,10 +921,10 @@ export function AirflowDagView(props: {
           </div>
         ) : null}
         {tab === "agent" ? (
-          dag?.asset_id != null ? (
-            <AgentPackPanel assetId={dag.asset_id} assetKind="AIRFLOW_DAG" />
+          dag?.agent_id != null ? (
+            <AgentPackPanel agentId={dag.agent_id} agentKind="AIRFLOW_DAG" />
           ) : (
-            <p className="note">This DAG has no asset yet.</p>
+            <p className="note">This DAG has no agent yet.</p>
           )
         ) : null}
         {tab === "source" ? (

@@ -8,7 +8,7 @@ from intelegent_data_catalog.auth.principal import Principal
 
 @dataclass(frozen=True, slots=True)
 class AccessContext:
-    """Visibility for one request. Workspace membership gates files and assets."""
+    """Visibility for one request. Workspace membership gates files and agents."""
 
     principal: Principal
     user_id: UUID

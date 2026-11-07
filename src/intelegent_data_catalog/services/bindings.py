@@ -1,4 +1,4 @@
-"""Source and asset binding writes and reads."""
+"""Source and agent binding writes and reads."""
 
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -7,22 +7,22 @@ from intelegent_data_catalog.exceptions import ConflictError, ValidationAppError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import BindingRole, EngineType
 from intelegent_data_catalog.persistence.models import (
-    AssetEngineBindingRow,
+    AgentEngineBindingRow,
     CatalogTableRow,
     DataSourceRow,
     EngineConnectionRow,
     SourceEngineBindingRow,
 )
 from intelegent_data_catalog.registry.reads import (
-    asset_binding_read,
+    agent_binding_read,
     dump_model,
     source_binding_read,
 )
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
-    AssetBindingCreate,
-    AssetBindingRead,
-    AssetBindingUpdate,
+    AgentBindingCreate,
+    AgentBindingRead,
+    AgentBindingUpdate,
     SourceBindingCreate,
     SourceBindingRead,
     SourceBindingUpdate,
@@ -102,20 +102,20 @@ class BindingService:
         return source_binding_read(row)
 
     def delete_source_binding(self, source_binding_id: UUID) -> None:
-        """Delete a source binding that has no asset bindings or sync runs."""
+        """Delete a source binding that has no agent bindings or sync runs."""
         row: SourceEngineBindingRow = self._source_binding(source_binding_id)
-        if self._repo.count_asset_bindings_for_source(source_binding_id) > 0:
-            raise ConflictError("source binding still has asset bindings")
+        if self._repo.count_agent_bindings_for_source(source_binding_id) > 0:
+            raise ConflictError("source binding still has agent bindings")
         if self._repo.count_sync_runs(source_binding_id) > 0:
             raise ConflictError("source binding still has sync runs")
         self._repo.delete(row)
         self._repo.commit()
 
-    def create_asset_binding(
+    def create_agent_binding(
         self,
         table_id: UUID,
-        body: AssetBindingCreate,
-    ) -> AssetBindingRead:
+        body: AgentBindingCreate,
+    ) -> AgentBindingRead:
         """Store an explicit engine address for a table.
 
         ``engine_ref_key`` is taken from the request. It is not copied from the table
@@ -125,7 +125,7 @@ class BindingService:
         source_binding: SourceEngineBindingRow = self._source_binding(body.source_engine_binding_id)
         if table.data_source_id != source_binding.data_source_id:
             raise ValidationAppError(
-                "asset binding and source binding must use the same data source",
+                "agent binding and source binding must use the same data source",
                 field="source_engine_binding_id",
             )
         _assert_role_engine(body.role, source_binding.engine_type)
@@ -134,7 +134,7 @@ class BindingService:
         if body.is_selected:
             self._ensure_single_selected_query(table_id, None)
         now: datetime = utc_now()
-        row: AssetEngineBindingRow = AssetEngineBindingRow(
+        row: AgentEngineBindingRow = AgentEngineBindingRow(
             id=uuid4(),
             catalog_table_id=table.id,
             data_source_id=table.data_source_id,
@@ -149,26 +149,26 @@ class BindingService:
             created_at=now,
             updated_at=now,
         )
-        stored: AssetEngineBindingRow = self._repo.add_asset_binding(row)
+        stored: AgentEngineBindingRow = self._repo.add_agent_binding(row)
         self._repo.commit()
-        return asset_binding_read(stored)
+        return agent_binding_read(stored)
 
-    def list_asset_bindings(self, table_id: UUID) -> list[AssetBindingRead]:
+    def list_agent_bindings(self, table_id: UUID) -> list[AgentBindingRead]:
         """List engine addresses stored for a table."""
         self._table(table_id)
-        return [asset_binding_read(row) for row in self._repo.list_asset_bindings(table_id)]
+        return [agent_binding_read(row) for row in self._repo.list_agent_bindings(table_id)]
 
-    def get_asset_binding(self, binding_id: UUID) -> AssetBindingRead:
-        """Return one asset binding."""
-        return asset_binding_read(self._asset_binding(binding_id))
+    def get_agent_binding(self, binding_id: UUID) -> AgentBindingRead:
+        """Return one agent binding."""
+        return agent_binding_read(self._agent_binding(binding_id))
 
-    def update_asset_binding(
+    def update_agent_binding(
         self,
         binding_id: UUID,
-        patch: AssetBindingUpdate,
-    ) -> AssetBindingRead:
-        """Patch an asset address. Ref and key must change together."""
-        row: AssetEngineBindingRow = self._asset_binding(binding_id)
+        patch: AgentBindingUpdate,
+    ) -> AgentBindingRead:
+        """Patch an agent address. Ref and key must change together."""
+        row: AgentEngineBindingRow = self._agent_binding(binding_id)
         changes: dict[str, object] = patch.model_dump(exclude_unset=True)
         ref_in_patch: bool = "engine_ref" in changes
         key_in_patch: bool = "engine_ref_key" in changes
@@ -197,11 +197,11 @@ class BindingService:
             row.last_validated_at = patch.last_validated_at
         row.updated_at = utc_now()
         self._repo.commit()
-        return asset_binding_read(row)
+        return agent_binding_read(row)
 
-    def delete_asset_binding(self, binding_id: UUID) -> None:
-        """Delete one asset binding."""
-        row: AssetEngineBindingRow = self._asset_binding(binding_id)
+    def delete_agent_binding(self, binding_id: UUID) -> None:
+        """Delete one agent binding."""
+        row: AgentEngineBindingRow = self._agent_binding(binding_id)
         self._repo.delete(row)
         self._repo.commit()
 
@@ -224,7 +224,7 @@ class BindingService:
         engine_ref_key: str,
         current_id: UUID | None,
     ) -> None:
-        existing: AssetEngineBindingRow | None = self._repo.find_asset_binding_by_key(
+        existing: AgentEngineBindingRow | None = self._repo.find_agent_binding_by_key(
             source_binding_id,
             engine_ref_key,
         )
@@ -232,7 +232,7 @@ class BindingService:
             raise ConflictError("engine_ref_key already exists for this source binding")
 
     def _ensure_single_selected_query(self, table_id: UUID, current_id: UUID | None) -> None:
-        existing: AssetEngineBindingRow | None = self._repo.find_selected_query(table_id)
+        existing: AgentEngineBindingRow | None = self._repo.find_selected_query(table_id)
         if existing is not None and existing.id != current_id:
             raise ConflictError("a selected QUERY binding already exists for this table")
 
@@ -252,9 +252,9 @@ class BindingService:
         row: SourceEngineBindingRow | None = self._repo.get_source_binding(source_binding_id)
         return require_row(row, "source binding", source_binding_id)
 
-    def _asset_binding(self, binding_id: UUID) -> AssetEngineBindingRow:
-        row: AssetEngineBindingRow | None = self._repo.get_asset_binding(binding_id)
-        return require_row(row, "asset binding", binding_id)
+    def _agent_binding(self, binding_id: UUID) -> AgentEngineBindingRow:
+        row: AgentEngineBindingRow | None = self._repo.get_agent_binding(binding_id)
+        return require_row(row, "agent binding", binding_id)
 
 
 def _assert_role_engine(role: BindingRole, engine_type: str) -> None:

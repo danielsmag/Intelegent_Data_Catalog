@@ -21,9 +21,9 @@ from intelegent_data_catalog.knowledge.models import (
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import ContextOrigin
 from intelegent_data_catalog.persistence.models import (
+    AgentKnowledgeContextRow,
     AirflowInstanceKnowledgeContextRow,
     AirflowInstanceRow,
-    AssetKnowledgeContextRow,
     CatalogTableRow,
     ColumnRow,
     TableKnowledgeContextRow,
@@ -61,8 +61,8 @@ class KnowledgeContextStore:
         self._commit()
 
     def get(self, table_id: UUID) -> TableAnalysisContext | None:
-        """Return the asset snapshot when this table has one, otherwise the table row."""
-        stored: TableAnalysisContext | None = self._from_asset(table_id)
+        """Return the agent snapshot when this table has one, otherwise the table row."""
+        stored: TableAnalysisContext | None = self._from_agent(table_id)
         if stored is not None:
             return stored
         row: TableKnowledgeContextRow | None = self._by_table(table_id)
@@ -70,15 +70,15 @@ class KnowledgeContextStore:
             return None
         return self._decode(row.payload, table_id)
 
-    def _from_asset(self, table_id: UUID) -> TableAnalysisContext | None:
-        """Read a table snapshot nested in the linked asset. A thin payload is absent."""
+    def _from_agent(self, table_id: UUID) -> TableAnalysisContext | None:
+        """Read a table snapshot nested in the linked agent. A thin payload is absent."""
         table: CatalogTableRow | None = self._session.get(CatalogTableRow, table_id)
-        if table is None or table.asset_id is None:
+        if table is None or table.agent_id is None:
             return None
-        statement: Select[tuple[AssetKnowledgeContextRow]] = select(AssetKnowledgeContextRow).where(
-            AssetKnowledgeContextRow.asset_id == table.asset_id,
+        statement: Select[tuple[AgentKnowledgeContextRow]] = select(AgentKnowledgeContextRow).where(
+            AgentKnowledgeContextRow.agent_id == table.agent_id,
         )
-        saved: AssetKnowledgeContextRow | None = self._session.scalar(statement)
+        saved: AgentKnowledgeContextRow | None = self._session.scalar(statement)
         if saved is None or not isinstance(saved.payload, dict):
             return None
         inner: object = saved.payload.get("payload")
