@@ -13,8 +13,10 @@ from intelegent_data_catalog.assets.definitions.fingerprint import declaration_p
 from intelegent_data_catalog.assets.definitions.models import (
     AssetSpec,
     DefinitionSpec,
+    SchemaSourceRef,
     ScopeSpec,
     SpaceSpec,
+    TableSourceRef,
 )
 from intelegent_data_catalog.assets.definitions.repository import AssetDefinitionRepository
 from intelegent_data_catalog.assets.definitions.resolver import (
@@ -83,12 +85,20 @@ class AssetDefinitionApplier:
         }
         declared: list[tuple[str, DefinitionKind, BaseModel]] = _declared(spec)
         declared_keys: set[str] = {item[0] for item in declared}
+        schema_keys: set[str] = {
+            asset.key for asset in spec.assets if isinstance(asset.source, SchemaSourceRef)
+        }
         for key, prior in existing.items():
-            if key not in declared_keys:
-                self._retire_item(prior)
+            if key in declared_keys or key.split("/", 1)[0] in schema_keys:
+                continue
+            self._retire_item(prior)
         for item_key, kind, model in declared:
             prior_item: AssetDefinitionItemRow | None = existing.get(item_key)
-            if _unchanged(prior_item, model):
+            schema_asset: bool = isinstance(model, AssetSpec) and isinstance(
+                model.source,
+                SchemaSourceRef,
+            )
+            if not schema_asset and _unchanged(prior_item, model):
                 continue
             self._apply_model(file_row, kind, model, prior_item)
 
@@ -118,6 +128,36 @@ class AssetDefinitionApplier:
             if status == DefinitionItemStatus.APPLIED:
                 applied += 1
         return applied
+
+    def refresh_schemas(self) -> int:
+        """Re-resolve applied schema declarations so new and gone tables are picked up."""
+        refreshed: int = 0
+        item: AssetDefinitionItemRow
+        for item in self._repo.schema_parents():
+            item_id: UUID = item.id
+            kept: int = len(self._pending)
+            try:
+                self._refresh_schema(item)
+                self._session.commit()
+            except (CatalogError, ValidationError, SQLAlchemyError):
+                self._logger.exception("asset schema refresh failed: %s", item_id)
+                self._pending = self._pending[:kept]
+                self._session.rollback()
+                self._mark_retry_error(item_id)
+                self._session.commit()
+                continue
+            refreshed += 1
+        return refreshed
+
+    def _refresh_schema(self, item: AssetDefinitionItemRow) -> None:
+        file_row: AssetDefinitionFileRow | None = self._session.get(
+            AssetDefinitionFileRow,
+            item.file_id,
+        )
+        if file_row is None or file_row.status == DefinitionFileStatus.REMOVED.value:
+            return
+        spec: AssetSpec = AssetSpec.model_validate(item.declaration)
+        self._apply_schema(file_row, spec, item)
 
     def _retry(self, item: AssetDefinitionItemRow) -> DefinitionItemStatus:
         file_row: AssetDefinitionFileRow | None = self._session.get(
@@ -230,9 +270,13 @@ class AssetDefinitionApplier:
         spec: AssetSpec,
         prior: AssetDefinitionItemRow | None,
     ) -> DefinitionItemStatus:
-        resolved: ResolvedSource | UnresolvedSource | RejectedSource = self._resolver.resolve(
-            spec.source,
-        )
+        if isinstance(spec.source, SchemaSourceRef):
+            return self._apply_schema(file_row, spec, prior)
+        found: ResolvedSource | UnresolvedSource | RejectedSource | list[CatalogTableRow]
+        found = self._resolver.resolve(spec.source)
+        if isinstance(found, list):
+            raise CatalogError("schema declaration was not expanded")
+        resolved: ResolvedSource | UnresolvedSource | RejectedSource = found
         if isinstance(resolved, UnresolvedSource):
             if prior is not None:
                 self._detach_claim(prior)
@@ -259,7 +303,7 @@ class AssetDefinitionApplier:
                 prior,
             )
             return DefinitionItemStatus.ERROR
-        asset: AssetRow = self._ensure_asset(resolved)
+        asset: AssetRow = self._ensure_asset(resolved, spec, prior)
         self._overlay(asset, spec, file_row.key)
         if prior is not None and (prior.scope_id is not None or prior.space_id is not None):
             self._detach_claim(prior)
@@ -277,6 +321,76 @@ class AssetDefinitionApplier:
         )
         if changed and spec.operator is not None:
             self._queue(file_row, recorded, asset, spec)
+        return DefinitionItemStatus.APPLIED
+
+    def _apply_schema(
+        self,
+        file_row: AssetDefinitionFileRow,
+        spec: AssetSpec,
+        prior: AssetDefinitionItemRow | None,
+    ) -> DefinitionItemStatus:
+        """Record the schema item and one child asset for each matching table."""
+        if not isinstance(spec.source, SchemaSourceRef):
+            raise CatalogError("schema declaration has no schema source")
+        source: SchemaSourceRef = spec.source
+        resolved: ResolvedSource | UnresolvedSource | RejectedSource | list[CatalogTableRow]
+        resolved = self._resolver.resolve(source)
+        prefix: str = f"{spec.key}/"
+        children: list[AssetDefinitionItemRow] = [
+            item for item in self._repo.items_for(file_row.id) if item.item_key.startswith(prefix)
+        ]
+        if isinstance(resolved, UnresolvedSource):
+            child: AssetDefinitionItemRow
+            for child in children:
+                self._retire_item(child)
+            self._record(
+                file_row,
+                DefinitionKind.ASSET,
+                spec.key,
+                spec,
+                DefinitionItemStatus.UNRESOLVED,
+                resolved.reason,
+                prior,
+            )
+            return DefinitionItemStatus.UNRESOLVED
+        if not isinstance(resolved, list):
+            raise CatalogError("schema did not resolve to tables")
+        self._record(
+            file_row,
+            DefinitionKind.ASSET,
+            spec.key,
+            spec,
+            DefinitionItemStatus.APPLIED,
+            None,
+            prior,
+        )
+        seen: set[str] = set()
+        table: CatalogTableRow
+        for table in resolved:
+            child_key: str = f"{spec.key}/{table.name}"
+            seen.add(child_key)
+            child_spec: AssetSpec = AssetSpec(
+                key=child_key,
+                source=TableSourceRef(source_key=table.source_key, data_source=source.data_source),
+                operator=spec.operator,
+                parent_key=spec.key,
+                schedule=spec.schedule,
+                description=spec.description,
+                context=spec.context,
+                status=spec.status,
+                properties=dict(spec.properties),
+                tags=list(spec.tags),
+                set_fields=list(spec.set_fields),
+            )
+            prior_child: AssetDefinitionItemRow | None = None
+            candidate: AssetDefinitionItemRow
+            for candidate in children:
+                if candidate.item_key == child_key:
+                    prior_child = candidate
+            self._apply_asset(file_row, child_spec, prior_child)
+        for child in children:
+            if child.item_key not in seen:
+                self._retire_item(child)
         return DefinitionItemStatus.APPLIED
 
     def _queue(
@@ -305,8 +419,19 @@ class AssetDefinitionApplier:
             ),
         )
 
-    def _ensure_asset(self, resolved: ResolvedSource) -> AssetRow:
+    def _ensure_asset(
+        self,
+        resolved: ResolvedSource,
+        spec: AssetSpec,
+        prior: AssetDefinitionItemRow | None,
+    ) -> AssetRow:
         match resolved:
+            case CatalogTableRow() if spec.parent_key is not None:
+                existing: AssetRow | None = None
+                if prior is not None and prior.asset_id is not None:
+                    existing = self._session.get(AssetRow, prior.asset_id)
+                raw_slug: str = f"{spec.parent_key}-{resolved.name}"
+                return self._sync.ensure_table_alias(resolved, existing, raw_slug)
             case CatalogTableRow():
                 return self._sync.ensure_table(resolved)
             case AirflowDagRow():
@@ -320,7 +445,8 @@ class AssetDefinitionApplier:
                 return created
 
     def _overlay(self, asset: AssetRow, spec: AssetSpec, file_key: str) -> None:
-        asset.name = _clip(spec.key)
+        if spec.parent_key is None:
+            asset.name = _clip(spec.key)
         if "description" in spec.set_fields:
             asset.description = spec.description
         if "context" in spec.set_fields:

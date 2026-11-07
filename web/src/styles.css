@@ -4789,12 +4789,28 @@ span.run-status {
   font-size: 12px;
 }
 
+.agent-paths {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
 .agent-path {
   min-width: 0;
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-layer {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: lowercase;
 }
 
 .agent-flag-error {

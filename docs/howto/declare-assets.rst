@@ -7,13 +7,13 @@ prefix (default ``asset-definitions/``) in the definition bucket.
 
 The commerce team's declarations are the ``lumen-sales`` project next to this
 repository. Those files belong under the prefix in the definition bucket. The
-catalog reads that prefix from object storage. The snippets below are those
-files.
+catalog reads that prefix from object storage. The snippets below are copies
+shipped with this manual, so the HTML build does not need that checkout.
 
 Space
 -----
 
-.. literalinclude:: ../../../lumen-sales/spaces/space_sales.py
+.. literalinclude:: ../examples/lumen-sales/spaces/space_sales.py
    :language: python
    :caption: lumen-sales/spaces/space_sales.py
 
@@ -22,7 +22,7 @@ Object key: ``asset-definitions/spaces/space_sales.py``.
 Scope
 -----
 
-.. literalinclude:: ../../../lumen-sales/scopes/sales/scope_sales.py
+.. literalinclude:: ../examples/lumen-sales/scopes/sales/scope_sales.py
    :language: python
    :caption: lumen-sales/scopes/sales/scope_sales.py
 
@@ -33,7 +33,7 @@ whose space is still missing stays unresolved and is retried on a later scan.
 Asset
 -----
 
-.. literalinclude:: ../../../lumen-sales/assets/sales/asset_customer_spend.py
+.. literalinclude:: ../examples/lumen-sales/assets/sales/asset_customer_spend.py
    :language: python
    :caption: lumen-sales/assets/sales/asset_customer_spend.py
 
@@ -48,6 +48,10 @@ on the asset. Omit ``tags`` and the stored labels stay.
 ``polaris.sales.orders`` and runs at 01:30.
 
 Omit ``schedule`` to run once when the file is applied.
+
+``SchemaOperator`` in that file fans out to one table asset per catalog
+table. Put table-specific agent files in ``asset_<table>/`` next to the
+schema file. The ``asset_`` prefix marks the folder. See :doc:`/concepts/operators`.
 
 Scan
 ----

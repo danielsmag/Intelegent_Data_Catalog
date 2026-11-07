@@ -275,7 +275,8 @@ class AssetService:
 class _UnavailableAgents(AssetAgentProvider):
     """Placeholder used when a request only reads assets."""
 
-    def for_table(self, table_id: UUID) -> AssetAgent:
+    def for_table(self, table_id: UUID, asset_id: UUID, *, primary: bool) -> AssetAgent:
+        del table_id, asset_id, primary
         raise LlmUnavailableError("language model is not configured")
 
     def for_dag(self, dag_row_id: UUID, instance_id: UUID) -> AssetAgent:

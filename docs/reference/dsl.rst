@@ -22,6 +22,7 @@ their fields at construction and run in :doc:`/concepts/execution`.
    TableOperator
    IcebergTableOperator
    PostgresTableOperator
+   SchemaOperator
    AirflowOperator
    PageOperator
    operator_from_ref

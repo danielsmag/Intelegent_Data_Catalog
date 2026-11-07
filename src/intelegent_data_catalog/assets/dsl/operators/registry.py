@@ -13,6 +13,7 @@ from intelegent_data_catalog.assets.dsl.operators.page import PageOperator
 from intelegent_data_catalog.assets.dsl.operators.tables import (
     IcebergTableOperator,
     PostgresTableOperator,
+    SchemaOperator,
 )
 
 _OPERATORS: dict[str, type[Operator]] = {
@@ -20,6 +21,7 @@ _OPERATORS: dict[str, type[Operator]] = {
     for cls in (
         IcebergTableOperator,
         PostgresTableOperator,
+        SchemaOperator,
         AirflowOperator,
         AirflowInstanceOperator,
         PageOperator,

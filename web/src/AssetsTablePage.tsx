@@ -38,15 +38,6 @@ const SERVICES: readonly { id: ServiceId; label: string }[] = [
   { id: "iceberg", label: "Iceberg" },
 ]
 
-const KIND_TABS: readonly { id: "all" | AssetKind; label: string }[] = [
-  { id: "all", label: "Assets" },
-  { id: "TABLE", label: "Tables" },
-  { id: "AIRFLOW_DAG", label: "Airflow DAGs" },
-  { id: "AIRFLOW_INSTANCE", label: "Airflow instances" },
-  { id: "NOTEBOOK", label: "Notebooks" },
-  { id: "FILE", label: "Files" },
-]
-
 const STATUSES: readonly { id: "" | AssetStatus; label: string }[] = [
   { id: "", label: "All" },
   { id: "ACTIVE", label: "Active" },
@@ -80,13 +71,10 @@ export function AssetsTablePage(): ReactElement {
   const scopeId: string | null = params.get("scope")
   const status: AssetStatus | null = statusParam(params.get("status"))
   const offset: number = Number(params.get("offset") ?? "0")
-  const kinds: AssetKind[] = params.getAll("kind").filter(isKind)
   const service: ServiceId = serviceParam(params.get("service"))
-  const activeKind: BoardKind = boardKind(kinds)
-  const queryKinds: AssetKind[] = serviceKinds(service, kinds)
+  const queryKinds: AssetKind[] = serviceKinds(service)
   const queryFormats: string[] = service === "iceberg" ? ["ICEBERG"] : []
-  const creatingInstance: boolean =
-    (service === "airflow" || activeKind === "AIRFLOW_INSTANCE") && params.get("new") === "1"
+  const creatingInstance: boolean = service === "airflow" && params.get("new") === "1"
   const chosenRank = RANKS.find((item) => item.id === rank) ?? RANKS[2]
   const now: number = useClock(FRESHNESS_TICK_MS)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
@@ -290,16 +278,6 @@ export function AssetsTablePage(): ReactElement {
     }
     setParams(updated)
   }
-  function selectKind(kind: "all" | AssetKind): void {
-    const updated: URLSearchParams = new URLSearchParams(params)
-    updated.delete("kind")
-    updated.delete("service")
-    if (kind !== "all") {
-      updated.append("kind", kind)
-    }
-    updated.delete("offset")
-    setParams(updated)
-  }
   async function addTo(targetKind: "scope" | "space", targetId: string): Promise<void> {
     const ids: string[] = [...selected]
     const result = await bulkMembership(ids, targetKind, targetId, "attach")
@@ -319,7 +297,7 @@ export function AssetsTablePage(): ReactElement {
             <h1>Assets</h1>
           </div>
           <div className="catalog-hero-actions">
-            {activeKind === "AIRFLOW_INSTANCE" ? (
+            {service === "airflow" ? (
               <button
                 type="button"
                 className="button"
@@ -352,22 +330,6 @@ export function AssetsTablePage(): ReactElement {
           />
         </div>
       ) : null}
-      <div className="tabs" role="tablist" aria-label="Asset kinds">
-        {KIND_TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            className={service === "" && activeKind === item.id ? "tab selected" : "tab"}
-            aria-selected={service === "" && activeKind === item.id}
-            onClick={() => {
-              selectKind(item.id)
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
       <div className="asset-board__filters">
         <input
           className="asset-board__search"
@@ -937,15 +899,7 @@ function weekdayLabel(value: string): string | null {
   return `${left}–${right}`
 }
 
-type BoardKind = "all" | AssetKind
 type ServiceId = "" | "airflow" | "iceberg"
-
-function boardKind(kinds: readonly AssetKind[]): BoardKind {
-  if (kinds.length === 1) {
-    return kinds[0] ?? "all"
-  }
-  return "all"
-}
 
 function serviceParam(value: string | null): ServiceId {
   if (value === "airflow" || value === "iceberg") {
@@ -954,14 +908,14 @@ function serviceParam(value: string | null): ServiceId {
   return ""
 }
 
-function serviceKinds(service: ServiceId, kinds: readonly AssetKind[]): AssetKind[] {
+function serviceKinds(service: ServiceId): AssetKind[] {
   if (service === "airflow") {
     return ["AIRFLOW_DAG", "AIRFLOW_INSTANCE"]
   }
   if (service === "iceberg") {
     return ["TABLE"]
   }
-  return [...kinds]
+  return []
 }
 
 function isIceberg(format: string | null): boolean {
@@ -988,16 +942,6 @@ function kindLabel(kind: AssetKind): string {
   return "Table"
 }
 
-function isKind(value: string): value is AssetKind {
-  return (
-    value === "TABLE" ||
-    value === "AIRFLOW_DAG" ||
-    value === "AIRFLOW_INSTANCE" ||
-    value === "NOTEBOOK" ||
-    value === "FILE"
-  )
-}
-
 function statusParam(value: string | null): AssetStatus | null {
   if (value === "ACTIVE" || value === "MISSING" || value === "DEPRECATED") {
     return value
@@ -1013,7 +957,7 @@ function ownerParam(value: string | null): "me" | "shared" | "all" {
 }
 
 async function exportCsv(params: URLSearchParams): Promise<void> {
-  const kinds: AssetKind[] = serviceKinds(serviceParam(params.get("service")), params.getAll("kind").filter(isKind))
+  const kinds: AssetKind[] = serviceKinds(serviceParam(params.get("service")))
   const formats: string[] = params.get("service") === "iceberg" ? ["ICEBERG"] : []
   const collected: AssetListItem[] = []
   let offset: number = 0

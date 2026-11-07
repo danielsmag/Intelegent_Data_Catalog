@@ -36,6 +36,10 @@ class OperatorContext(ABC):
     def describe(self) -> None:
         """Write the asset's business context. A manual edit by a user is kept."""
 
+    @abstractmethod
+    def has_context(self) -> bool:
+        """True when the asset already has a non-blank business context."""
+
 
 class OperatorObserver(Protocol):
     """Optional hooks around each step of ``execute``."""

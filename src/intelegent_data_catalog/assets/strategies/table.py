@@ -14,7 +14,7 @@ from intelegent_data_catalog.knowledge.models import TableAnalysisContext, Table
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind
-from intelegent_data_catalog.persistence.models import CatalogTableRow
+from intelegent_data_catalog.persistence.models import AssetRow, CatalogTableRow
 from intelegent_data_catalog.registry.reads import dump_model
 
 _JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
@@ -34,10 +34,20 @@ class TableAssetDetail(BaseModel):
 class TableAssetAgentAdapter(AssetAgent):
     """Maps asset build and describe calls onto ``TableAgent``."""
 
-    def __init__(self, table_id: UUID, agent: TableAgent, session: Session) -> None:
+    def __init__(
+        self,
+        table_id: UUID,
+        asset_id: UUID,
+        agent: TableAgent,
+        session: Session,
+        *,
+        save_table: bool,
+    ) -> None:
         self._table_id: UUID = table_id
+        self._asset_id: UUID = asset_id
         self._agent: TableAgent = agent
         self._session: Session = session
+        self._save_table: bool = save_table
 
     def get_metadata(self) -> BaseModel:
         """Load the table catalog context."""
@@ -58,13 +68,9 @@ class TableAssetAgentAdapter(AssetAgent):
                 effort=options.effort,
             ),
         )
-        table: CatalogTableRow | None = self._session.get(CatalogTableRow, self._table_id)
-        asset_id: UUID | None = None if table is None else table.asset_id
-        if asset_id is None:
-            raise EntityNotFoundError("asset", str(self._table_id))
         summary: str | None = built.table.description or built.table.name
         return AssetAnalysisContext(
-            asset_id=asset_id,
+            asset_id=self._asset_id,
             kind=AssetKind.TABLE,
             summary=summary,
             built_at=utc_now(),
@@ -72,8 +78,10 @@ class TableAssetAgentAdapter(AssetAgent):
         )
 
     def describe(self) -> str:
-        """Write the table's business context through the table agent."""
-        return self._agent.describe_table()
+        """Write business context. An alias keeps the shared table context."""
+        if self._save_table:
+            return self._agent.describe_table()
+        return self._agent.propose_table_context()
 
 
 class TableStrategy:
@@ -91,7 +99,8 @@ class TableStrategy:
     ) -> AssetAgent:
         """Adapter over the table agent for this asset's table."""
         table: CatalogTableRow = _table(session, asset_id)
-        return agents.for_table(table.id)
+        primary: bool = table.asset_id == asset_id
+        return agents.for_table(table.id, asset_id, primary=primary)
 
     def detail(self, session: Session, asset_id: UUID) -> TableAssetDetail:
         """Table id and source key."""
@@ -105,12 +114,30 @@ class TableStrategy:
 
 
 def _table(session: Session, asset_id: UUID) -> CatalogTableRow:
+    asset: AssetRow | None = session.get(AssetRow, asset_id)
+    linked: CatalogTableRow | None = _linked_table(session, asset)
+    if linked is not None:
+        return linked
     table: CatalogTableRow | None = session.scalar(
         select(CatalogTableRow).where(CatalogTableRow.asset_id == asset_id),
     )
     if table is None:
         raise EntityNotFoundError("catalog table", str(asset_id))
     return table
+
+
+def _linked_table(session: Session, asset: AssetRow | None) -> CatalogTableRow | None:
+    """Table named by ``properties.table_id``. Missing or stale ids fall through."""
+    if asset is None:
+        return None
+    raw: object = asset.properties.get("table_id")
+    if not isinstance(raw, str):
+        return None
+    try:
+        table_id: UUID = UUID(raw)
+    except ValueError:
+        return None
+    return session.get(CatalogTableRow, table_id)
 
 
 def _analysis_payload(built: TableAnalysisContext) -> dict[str, JsonValue]:

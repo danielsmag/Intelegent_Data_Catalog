@@ -471,8 +471,6 @@ services:
     build:
       context: .
       dockerfile: docker/docs/Dockerfile
-      additional_contexts:
-        lumen-sales: ../lumen-sales
     image: intelegent-data-catalog-docs:local
     container_name: intelegent-data-catalog-docs
     restart: unless-stopped
