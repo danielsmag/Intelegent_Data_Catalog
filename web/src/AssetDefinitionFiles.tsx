@@ -156,7 +156,7 @@ function FileNode(props: {
         aria-current={current ? "page" : undefined}
         style={{ paddingLeft: pad }}
         title={props.node.name}
-        onDoubleClick={() => {
+        onClick={() => {
           openInFocusedGroup(pagePath)
         }}
         onPointerDown={(event) => {

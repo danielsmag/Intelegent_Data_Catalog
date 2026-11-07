@@ -4,17 +4,14 @@ import {
   fetchAssetDefinitionFile,
   fetchAssetDefinitionText,
   type AssetDefinitionFileDetail,
-  type AssetDefinitionItem,
   type AssetDefinitionText,
 } from "./assetDefinitionsApi"
-import { DefinitionDocument } from "./DefinitionDocument"
-import { openInFocusedGroup } from "./editorLayout"
 import { useEditorTitle } from "./editorSlots"
+import { HighlightedSource } from "./sourceHighlight"
 
 export function AssetDefinitionPage(): ReactElement {
   const fileId: string | undefined = useParams().fileId
   const objectKey: string | undefined = useParams().objectKey
-  const [detail, setDetail] = useState<AssetDefinitionFileDetail | null>(null)
   const [source, setSource] = useState<string | null>(null)
   const [filename, setFilename] = useState<string>("")
   const [storedKey, setStoredKey] = useState<string>("")
@@ -26,7 +23,6 @@ export function AssetDefinitionPage(): ReactElement {
       if (controller.signal.aborted) {
         return
       }
-      setDetail(null)
       setSource(null)
       setStoredKey("")
       setError(err instanceof Error ? err.message : "Could not load definition file")
@@ -34,7 +30,6 @@ export function AssetDefinitionPage(): ReactElement {
     if (fileId !== undefined && fileId !== "") {
       void fetchAssetDefinitionFile(fileId, controller.signal)
         .then((row: AssetDefinitionFileDetail) => {
-          setDetail(row)
           setSource(row.source)
           setStoredKey(row.file.key)
           setFilename(fileName(row.file.key))
@@ -45,7 +40,6 @@ export function AssetDefinitionPage(): ReactElement {
       const key: string = decodeURIComponent(objectKey)
       void fetchAssetDefinitionText(key, controller.signal)
         .then((row: AssetDefinitionText) => {
-          setDetail(null)
           setSource(row.source)
           setStoredKey(row.key)
           setFilename(fileName(row.key))
@@ -58,54 +52,38 @@ export function AssetDefinitionPage(): ReactElement {
     }
   }, [fileId, objectKey])
   const heading: string = filename === "" ? "Definition" : filename
-  const document: ReactElement | null = source === null ? null : (
-    <DefinitionDocument filename={filename} objectKey={storedKey} source={source} />
-  )
   return (
     <section className="page-grid">
-      {document !== null ? null : (
-        <header className="page-intro">
-          <p className="eyebrow">Definition</p>
-          <h1>{heading}</h1>
-        </header>
-      )}
+      <header className="page-intro definition-head">
+        <p className="eyebrow">{fileKind(filename)}</p>
+        <h1>{heading}</h1>
+        {storedKey !== "" ? <p className="definition-path">{displayPath(storedKey)}</p> : null}
+      </header>
       {error !== null ? <p className="error-text">{error}</p> : null}
       {source === null && error === null ? <p className="note">Loading script…</p> : null}
-      {document !== null ? document : source !== null ? <pre className="source-code">{source}</pre> : null}
-      {detail !== null && detail.items.length > 0 ? (
-        <>
-          <h2>Included</h2>
-          <ul className="asset-membership-list">
-            {detail.items.map((item: AssetDefinitionItem) => (
-              <IncludedItem key={item.id} item={item} />
-            ))}
-          </ul>
-        </>
-      ) : null}
+      {source !== null ? <HighlightedSource filename={filename} source={source} /> : null}
     </section>
   )
 }
 
-function IncludedItem(props: { item: AssetDefinitionItem }): ReactElement {
-  const item: AssetDefinitionItem = props.item
-  const label: string = `${item.item_key} · ${item.status}`
-  return (
-    <li>
-      {item.asset_id !== null ? (
-        <button
-          type="button"
-          onClick={() => {
-            openInFocusedGroup(`/assets/${item.asset_id}`)
-          }}
-        >
-          {label}
-        </button>
-      ) : (
-        <span>{label}</span>
-      )}
-      {item.error !== null ? <p className="note">{item.error}</p> : null}
-    </li>
-  )
+function fileKind(name: string): string {
+  const lower: string = name.toLowerCase()
+  if (lower.endsWith(".py")) {
+    return "Python"
+  }
+  if (lower.endsWith(".md")) {
+    return "Markdown"
+  }
+  const dot: number = lower.lastIndexOf(".")
+  if (dot < 0 || dot === lower.length - 1) {
+    return "File"
+  }
+  return lower.slice(dot + 1)
+}
+
+function displayPath(key: string): string {
+  const prefix: string = "asset-definitions/"
+  return key.startsWith(prefix) ? key.slice(prefix.length) : key
 }
 
 function fileName(key: string): string {

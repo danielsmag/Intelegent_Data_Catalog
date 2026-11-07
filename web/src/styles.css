@@ -2420,10 +2420,35 @@ html.pane-dragging * {
   color: var(--text);
 }
 
+.definition-head {
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--catalog);
+}
+
+.definition-head .eyebrow,
+.definition-head h1 {
+  color: var(--catalog);
+}
+
+.definition-head .eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.definition-path {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 .source-code {
   overflow: auto;
   max-height: 70vh;
-  margin: 8px 0 0;
+  margin: 16px 0 0;
   padding: 12px;
   background: var(--input);
   border: 1px solid var(--border);
@@ -2431,6 +2456,71 @@ html.pane-dragging * {
   font-family: var(--mono);
   font-size: 12px;
   white-space: pre;
+}
+
+.source-view {
+  padding: 8px 0;
+}
+
+.source-view code {
+  display: block;
+}
+
+.source-line {
+  display: flex;
+  min-height: 1.5em;
+  line-height: 1.5;
+}
+
+.source-gutter {
+  flex: none;
+  padding: 0 16px 0 12px;
+  color: #6e7681;
+  text-align: right;
+  user-select: none;
+}
+
+.source-text {
+  white-space: pre;
+}
+
+.tok-key,
+.tok-heading {
+  color: #569cd6;
+}
+
+.tok-string {
+  color: var(--string);
+}
+
+.tok-keyword {
+  color: #c586c0;
+}
+
+.tok-comment {
+  color: #6a9955;
+}
+
+.tok-number {
+  color: #b5cea8;
+}
+
+.tok-function {
+  color: #dcdcaa;
+}
+
+.tok-class,
+.tok-decorator {
+  color: var(--type);
+}
+
+.tok-fence,
+.tok-punct {
+  color: var(--muted);
+}
+
+.tok-guide {
+  border-left: 1px solid color-mix(in srgb, var(--kind-table) 70%, transparent);
 }
 
 .config-rail-frame {
@@ -3833,7 +3923,18 @@ html.editor-dragging * {
 }
 
 .asset-files .tree-row--draggable {
-  cursor: grab;
+  cursor: pointer;
+}
+
+.asset-files .tree-row.current-branch {
+  background: color-mix(in srgb, var(--catalog) 22%, transparent);
+  color: var(--catalog);
+  box-shadow: inset 2px 0 0 var(--catalog);
+}
+
+.asset-files .tree-row.current-branch .asset-files__icon,
+.asset-files .tree-row.current-branch .tree-label {
+  color: var(--catalog);
 }
 
 .asset-files .tree-label {
