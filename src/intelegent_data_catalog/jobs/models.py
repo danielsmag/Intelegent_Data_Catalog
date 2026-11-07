@@ -22,30 +22,6 @@ class KnowledgeBuildJobRead(BaseModel):
     error: str | None = None
 
 
-class ScopeBuildJobRead(BaseModel):
-    """One background scope build. The saved context is a separate read."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    scope_id: UUID
-    scope_name: str
-    status: KnowledgeBuildState
-    error: str | None = None
-
-
-class SpaceBuildJobRead(BaseModel):
-    """One background space build. The saved context is a separate read."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    space_id: UUID
-    space_name: str
-    status: KnowledgeBuildState
-    error: str | None = None
-
-
 class AssetBuildJobRead(BaseModel):
     """One background asset build. The saved context is a separate read."""
 

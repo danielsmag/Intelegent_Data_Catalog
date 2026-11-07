@@ -1,7 +1,7 @@
-"""Reads and writes asset rows, memberships, and the asset search."""
+"""Reads and writes asset rows and the asset search."""
 
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import Float, Select, and_, case, cast, func, or_, select, union_all
 from sqlalchemy.orm import Session
@@ -12,7 +12,6 @@ from sqlalchemy.sql.selectable import SelectBase
 from intelegent_data_catalog.assets.models import (
     AssetListItem,
     AssetQuery,
-    AssetTargetRef,
     ContextState,
 )
 from intelegent_data_catalog.assets.naming import AssetSlugs
@@ -28,13 +27,10 @@ from intelegent_data_catalog.persistence.enums import (
 )
 from intelegent_data_catalog.persistence.models import (
     AssetDefinitionItemRow,
-    AssetMembershipRow,
     AssetRow,
     CatalogJobRow,
     CatalogTableRow,
     EntityConfigurationRow,
-    ScopeRow,
-    SpaceRow,
 )
 
 _DEFAULT_INTERVAL: int = 600
@@ -91,111 +87,14 @@ class AssetRepository:
         self._session.delete(row)
         self._session.flush()
 
-    def memberships_for_target(
-        self,
-        *,
-        scope_id: UUID | None,
-        space_id: UUID | None,
-    ) -> list[AssetMembershipRow]:
-        """Return memberships on one scope or one space."""
-        statement = select(AssetMembershipRow)
-        if scope_id is not None:
-            statement = statement.where(AssetMembershipRow.scope_id == scope_id)
-        else:
-            statement = statement.where(AssetMembershipRow.space_id == space_id)
-        return list(self._session.scalars(statement))
 
-    def memberships(self, asset_id: UUID) -> list[AssetMembershipRow]:
-        """Return every space and scope holding this asset."""
-        statement = select(AssetMembershipRow).where(AssetMembershipRow.asset_id == asset_id)
-        return list(self._session.scalars(statement))
 
-    def membership_for(
-        self,
-        asset_id: UUID,
-        *,
-        scope_id: UUID | None,
-        space_id: UUID | None,
-    ) -> AssetMembershipRow | None:
-        """Return the membership for one target, or none."""
-        statement = select(AssetMembershipRow).where(AssetMembershipRow.asset_id == asset_id)
-        if scope_id is not None:
-            statement = statement.where(AssetMembershipRow.scope_id == scope_id)
-        else:
-            statement = statement.where(AssetMembershipRow.space_id == space_id)
-        return self._session.scalar(statement)
 
-    def attach(
-        self,
-        asset_id: UUID,
-        *,
-        scope_id: UUID | None,
-        space_id: UUID | None,
-    ) -> tuple[AssetMembershipRow, bool]:
-        """Attach an asset. The flag is false when the membership already exists."""
-        existing: AssetMembershipRow | None = self.membership_for(
-            asset_id,
-            scope_id=scope_id,
-            space_id=space_id,
-        )
-        if existing is not None:
-            return existing, False
-        created: AssetMembershipRow = AssetMembershipRow(
-            id=uuid4(),
-            asset_id=asset_id,
-            scope_id=scope_id,
-            space_id=space_id,
-            created_at=utc_now(),
-        )
-        self._session.add(created)
-        self._session.flush()
-        return created, True
 
-    def detach(self, row: AssetMembershipRow) -> None:
-        """Remove one membership. The caller commits."""
-        self._session.delete(row)
-        self._session.flush()
 
-    def list_for_scope(self, scope_id: UUID) -> list[AssetRow]:
-        """Return assets attached to one scope."""
-        statement = (
-            select(AssetRow)
-            .join(AssetMembershipRow, AssetMembershipRow.asset_id == AssetRow.id)
-            .where(AssetMembershipRow.scope_id == scope_id)
-            .order_by(AssetRow.kind, AssetRow.name)
-        )
-        return list(self._session.scalars(statement))
 
-    def list_for_space(self, space_id: UUID) -> list[AssetRow]:
-        """Return assets attached to the space or to one of its scopes."""
-        scope_ids = select(ScopeRow.id).where(ScopeRow.space_id == space_id)
-        statement = (
-            select(AssetRow)
-            .join(AssetMembershipRow, AssetMembershipRow.asset_id == AssetRow.id)
-            .where(
-                or_(
-                    AssetMembershipRow.space_id == space_id,
-                    AssetMembershipRow.scope_id.in_(scope_ids),
-                ),
-            )
-            .order_by(AssetRow.kind, AssetRow.name)
-            .distinct()
-        )
-        return list(self._session.scalars(statement))
 
-    def summaries_for_scope(self, scope_id: UUID) -> list[tuple[UUID, str, str, str | None]]:
-        """Non-table assets on a scope: id, kind, name, summary from the snapshot payload."""
-        return self._summaries(AssetMembershipRow.scope_id == scope_id)
 
-    def summaries_for_space(self, space_id: UUID) -> list[tuple[UUID, str, str, str | None]]:
-        """Non-table assets on a space or its scopes."""
-        scope_ids = select(ScopeRow.id).where(ScopeRow.space_id == space_id)
-        return self._summaries(
-            or_(
-                AssetMembershipRow.space_id == space_id,
-                AssetMembershipRow.scope_id.in_(scope_ids),
-            ),
-        )
 
     def search(self, query: AssetQuery, access: AccessContext) -> tuple[list[AssetListItem], int]:
         """Return one page of visible assets and the unpaged total."""
@@ -218,32 +117,6 @@ class AssetRepository:
         """Workspace used for catalog tables and DAGs that are not personal files."""
         return SHARED_WORKSPACE_ID
 
-    def _summaries(
-        self,
-        predicate: ColumnElement[bool],
-    ) -> list[tuple[UUID, str, str, str | None]]:
-        from intelegent_data_catalog.persistence.models import AssetKnowledgeContextRow
-
-        statement = (
-            select(AssetRow, AssetKnowledgeContextRow.payload)
-            .join(AssetMembershipRow, AssetMembershipRow.asset_id == AssetRow.id)
-            .outerjoin(
-                AssetKnowledgeContextRow,
-                AssetKnowledgeContextRow.asset_id == AssetRow.id,
-            )
-            .where(predicate, AssetRow.kind != AssetKind.TABLE.value)
-            .order_by(AssetRow.name)
-            .distinct()
-        )
-        found: list[tuple[UUID, str, str, str | None]] = []
-        for asset, payload in self._session.execute(statement):
-            summary: str | None = None
-            if payload:
-                raw: object = payload.get("summary")
-                if isinstance(raw, str) and raw.strip() != "":
-                    summary = raw
-            found.append((asset.id, asset.kind, asset.name, summary))
-        return found
 
     def _filters(self, query: AssetQuery, access: AccessContext) -> list[ColumnElement[bool]]:
         filters: list[ColumnElement[bool]] = []
@@ -267,7 +140,9 @@ class AssetRepository:
         if len(query.kinds) > 0:
             filters.append(AssetRow.kind.in_([kind.value for kind in query.kinds]))
         if len(query.formats) > 0:
-            stored_format: ColumnElement[str] = func.lower(AssetRow.properties["table_format"].as_string())
+            stored_format: ColumnElement[str] = func.lower(
+                AssetRow.properties["table_format"].as_string()
+            )
             wanted: list[str] = [item.lower() for item in query.formats if item != ""]
             if len(wanted) > 0:
                 filters.append(stored_format.in_(wanted))
@@ -286,20 +161,6 @@ class AssetRepository:
                     AssetRow.context.ilike(pattern),
                 ),
             )
-        if query.scope_id is not None:
-            filters.append(AssetRow.id.in_(self._member_ids(scope_id=query.scope_id)))
-        if query.space_id is not None:
-            scope_ids = select(ScopeRow.id).where(ScopeRow.space_id == query.space_id)
-            filters.append(
-                or_(
-                    AssetRow.id.in_(self._member_ids(space_id=query.space_id)),
-                    AssetRow.id.in_(
-                        select(AssetMembershipRow.asset_id).where(
-                            AssetMembershipRow.scope_id.in_(scope_ids),
-                        ),
-                    ),
-                ),
-            )
         if query.refresh_mode is not None:
             filters.append(
                 AssetRow.id.in_(
@@ -311,16 +172,6 @@ class AssetRepository:
             )
         return filters
 
-    def _member_ids(
-        self,
-        *,
-        scope_id: UUID | None = None,
-        space_id: UUID | None = None,
-    ) -> Select[UUID]:
-        statement = select(AssetMembershipRow.asset_id)
-        if scope_id is not None:
-            return statement.where(AssetMembershipRow.scope_id == scope_id)
-        return statement.where(AssetMembershipRow.space_id == space_id)
 
     def _total(self, filters: list[ColumnElement[bool]]) -> int:
         statement = select(func.count()).select_from(AssetRow)
@@ -334,7 +185,6 @@ class AssetRepository:
     def _page(self, query: AssetQuery, filters: list[ColumnElement[bool]]) -> list[AssetRow]:
         dialect: str = self._session.get_bind().dialect.name
         builds = _build_times()
-        counts = _membership_counts()
         modes = _refresh_modes()
         freshness = _freshness_score(
             builds.c.last_built_at,
@@ -346,7 +196,6 @@ class AssetRepository:
         statement = (
             select(AssetRow)
             .outerjoin(builds, builds.c.asset_id == AssetRow.id)
-            .outerjoin(counts, counts.c.asset_id == AssetRow.id)
             .outerjoin(modes, modes.c.asset_id == AssetRow.id)
         )
         if len(filters) > 0:
@@ -361,9 +210,6 @@ class AssetRepository:
                 statement = _order_page(statement, AssetRow.updated_at, descending=descending)
             case "last_built_at":
                 statement = _order_page(statement, builds.c.last_built_at, descending=descending)
-            case "membership_count":
-                counted = func.coalesce(counts.c.membership_count, 0)
-                statement = _order_page(statement, counted, descending=descending)
             case "freshness_score":
                 statement = _order_page(statement, freshness, descending=descending)
             case "context_state":
@@ -375,7 +221,6 @@ class AssetRepository:
         if len(rows) == 0:
             return []
         ids: list[UUID] = [row.id for row in rows]
-        targets: dict[UUID, tuple[list[AssetTargetRef], list[AssetTargetRef]]] = self._targets(ids)
         built: dict[UUID, datetime] = self._last_built(ids)
         running: set[UUID] = self._running(ids)
         modes: dict[UUID, tuple[str, int]] = self._modes(ids)
@@ -384,7 +229,6 @@ class AssetRepository:
         items: list[AssetListItem] = []
         row: AssetRow
         for row in rows:
-            scopes, spaces = targets.get(row.id, ([], []))
             fallback: tuple[str, int] = (AssetRefreshMode.INTERVAL.value, _DEFAULT_INTERVAL)
             mode_name, interval = modes.get(row.id, fallback)
             schedule_pair: tuple[str | None, datetime | None] = schedules.get(row.id, (None, None))
@@ -403,9 +247,6 @@ class AssetRepository:
                     status=AssetStatus(row.status),
                     subtitle=_subtitle(row.properties),
                     table_format=_table_format(row.properties),
-                    membership_count=len(scopes) + len(spaces),
-                    scopes=scopes,
-                    spaces=spaces,
                     last_built_at=last_built,
                     context_state=_state(row),
                     freshness_score=_score(mode_name, interval, last_built, now),
@@ -419,24 +260,6 @@ class AssetRepository:
             )
         return items
 
-    def _targets(
-        self,
-        asset_ids: list[UUID],
-    ) -> dict[UUID, tuple[list[AssetTargetRef], list[AssetTargetRef]]]:
-        statement = (
-            select(AssetMembershipRow, ScopeRow.name, SpaceRow.name)
-            .outerjoin(ScopeRow, ScopeRow.id == AssetMembershipRow.scope_id)
-            .outerjoin(SpaceRow, SpaceRow.id == AssetMembershipRow.space_id)
-            .where(AssetMembershipRow.asset_id.in_(asset_ids))
-        )
-        found: dict[UUID, tuple[list[AssetTargetRef], list[AssetTargetRef]]] = {}
-        for membership, scope_name, space_name in self._session.execute(statement):
-            scopes, spaces = found.setdefault(membership.asset_id, ([], []))
-            if membership.scope_id is not None and scope_name:
-                scopes.append(AssetTargetRef(id=membership.scope_id, name=scope_name))
-            if membership.space_id is not None and space_name:
-                spaces.append(AssetTargetRef(id=membership.space_id, name=space_name))
-        return found
 
     def _last_built(self, asset_ids: list[UUID]) -> dict[UUID, datetime]:
         found: dict[UUID, datetime] = {}
@@ -574,15 +397,6 @@ def _build_times() -> Subquery:
     )
 
 
-def _membership_counts() -> Subquery:
-    return (
-        select(
-            AssetMembershipRow.asset_id.label("asset_id"),
-            func.count().label("membership_count"),
-        )
-        .group_by(AssetMembershipRow.asset_id)
-        .subquery()
-    )
 
 
 def _refresh_modes() -> Subquery:

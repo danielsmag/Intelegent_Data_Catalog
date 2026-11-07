@@ -5,19 +5,11 @@ import { fetchAssetBuild, startAssetBuild, type AssetBuildJob } from "./assetsAp
 import {
   fetchContextGeneration,
   fetchKnowledgeBuild,
-  fetchScopeBuild,
-  fetchSpaceBuild,
   startContextGeneration,
   startKnowledgeBuild,
-  startScopeBuild,
-  startSpaceBuild,
   type ContextGenerationJob,
   type ContextSubjectKind,
   type KnowledgeBuildJob,
-  type ScopeBuildJob,
-  type ScopeBuildOptions,
-  type SpaceBuildJob,
-  type SpaceBuildOptions,
   type TableBuildOptions,
 } from "./registryApi"
 import {
@@ -120,18 +112,6 @@ const tableBuilds: BuildFollower<KnowledgeBuildJob> = createFollower(
   (job: KnowledgeBuildJob): string => `Build context for ${job.table_name}`,
 )
 
-const scopeBuilds: BuildFollower<ScopeBuildJob> = createFollower(
-  fetchScopeBuild,
-  (job: ScopeBuildJob): string => {
-    const detail: string = job.error ?? "Build failed."
-    if (job.status === "succeeded") {
-      return `Scope context for ${job.scope_name} is ready.`
-    }
-    return `Scope context for ${job.scope_name} failed. ${detail}`
-  },
-  (job: ScopeBuildJob): string => `Build scope context for ${job.scope_name}`,
-)
-
 export function onKnowledgeBuildFinished(handler: FinishedHandler<KnowledgeBuildJob>): () => void {
   return tableBuilds.onFinished(handler)
 }
@@ -147,52 +127,6 @@ export async function requestKnowledgeBuild(
 
 export function followKnowledgeBuild(job: KnowledgeBuildJob): void {
   tableBuilds.follow(job)
-}
-
-export function onScopeBuildFinished(handler: FinishedHandler<ScopeBuildJob>): () => void {
-  return scopeBuilds.onFinished(handler)
-}
-
-export async function requestScopeBuild(
-  scopeId: string,
-  options: ScopeBuildOptions,
-): Promise<ScopeBuildJob> {
-  const job: ScopeBuildJob = await startScopeBuild(scopeId, options)
-  scopeBuilds.follow(job)
-  return job
-}
-
-export function followScopeBuild(job: ScopeBuildJob): void {
-  scopeBuilds.follow(job)
-}
-
-const spaceBuilds: BuildFollower<SpaceBuildJob> = createFollower(
-  fetchSpaceBuild,
-  (job: SpaceBuildJob): string => {
-    const detail: string = job.error ?? "Build failed."
-    if (job.status === "succeeded") {
-      return `Space context for ${job.space_name} is ready.`
-    }
-    return `Space context for ${job.space_name} failed. ${detail}`
-  },
-  (job: SpaceBuildJob): string => `Build space context for ${job.space_name}`,
-)
-
-export function onSpaceBuildFinished(handler: FinishedHandler<SpaceBuildJob>): () => void {
-  return spaceBuilds.onFinished(handler)
-}
-
-export async function requestSpaceBuild(
-  spaceId: string,
-  options: SpaceBuildOptions,
-): Promise<SpaceBuildJob> {
-  const job: SpaceBuildJob = await startSpaceBuild(spaceId, options)
-  spaceBuilds.follow(job)
-  return job
-}
-
-export function followSpaceBuild(job: SpaceBuildJob): void {
-  spaceBuilds.follow(job)
 }
 
 const airflowBuilds: BuildFollower<AirflowBuildJob> = createFollower(
@@ -230,9 +164,6 @@ function contextOperation(job: ContextGenerationJob): string {
   }
   if (job.subject_kind === "airflow") {
     return `Analyze ${job.subject_name}`
-  }
-  if (job.subject_kind === "space" || job.subject_kind === "scope") {
-    return `Build ${job.subject_kind} context for ${job.subject_name}`
   }
   return `Generate context for ${job.subject_name}`
 }

@@ -27,15 +27,12 @@ from intelegent_data_catalog.persistence.enums import (
     DataSourceType,
     EngineConnectionStatus,
     EngineType,
-    SpaceIsolationMode,
 )
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import (
     DataSourceRow,
     EngineConnectionRow,
-    ScopeRow,
     SourceEngineBindingRow,
-    SpaceRow,
 )
 
 _PASSWORD: str = "s3cr3t-reader"
@@ -62,7 +59,7 @@ def test_trino_and_postgres_bindings_become_kernel_env(tmp_path: Path) -> None:
         session.add(_binding(sales, warehouse, "appdb"))
         session.add(_binding(crm, warehouse, "crm"))
         session.commit()
-        environment: KernelEnvironment = _builder(session).build(_access(None))
+        environment: KernelEnvironment = _builder(session).build(_access())
     finally:
         session.close()
         database.dispose()
@@ -90,7 +87,7 @@ def test_missing_credential_is_a_warning(tmp_path: Path) -> None:
         session.add(broken)
         session.add(_binding(broken, warehouse, "billing"))
         session.commit()
-        environment: KernelEnvironment = _builder(session).build(_access(None))
+        environment: KernelEnvironment = _builder(session).build(_access())
     finally:
         session.close()
         database.dispose()
@@ -115,53 +112,12 @@ def test_duplicate_binding_keys_get_a_suffix(tmp_path: Path) -> None:
         session.add(_binding(sales, first, "appdb"))
         session.add(_binding(other, second, "appdb"))
         session.commit()
-        environment: KernelEnvironment = _builder(session).build(_access(None))
+        environment: KernelEnvironment = _builder(session).build(_access())
     finally:
         session.close()
         database.dispose()
     assert set(environment.spark_catalogs) == {"appdb", "appdb_2"}
     assert any("appdb_2" in warning for warning in environment.warnings)
-
-
-def test_scoped_binding_outside_the_workspace_is_hidden(tmp_path: Path) -> None:
-    """A binding tied to another space is not registered for this caller."""
-    database: CatalogDatabase
-    session: Session
-    database, session = _database(tmp_path)
-    try:
-        warehouse: EngineConnectionRow = _engine("warehouse", "http://trino:8080")
-        sales: DataSourceRow = _postgres("sales", "source_db", "postgres", "sales")
-        space: SpaceRow = SpaceRow(
-            id=uuid4(),
-            name="Private",
-            slug=f"private-{uuid4().hex[:8]}",
-            isolation_mode=SpaceIsolationMode.ISOLATED.value,
-            created_at=utc_now(),
-            updated_at=utc_now(),
-        )
-        session.add_all([warehouse, sales, space])
-        session.flush()
-        scope: ScopeRow = ScopeRow(
-            id=uuid4(),
-            space_id=space.id,
-            name="Core",
-            slug="core",
-            created_at=utc_now(),
-            updated_at=utc_now(),
-        )
-        session.add(scope)
-        session.flush()
-        binding: SourceEngineBindingRow = _binding(sales, warehouse, "appdb")
-        binding.default_scope_id = scope.id
-        session.add(binding)
-        session.commit()
-        hidden: KernelEnvironment = _builder(session).build(_access(frozenset()))
-        visible: KernelEnvironment = _builder(session).build(_access(frozenset({space.id})))
-    finally:
-        session.close()
-        database.dispose()
-    assert hidden.spark_catalogs == ()
-    assert visible.spark_catalogs == ("appdb",)
 
 
 def test_trino_settings_fallback_when_registry_is_empty(tmp_path: Path) -> None:
@@ -177,7 +133,7 @@ def test_trino_settings_fallback_when_registry_is_empty(tmp_path: Path) -> None:
             session,
             settings,
             EnvCredentialResolver({}),
-        ).build(_access(None))
+        ).build(_access())
     finally:
         session.close()
         database.dispose()
@@ -202,7 +158,7 @@ def test_seed_postgres_when_registry_has_no_catalog(tmp_path: Path) -> None:
             session,
             settings,
             _resolver(),
-        ).build(_access(None))
+        ).build(_access())
     finally:
         session.close()
         database.dispose()
@@ -229,14 +185,13 @@ def _resolver() -> EnvCredentialResolver:
     )
 
 
-def _access(space_ids: frozenset[UUID] | None) -> AccessContext:
+def _access() -> AccessContext:
     return AccessContext(
         principal=Principal("dev", None, "Dev", frozenset(), True),
         user_id=UUID("00000000-0000-4000-8000-000000000010"),
         workspace_id=SHARED_WORKSPACE_ID,
         member_workspace_ids=frozenset({SHARED_WORKSPACE_ID}),
         admin_workspace_ids=frozenset({SHARED_WORKSPACE_ID}),
-        visible_space_ids=space_ids,
     )
 
 
@@ -297,7 +252,6 @@ def _binding(
         binding_key=binding_key,
         engine_type=engine.engine_type,
         configuration={},
-        default_scope_id=None,
         capabilities={},
         created_at=now,
         updated_at=now,

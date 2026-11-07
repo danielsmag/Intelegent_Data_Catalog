@@ -5,8 +5,6 @@ from intelegent_data_catalog.jobs.models import (
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
-    ScopeBuildJobRead,
-    SpaceBuildJobRead,
 )
 
 __all__ = [
@@ -14,6 +12,4 @@ __all__ = [
     "ContextGenerationJobRead",
     "KnowledgeBuildJobRead",
     "KnowledgeBuildState",
-    "ScopeBuildJobRead",
-    "SpaceBuildJobRead",
 ]

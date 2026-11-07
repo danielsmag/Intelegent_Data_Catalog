@@ -218,18 +218,9 @@ class MetadataSyncService:
         )
         table_format: str | None = "ICEBERG" if data_source.type == "ICEBERG_REST" else None
         if existing is None:
-            scope_id: UUID | None = _scope_for_new_table(binding, observed.namespace)
-            if scope_id is None:
-                raise ValidationAppError(
-                    "discovery binding has no default scope for new tables",
-                    field="default_scope_id",
-                )
-            if self._repo.get_scope(scope_id) is None:
-                raise ValidationAppError("default scope does not exist", field="default_scope_id")
             existing = self._repo.add_table(
                 CatalogTableRow(
                     id=uuid4(),
-                    scope_id=scope_id,
                     data_source_id=data_source.id,
                     name=observed.name,
                     display_name=None,
@@ -561,18 +552,6 @@ class MetadataSyncService:
 
 def _source_key(catalog: str, namespace: str, table: str) -> str:
     return f"{catalog}.{namespace}.{table}"
-
-
-def _scope_for_new_table(binding: SourceEngineBindingRow, namespace: str) -> UUID | None:
-    mappings: object = binding.configuration.get("mappings")
-    if isinstance(mappings, dict):
-        raw: object = mappings.get(namespace)
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                return binding.default_scope_id
-    return binding.default_scope_id
 
 
 def _string_list(value: object) -> list[str]:

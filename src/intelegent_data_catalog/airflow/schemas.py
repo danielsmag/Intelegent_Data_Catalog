@@ -1,7 +1,6 @@
 """HTTP models for Airflow instances. Passwords are accepted and never returned."""
 
 from datetime import datetime
-from typing import Literal
 from urllib.parse import SplitResult, urlsplit
 from uuid import UUID
 
@@ -338,63 +337,6 @@ class AirflowTableDagRead(BaseModel):
     origin: AirflowMappingOrigin
     direction: AirflowMappingDirection
     evidence: str | None
-
-
-AirflowAttachmentTargetKind = Literal["space", "scope"]
-AirflowAttachmentVia = Literal["instance", "dag"]
-
-
-class AirflowAttachmentCreate(BaseModel):
-    """Attach a whole instance, or one DAG when dag_id is set."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    instance_id: UUID
-    dag_id: str | None = Field(default=None, min_length=1, max_length=250)
-
-    @field_validator("dag_id")
-    @classmethod
-    def _dag_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _non_blank(value)
-
-
-class AirflowAttachmentRead(BaseModel):
-    """One Airflow attachment on a space or scope."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    target_kind: AirflowAttachmentTargetKind
-    target_id: UUID
-    instance_id: UUID
-    instance_name: str
-    instance_slug: str
-    dag_row_id: UUID | None
-    dag_id: str | None
-    dag_display_name: str | None
-    created_at: datetime
-
-
-class AirflowAttachedDagRead(BaseModel):
-    """A DAG that belongs to a space or scope through an attachment."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    attachment_id: UUID
-    dag_row_id: UUID
-    instance_id: UUID
-    instance_name: str
-    dag_id: str
-    display_name: str | None
-    description: str | None
-    timetable_summary: str | None
-    is_paused: bool
-    last_run: AirflowLastRunRead | None
-    table_count: int
-    via: AirflowAttachmentVia
-    summary: str | None
 
 
 class AirflowSyncCounts(BaseModel):

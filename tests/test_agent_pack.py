@@ -123,8 +123,6 @@ def test_private_folder_round_trip_and_flat_file_is_not_writable(tmp_path: Path)
     database, session, store, scanner, _executor = definitions._open(tmp_path)
     try:
         definitions._table(session, "iceberg.sales.orders")
-        definitions._put(store, "spaces/space_analytics.py", definitions._SPACE)
-        definitions._put(store, "scopes/analytics/scope_finance.py", definitions._SCOPE)
         definitions._put(store, "assets/sales/orders/asset_orders.py", definitions._ORDERS)
         scanner.scan(datetime.now(UTC))
         asset_id: UUID = _asset_id(session)
@@ -191,8 +189,6 @@ def test_flat_declaration_has_no_private_folder(tmp_path: Path) -> None:
     database, session, store, scanner, _executor = definitions._open(tmp_path)
     try:
         definitions._table(session, "iceberg.sales.orders")
-        definitions._put(store, "spaces/space_analytics.py", definitions._SPACE)
-        definitions._put(store, "scopes/analytics/scope_finance.py", definitions._SCOPE)
         definitions._put(store, "assets/sales/asset_orders.py", definitions._ORDERS)
         definitions._put(store, "assets/sales/asset_customers.py", "x = 1\n")
         scanner.scan(datetime.now(UTC))
@@ -440,7 +436,6 @@ def _service(session: Session, store: MemoryObjectStore) -> AgentPackService:
         workspace_id=None,
         member_workspace_ids=frozenset(),
         admin_workspace_ids=frozenset(),
-        visible_space_ids=None,
     )
     return AgentPackService(
         session,

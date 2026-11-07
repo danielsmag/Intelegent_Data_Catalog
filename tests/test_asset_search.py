@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI
@@ -25,7 +25,7 @@ from intelegent_data_catalog.persistence.models import (
     CatalogTableRow,
     DataSourceRow,
 )
-from tests.test_asset_api import _app, _send, _table
+from tests.test_asset_api import _app, _send
 
 
 def test_every_sort_key_returns_the_table_asset(tmp_path: Path) -> None:
@@ -33,15 +33,66 @@ def test_every_sort_key_returns_the_table_asset(tmp_path: Path) -> None:
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
+    session: Session = database.session()
     try:
-        _table(app)
+        now: datetime = datetime.now(UTC)
+        asset_id: UUID = uuid4()
+        source_id: UUID = uuid4()
+        table_id: UUID = uuid4()
+        session.add(
+            AssetRow(
+                id=asset_id,
+                kind=AssetKind.TABLE.value,
+                name="orders",
+                slug="orders",
+                description=None,
+                context=None,
+                context_origin=None,
+                workspace_id=SHARED_WORKSPACE_ID,
+                owner_user_id=None,
+                created_by=None,
+                properties={"source_key": "db.public.orders"},
+                status=AssetStatus.ACTIVE.value,
+                last_synced_at=None,
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        session.add(
+            DataSourceRow(
+                id=source_id,
+                name="pg",
+                type=DataSourceType.POSTGRES.value,
+                configuration={},
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        session.flush()
+        session.add(
+            CatalogTableRow(
+                id=table_id,
+                asset_id=asset_id,
+                data_source_id=source_id,
+                name="orders",
+                table_type=TableKind.TABLE.value,
+                status=TableStatus.ACTIVE.value,
+                physical_catalog="db",
+                physical_namespace="public",
+                physical_table="orders",
+                source_ref={},
+                source_key="db.public.orders",
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        session.commit()
         sort: str
         for sort in (
             "name",
             "kind",
             "updated_at",
             "last_built_at",
-            "membership_count",
             "freshness_score",
             "context_state",
         ):
@@ -59,7 +110,6 @@ def test_every_sort_key_returns_the_table_asset(tmp_path: Path) -> None:
             assert isinstance(row, dict)
             assert isinstance(row["freshness_score"], int)
             assert isinstance(row["interval_seconds"], int)
-            assert isinstance(row["membership_count"], int)
             assert row["context_state"] in {"none", "user", "llm"}
     finally:
         database.dispose()

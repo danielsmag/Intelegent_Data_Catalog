@@ -14,9 +14,9 @@ Keycloak itself is at http://localhost:8180. The master admin uses
 are ``admin`` / ``admin``.
 
 The UI sends the active workspace as ``X-Workspace-Id``, a workspace UUID.
-Omit the header and a platform admin can see every space. Any other caller
-sees ``OPEN`` spaces. An unknown workspace id is rejected. A member can
-select a workspace they belong to, plus the built-in Shared workspace.
+Omit the header and the caller is not pinned to one workspace. An unknown
+workspace id is rejected. A member can select a workspace they belong to,
+plus the built-in Shared workspace.
 
 A host ``uv run`` leaves ``[auth] enabled`` false, so the API uses the dev
 principal from ``[auth]`` (``dev_subject``, ``dev_email``, ``dev_name``,

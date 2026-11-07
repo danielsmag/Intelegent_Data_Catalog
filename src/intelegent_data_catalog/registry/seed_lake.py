@@ -1,6 +1,6 @@
 """Project the seeded Polaris sales tables into the catalog registry.
 
-The Spark seed writes Iceberg files and Polaris metadata. The Spaces tree
+The Spark seed writes Iceberg files and Polaris metadata. The catalog
 reads PostgreSQL, so those tables stay invisible until this registrar syncs them.
 """
 
@@ -31,21 +31,15 @@ from intelegent_data_catalog.registry.schemas import (
     EngineConnectionCreate,
     EngineConnectionRead,
     EngineRef,
-    ScopeCreate,
-    ScopeRead,
     SourceBindingConfig,
     SourceBindingCreate,
     SourceBindingRead,
     SourceBindingUpdate,
-    SpaceCreate,
-    SpaceRead,
     SyncRunRead,
 )
 from intelegent_data_catalog.services.bindings import BindingService
 from intelegent_data_catalog.services.data_sources import DataSourceService
 from intelegent_data_catalog.services.engines import EngineService
-from intelegent_data_catalog.services.scopes import ScopeService
-from intelegent_data_catalog.services.spaces import SpaceService
 from intelegent_data_catalog.services.tables import TableService
 from intelegent_data_catalog.sources import CatalogSource
 from intelegent_data_catalog.sources.sync import MetadataSyncService
@@ -53,13 +47,10 @@ from intelegent_data_catalog.sources.sync import MetadataSyncService
 _SEED: str = "polaris-sales"
 _TRINO_CATALOG: str = "polaris"
 _SCHEMA: str = "sales"
-_SPACE_NAME: str = "Sales"
-_SPACE_SLUG: str = "sales"
-_SCOPE_NAME: str = "sales"
 
 
 class SeedLakeRegistrar:
-    """Create the sales space and copy Trino's view of the seed tables into it."""
+    """Copy Trino's view of the seed tables into the catalog."""
 
     def __init__(
         self,
@@ -78,18 +69,13 @@ class SeedLakeRegistrar:
         session: Session = self._database.session()
         try:
             repo: RegistryRepository = RegistryRepository(session)
-            spaces: SpaceService = SpaceService(repo)
-            scopes: ScopeService = ScopeService(repo)
             sources: DataSourceService = DataSourceService(repo)
             tables: TableService = TableService(repo)
             engines: EngineService = EngineService(repo)
             bindings: BindingService = BindingService(repo)
-            scope_id: UUID
             trino_binding_id: UUID
             spark_binding_id: UUID
-            scope_id, trino_binding_id, spark_binding_id = self._ensure_layout(
-                spaces,
-                scopes,
+            trino_binding_id, spark_binding_id = self._ensure_layout(
                 sources,
                 engines,
                 bindings,
@@ -104,7 +90,7 @@ class SeedLakeRegistrar:
                     result.sanitized_error,
                 )
                 return False
-            self._attach_spark_queries(tables, bindings, scope_id, spark_binding_id)
+            self._attach_spark_queries(tables, bindings, spark_binding_id)
             self._logger.info("seed lake projected tables=%s", result.counts.tables_seen)
             return True
         finally:
@@ -112,13 +98,10 @@ class SeedLakeRegistrar:
 
     def _ensure_layout(
         self,
-        spaces: SpaceService,
-        scopes: ScopeService,
         sources: DataSourceService,
         engines: EngineService,
         bindings: BindingService,
-    ) -> tuple[UUID, UUID, UUID]:
-        scope_id: UUID = self._ensure_scope(spaces, scopes)
+    ) -> tuple[UUID, UUID]:
         source: DataSourceRead = self._ensure_source(sources)
         trino: EngineConnectionRead = self._ensure_engine(
             engines,
@@ -137,7 +120,6 @@ class SeedLakeRegistrar:
             data_source_id=source.id,
             engine_connection_id=trino.id,
             binding_key=_TRINO_CATALOG,
-            scope_id=scope_id,
             schema_allowlist=[_SCHEMA],
         )
         spark_binding: SourceBindingRead = self._ensure_binding(
@@ -145,37 +127,9 @@ class SeedLakeRegistrar:
             data_source_id=source.id,
             engine_connection_id=spark.id,
             binding_key=self._settings.polaris.catalog,
-            scope_id=scope_id,
             schema_allowlist=[],
         )
-        return scope_id, trino_binding.id, spark_binding.id
-
-    def _ensure_scope(self, spaces: SpaceService, scopes: ScopeService) -> UUID:
-        space: SpaceRead | None = _find_space(spaces, _SPACE_SLUG)
-        if space is None:
-            space = spaces.create_space(
-                SpaceCreate(
-                    name=_SPACE_NAME,
-                    slug=_SPACE_SLUG,
-                    description="Seeded Iceberg sales tables",
-                )
-            )
-        scope: ScopeRead | None = None
-        candidate: ScopeRead
-        for candidate in scopes.list_scopes(space.id):
-            if candidate.slug == _SCHEMA:
-                scope = candidate
-                break
-        if scope is None:
-            scope = scopes.create_scope(
-                space.id,
-                ScopeCreate(
-                    name=_SCOPE_NAME,
-                    slug=_SCHEMA,
-                    description="Polaris namespace sales",
-                ),
-            )
-        return scope.id
+        return trino_binding.id, spark_binding.id
 
     def _ensure_source(self, sources: DataSourceService) -> DataSourceRead:
         current: DataSourceRead | None = _find_marked(sources.list_data_sources())
@@ -217,7 +171,6 @@ class SeedLakeRegistrar:
         data_source_id: UUID,
         engine_connection_id: UUID,
         binding_key: str,
-        scope_id: UUID,
         schema_allowlist: list[str],
     ) -> SourceBindingRead:
         current: SourceBindingRead | None = None
@@ -233,16 +186,14 @@ class SeedLakeRegistrar:
                     engine_connection_id=engine_connection_id,
                     binding_key=binding_key,
                     configuration=SourceBindingConfig(schema_allowlist=schema_allowlist),
-                    default_scope_id=scope_id,
                 )
             )
         allowlist_matches: bool = list(current.configuration.schema_allowlist) == schema_allowlist
-        if current.default_scope_id == scope_id and allowlist_matches:
+        if allowlist_matches:
             return current
         return bindings.update_source_binding(
             current.id,
             SourceBindingUpdate(
-                default_scope_id=scope_id,
                 configuration=SourceBindingConfig(schema_allowlist=schema_allowlist),
             ),
         )
@@ -251,12 +202,11 @@ class SeedLakeRegistrar:
         self,
         tables: TableService,
         bindings: BindingService,
-        scope_id: UUID,
         spark_binding_id: UUID,
     ) -> None:
         spark_catalog: str = self._settings.polaris.catalog
         table: CatalogTableRead
-        for table in tables.list_tables(scope_id):
+        for table in tables.list_tables():
             if table.physical_namespace != _SCHEMA:
                 continue
             stored: list[AssetBindingRead] = bindings.list_asset_bindings(table.id)
@@ -310,16 +260,8 @@ def project_seed_lake(
             return True
         if attempt < attempts:
             wait(pause_seconds)
-    logger.warning("seed lake projection stopped; Spaces will not list the sales tables")
+    logger.warning("seed lake projection stopped; the catalog will not list the sales tables")
     return False
-
-
-def _find_space(spaces: SpaceService, slug: str) -> SpaceRead | None:
-    space: SpaceRead
-    for space in spaces.list_spaces():
-        if space.slug == slug:
-            return space
-    return None
 
 
 def _find_marked(sources: list[DataSourceRead]) -> DataSourceRead | None:

@@ -5,8 +5,6 @@ from contextvars import ContextVar, Token
 from intelegent_data_catalog.assets.definitions.models import (
     AssetSpec,
     DefinitionSpec,
-    ScopeSpec,
-    SpaceSpec,
 )
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
 from intelegent_data_catalog.persistence.enums import DefinitionKind
@@ -17,22 +15,8 @@ class DefinitionCollector:
 
     def __init__(self, expected: DefinitionKind) -> None:
         self.expected: DefinitionKind = expected
-        self.spaces: list[SpaceSpec] = []
-        self.scopes: list[ScopeSpec] = []
         self.assets: list[AssetSpec] = []
         self._keys: set[str] = set()
-
-    def add_space(self, spec: SpaceSpec) -> None:
-        """Record one space. The file must be a spaces file."""
-        self._expect(DefinitionKind.SPACE)
-        self._unique(spec.slug)
-        self.spaces.append(spec)
-
-    def add_scope(self, spec: ScopeSpec) -> None:
-        """Record one scope. The file must be a scopes file."""
-        self._expect(DefinitionKind.SCOPE)
-        self._unique(f"{spec.space_slug}/{spec.slug}")
-        self.scopes.append(spec)
 
     def add_asset(self, spec: AssetSpec) -> None:
         """Record one asset. The file must be an assets file."""
@@ -42,11 +26,7 @@ class DefinitionCollector:
 
     def spec(self) -> DefinitionSpec:
         """Return the declarations collected so far."""
-        return DefinitionSpec(
-            spaces=list(self.spaces),
-            scopes=list(self.scopes),
-            assets=list(self.assets),
-        )
+        return DefinitionSpec(assets=list(self.assets))
 
     def _expect(self, kind: DefinitionKind) -> None:
         if kind != self.expected:

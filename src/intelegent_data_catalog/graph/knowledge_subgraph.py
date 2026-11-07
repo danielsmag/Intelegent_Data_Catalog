@@ -18,10 +18,8 @@ _KNOWLEDGE_EDGE_TYPES: dict[str, LiteralString] = {
     "WRITES": "WRITES",
     "MENTIONS": "MENTIONS",
 }
-_OWNER_PROPERTIES: dict[Literal["table", "scope", "space"], LiteralString] = {
+_OWNER_PROPERTIES: dict[Literal["table"], LiteralString] = {
     "table": "owner_table_id",
-    "scope": "owner_scope_id",
-    "space": "owner_space_id",
 }
 
 
@@ -47,18 +45,12 @@ class KnowledgeEdgeWrite(BaseModel):
 
 
 class KnowledgeSubgraphWrite(BaseModel):
-    """Replacement payload for one knowledge subgraph.
-
-    ``owner_table_id`` is the catalog id of the owner. A scope subgraph stores the
-    scope id there and sets ``owner_kind`` to ``scope``, which writes ``owner_scope_id``.
-    A space subgraph stores the space id and sets ``owner_kind`` to ``space``.
-    """
+    """Replacement payload for one table knowledge subgraph."""
 
     model_config = ConfigDict(extra="forbid")
 
     owner_table_id: str
-    owner_kind: Literal["table", "scope", "space"] = "table"
-    scopes: list[KnowledgeNodeWrite] = Field(default_factory=list)
+    owner_kind: Literal["table"] = "table"
     tables: list[KnowledgeNodeWrite]
     dags: list[KnowledgeNodeWrite] = Field(default_factory=list)
     columns: list[KnowledgeNodeWrite]
@@ -85,14 +77,6 @@ def knowledge_statements(
             + owner_property
             + ": $owner})",
             {"owner": owner, "tables": [_node_row(node) for node in document.tables]},
-        ),
-        (
-            "UNWIND $scopes AS node "
-            "CREATE (n:Scope {node_id: node.node_id, catalog_id: node.catalog_id, "
-            "name: node.name, resolved: true, projection: 'knowledge', "
-            + owner_property
-            + ": $owner})",
-            {"owner": owner, "scopes": [_node_row(node) for node in document.scopes]},
         ),
         (
             "UNWIND $columns AS node "
@@ -127,7 +111,7 @@ def knowledge_statements(
     return statements
 
 
-def _owner_property(kind: Literal["table", "scope", "space"]) -> LiteralString:
+def _owner_property(kind: Literal["table"]) -> LiteralString:
     return _OWNER_PROPERTIES[kind]
 
 
@@ -158,7 +142,7 @@ class KnowledgeGraphNode(BaseModel):
     node_id: str
     catalog_id: str | None
     name: str
-    kind: Literal["scope", "table", "column", "dag"]
+    kind: Literal["table", "column", "dag"]
     resolved: bool = True
 
 
@@ -182,7 +166,7 @@ def knowledge_node_from_row(
 ) -> KnowledgeGraphNode | None:
     """Map one Neo4j row onto a subgraph node. Unknown labels are skipped."""
     identity: str | None = _text(node_id)
-    kind: Literal["scope", "table", "column", "dag"] | None = _kind(labels)
+    kind: Literal["table", "column", "dag"] | None = _kind(labels)
     if identity is None or kind is None:
         return None
     label: str | None = _text(name)
@@ -257,12 +241,10 @@ def knowledge_graph_view(
     return GraphView(nodes=graph_nodes, edges=edges, truncated=False)
 
 
-def _kind(labels: object) -> Literal["scope", "table", "column", "dag"] | None:
+def _kind(labels: object) -> Literal["table", "column", "dag"] | None:
     if isinstance(labels, str) or not isinstance(labels, (list, tuple)):
         return None
     names: list[str] = [item for item in labels if isinstance(item, str)]
-    if "Scope" in names:
-        return "scope"
     if "Table" in names:
         return "table"
     if "Dag" in names:
@@ -274,8 +256,6 @@ def _kind(labels: object) -> Literal["scope", "table", "column", "dag"] | None:
 
 def _kind_order(kind: str) -> int:
     match kind:
-        case "scope":
-            return 0
         case "table":
             return 1
         case "dag":

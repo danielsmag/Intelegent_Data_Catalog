@@ -11,7 +11,6 @@ from intelegent_data_catalog.persistence.models import (
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
-    ScopeRow,
 )
 from intelegent_data_catalog.registry.identifiers import source_key_from_parts
 from intelegent_data_catalog.registry.reads import column_read, dump_model, table_read
@@ -39,9 +38,8 @@ class TableService:
     def __init__(self, repo: RegistryRepository) -> None:
         self._repo: RegistryRepository = repo
 
-    def create_table(self, scope_id: UUID, body: CatalogTableCreate) -> CatalogTableRead:
+    def create_table(self, body: CatalogTableCreate) -> CatalogTableRead:
         """Create a catalog table. Source key case is preserved."""
-        self._scope(scope_id)
         self._data_source(body.data_source_id)
         source_key: str = body.source_key or source_key_from_parts(
             body.physical_catalog,
@@ -54,7 +52,6 @@ class TableService:
         now: datetime = utc_now()
         row: CatalogTableRow = CatalogTableRow(
             id=uuid4(),
-            scope_id=scope_id,
             data_source_id=body.data_source_id,
             name=body.name,
             display_name=body.display_name,
@@ -79,10 +76,9 @@ class TableService:
         self._repo.commit()
         return table_read(stored)
 
-    def list_tables(self, scope_id: UUID) -> list[CatalogTableRead]:
-        """List tables in a scope."""
-        self._scope(scope_id)
-        return [table_read(row) for row in self._repo.list_tables(scope_id)]
+    def list_tables(self) -> list[CatalogTableRead]:
+        """List catalog tables."""
+        return [table_read(row) for row in self._repo.list_tables()]
 
     def get_table(self, table_id: UUID) -> CatalogTableRead:
         """Return one catalog table."""
@@ -103,7 +99,7 @@ class TableService:
         return table_read(row)
 
     def update_table(self, table_id: UUID, patch: CatalogTableUpdate) -> CatalogTableRead:
-        """Patch user fields and the manual scope assignment."""
+        """Patch user fields."""
         row: CatalogTableRow = self._table(table_id)
         changes: dict[str, object] = patch.model_dump(exclude_unset=True)
         if "name" in changes:
@@ -118,10 +114,6 @@ class TableService:
             row.status = required(patch.status, "status").value
         if "table_format" in changes:
             row.table_format = patch.table_format
-        if "scope_id" in changes:
-            scope_id: UUID = required(patch.scope_id, "scope_id")
-            self._scope(scope_id)
-            row.scope_id = scope_id
         row.updated_at = utc_now()
         self._repo.commit()
         return table_read(row)
@@ -140,7 +132,7 @@ class TableService:
         self._repo.commit()
 
     def apply_source_snapshot(self, table_id: UUID, snapshot: SourceSnapshot) -> CatalogTableRead:
-        """Apply imported fields. User description, scope, and DEPRECATED stay in place."""
+        """Apply imported fields. User description and DEPRECATED stay in place."""
         row: CatalogTableRow = self._table(table_id)
         changes: dict[str, object] = snapshot.model_dump(exclude_unset=True)
         if "source_description" in changes:
@@ -300,10 +292,6 @@ class TableService:
         existing: ColumnRow | None = self._repo.find_column_by_name(table_id, name)
         if existing is not None and existing.id != current_id:
             raise ConflictError(f"column name already exists on this table: {name}")
-
-    def _scope(self, scope_id: UUID) -> ScopeRow:
-        row: ScopeRow | None = self._repo.get_scope(scope_id)
-        return require_row(row, "scope", scope_id)
 
     def _data_source(self, data_source_id: UUID) -> DataSourceRow:
         row: DataSourceRow | None = self._repo.get_data_source(data_source_id)

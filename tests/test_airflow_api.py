@@ -209,10 +209,6 @@ def _instance(name: str, base_url: str = "http://airflow.test") -> dict[str, obj
 
 
 def _catalog_table(app: FastAPI, table: str) -> str:
-    space: dict[str, object] = _object(_send(app, "POST", "/api/v1/spaces", {"name": table}))
-    scope: dict[str, object] = _object(
-        _send(app, "POST", f"/api/v1/spaces/{_text(space, 'id')}/scopes", {"name": "Sales"}),
-    )
     source: dict[str, object] = _object(
         _send(
             app,
@@ -230,7 +226,7 @@ def _catalog_table(app: FastAPI, table: str) -> str:
         _send(
             app,
             "POST",
-            f"/api/v1/scopes/{_text(scope, 'id')}/tables",
+            "/api/v1/tables",
             {
                 "data_source_id": _text(source, "id"),
                 "name": table,

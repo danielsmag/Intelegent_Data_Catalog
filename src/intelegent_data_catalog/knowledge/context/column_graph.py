@@ -7,6 +7,7 @@ from uuid import UUID
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
+from intelegent_data_catalog.graph.document import GraphEdge, GraphNode, GraphView
 from intelegent_data_catalog.graph.knowledge_subgraph import (
     KnowledgeEdgeWrite,
     KnowledgeNodeWrite,
@@ -17,6 +18,7 @@ from intelegent_data_catalog.knowledge.models import (
     ColumnMappingSummary,
     ColumnMetadata,
     ColumnRelation,
+    ColumnRelationKind,
     TableAnalysisContext,
     TableRelation,
 )
@@ -29,18 +31,18 @@ _MAX_CANDIDATE_TABLES: int = 40
 _MAX_CANDIDATE_COLUMNS: int = 400
 _MAX_RELATIONS: int = 50
 _DESCRIPTION_LIMIT: int = 200
+_NEO4J_REASON: str = "Recorded in the table knowledge graph."
 
 
 class ColumnCandidateSource(Protocol):
     """Supplies columns the model may link. Does not write the catalog."""
 
-    def list_for_scope(
+    def list_candidates(
         self,
-        scope_id: UUID,
         focus_table_id: UUID,
         extra_column_ids: set[UUID],
     ) -> list[ColumnCandidate]:
-        """Return focus columns, relationship endpoints, then other scope columns."""
+        """Return focus columns, relationship endpoints, then other catalog columns."""
         ...
 
 
@@ -84,19 +86,18 @@ class ColumnGraphAppender(GraphBuilder[TableAnalysisContext, TableAnalysisContex
         ...
 
 
-class ScopeColumnCatalog:
+class ColumnCatalog:
     """Load candidate columns from PostgreSQL. Reads do not change rows."""
 
     def __init__(self, repository: RegistryRepository) -> None:
         self._repository: RegistryRepository = repository
 
-    def list_for_scope(
+    def list_candidates(
         self,
-        scope_id: UUID,
         focus_table_id: UUID,
         extra_column_ids: set[UUID],
     ) -> list[ColumnCandidate]:
-        """Prefer the focus table, then known relationship columns, then the scope."""
+        """Prefer the focus table, then known relationship columns, then other tables."""
         focus: CatalogTableRow | None = self._repository.get_table(focus_table_id)
         if focus is None:
             raise EntityNotFoundError("table", str(focus_table_id))
@@ -109,7 +110,11 @@ class ScopeColumnCatalog:
                 break
             self._append_column_id(chosen, seen, extra_id, focus_table_id)
         others: list[CatalogTableRow] = sorted(
-            (item for item in self._repository.list_tables(scope_id) if item.id != focus_table_id),
+            (
+                item
+                for item in self._repository.list_all_tables()
+                if item.id != focus_table_id
+            ),
             key=lambda item: item.name,
         )
         table_count: int = 1
@@ -173,8 +178,7 @@ class ColumnSubgraphBuilder(ColumnGraphAppender):
 
     def apply(self, context: TableAnalysisContext) -> TableAnalysisContext:
         """Select relations, write the subgraph, and return the context that names them."""
-        loaded: list[ColumnCandidate] = self._candidates.list_for_scope(
-            context.table.scope_id,
+        loaded: list[ColumnCandidate] = self._candidates.list_candidates(
             context.table.id,
             _relationship_column_ids(context),
         )
@@ -409,3 +413,101 @@ def _short_text(value: str | None) -> str | None:
     if len(text) <= _DESCRIPTION_LIMIT:
         return text
     return text[:_DESCRIPTION_LIMIT]
+
+
+class TableKnowledgeSlice:
+    """Column relations from one reader, and whether that reader had a record."""
+
+    def __init__(
+        self,
+        relations: list[ColumnRelation],
+        present: bool,
+        origin: str,
+    ) -> None:
+        self.relations: list[ColumnRelation] = relations
+        self.present: bool = present
+        self.origin: str = origin
+
+
+class KnowledgeGraphReader(Protocol):
+    """Reads one table's Neo4j knowledge subgraph."""
+
+    def read_knowledge(self, owner_table_id: str) -> GraphView:
+        """Return the subgraph owned by the catalog table id."""
+        ...
+
+
+class Neo4jTableKnowledgeReader:
+    """Column relations from the table's Neo4j knowledge subgraph."""
+
+    def __init__(self, graphs: KnowledgeGraphReader) -> None:
+        self._graphs: KnowledgeGraphReader = graphs
+
+    def read(self, table_id: UUID) -> TableKnowledgeSlice:
+        """Map subgraph edges onto column relations. ``HAS_COLUMN`` is ignored."""
+        view: GraphView = self._graphs.read_knowledge(str(table_id))
+        relations: list[ColumnRelation] = column_relations_from_graph(view)
+        return TableKnowledgeSlice(
+            relations=relations,
+            present=len(view.nodes) > 0,
+            origin="neo4j",
+        )
+
+
+def column_relations_from_graph(view: GraphView) -> list[ColumnRelation]:
+    """Turn knowledge-subgraph edges into column relations. Hierarchy edges are skipped."""
+    nodes: dict[str, GraphNode] = {node.id: node for node in view.nodes}
+    relations: list[ColumnRelation] = []
+    seen: set[tuple[UUID, UUID, str]] = set()
+    edge: GraphEdge
+    for edge in view.edges:
+        kind: ColumnRelationKind | None = _relation_kind(edge.kind)
+        if kind is None:
+            continue
+        source: GraphNode | None = nodes.get(edge.source)
+        target: GraphNode | None = nodes.get(edge.target)
+        if source is None or target is None:
+            continue
+        if source.kind != "column" or target.kind != "column":
+            continue
+        source_id: UUID | None = _catalog_uuid(source.catalog_id)
+        target_id: UUID | None = _catalog_uuid(target.catalog_id)
+        if source_id is None or target_id is None or source_id == target_id:
+            continue
+        key: tuple[UUID, UUID, str] = (source_id, target_id, kind.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        reason: str = edge.reason.strip() if edge.reason is not None else ""
+        relations.append(
+            ColumnRelation(
+                source_column_id=source_id,
+                target_column_id=target_id,
+                kind=kind,
+                reason=reason if reason != "" else _NEO4J_REASON,
+            )
+        )
+    return relations
+
+
+def _relation_kind(kind: str) -> ColumnRelationKind | None:
+    match kind:
+        case "REFERENCES":
+            return ColumnRelationKind.REFERENCES
+        case "JOINS_ON":
+            return ColumnRelationKind.JOINS_ON
+        case "DERIVED_FROM":
+            return ColumnRelationKind.DERIVED_FROM
+        case "SAME_MEANING":
+            return ColumnRelationKind.SAME_MEANING
+        case _:
+            return None
+
+
+def _catalog_uuid(value: str | None) -> UUID | None:
+    if value is None:
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None

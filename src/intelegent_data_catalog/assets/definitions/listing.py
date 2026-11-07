@@ -54,16 +54,9 @@ class AssetDefinitionListing:
         segment: str
         rest: str
         segment, _separator, rest = relative.partition("/")
-        folders: set[str] = {
-            self._settings.spaces_folder,
-            self._settings.scopes_folder,
-            self._settings.assets_folder,
-        }
+        folders: set[str] = {self._settings.assets_folder}
         return segment in folders and rest != ""
 
     def _segment(self, folder: DefinitionFolder) -> str:
-        if folder == "spaces":
-            return self._settings.spaces_folder
-        if folder == "scopes":
-            return self._settings.scopes_folder
+        del folder
         return self._settings.assets_folder

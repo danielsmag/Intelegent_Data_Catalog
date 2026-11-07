@@ -6,9 +6,6 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response
 
 from intelegent_data_catalog.airflow.schemas import (
-    AirflowAttachedDagRead,
-    AirflowAttachmentCreate,
-    AirflowAttachmentRead,
     AirflowConnectionTest,
     AirflowConnectionTestRequest,
     AirflowDagDetail,
@@ -182,82 +179,20 @@ def remove_airflow_dag_table(
     return Response(status_code=204)
 
 
-@router.get("/scopes/{scope_id}/airflow", response_model=list[AirflowAttachmentRead])
-def list_scope_airflow(
-    scope_id: UUID,
-    service: AirflowServiceDep,
-) -> list[AirflowAttachmentRead]:
-    """List Airflow attachments on a scope."""
-    return service.list_attachments("scope", scope_id)
 
 
-@router.post("/scopes/{scope_id}/airflow", response_model=AirflowAttachmentRead, status_code=201)
-def attach_scope_airflow(
-    scope_id: UUID,
-    body: AirflowAttachmentCreate,
-    service: AirflowServiceDep,
-) -> AirflowAttachmentRead:
-    """Attach an Airflow instance or one DAG to a scope."""
-    return service.attach("scope", scope_id, body)
 
 
-@router.get("/scopes/{scope_id}/airflow/dags", response_model=list[AirflowAttachedDagRead])
-def list_scope_airflow_dags(
-    scope_id: UUID,
-    service: AirflowServiceDep,
-) -> list[AirflowAttachedDagRead]:
-    """List DAGs attached to a scope, including DAGs synced later onto an attached instance."""
-    return service.list_attached_dags("scope", scope_id)
 
 
-@router.delete("/scopes/{scope_id}/airflow/{attachment_id}", status_code=204)
-def detach_scope_airflow(
-    scope_id: UUID,
-    attachment_id: UUID,
-    service: AirflowServiceDep,
-) -> Response:
-    """Remove one Airflow attachment from a scope."""
-    service.detach("scope", scope_id, attachment_id)
-    return Response(status_code=204)
 
 
-@router.get("/spaces/{space_id}/airflow", response_model=list[AirflowAttachmentRead])
-def list_space_airflow(
-    space_id: UUID,
-    service: AirflowServiceDep,
-) -> list[AirflowAttachmentRead]:
-    """List Airflow attachments on a space."""
-    return service.list_attachments("space", space_id)
 
 
-@router.post("/spaces/{space_id}/airflow", response_model=AirflowAttachmentRead, status_code=201)
-def attach_space_airflow(
-    space_id: UUID,
-    body: AirflowAttachmentCreate,
-    service: AirflowServiceDep,
-) -> AirflowAttachmentRead:
-    """Attach an Airflow instance or one DAG to a space."""
-    return service.attach("space", space_id, body)
 
 
-@router.get("/spaces/{space_id}/airflow/dags", response_model=list[AirflowAttachedDagRead])
-def list_space_airflow_dags(
-    space_id: UUID,
-    service: AirflowServiceDep,
-) -> list[AirflowAttachedDagRead]:
-    """List DAGs attached to a space or to any scope inside it."""
-    return service.list_attached_dags("space", space_id)
 
 
-@router.delete("/spaces/{space_id}/airflow/{attachment_id}", status_code=204)
-def detach_space_airflow(
-    space_id: UUID,
-    attachment_id: UUID,
-    service: AirflowServiceDep,
-) -> Response:
-    """Remove one Airflow attachment from a space."""
-    service.detach("space", space_id, attachment_id)
-    return Response(status_code=204)
 
 
 @router.get("/tables/{table_id}/airflow-dags", response_model=list[AirflowTableDagRead])

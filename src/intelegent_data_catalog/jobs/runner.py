@@ -27,8 +27,6 @@ from intelegent_data_catalog.jobs.catalog import (
     CatalogAssetBuild,
     CatalogContextGeneration,
     CatalogKnowledgeBuild,
-    CatalogScopeBuild,
-    CatalogSpaceBuild,
 )
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobStore
 from intelegent_data_catalog.jobs.lease import JobLeaseStore, LeaseHeartbeat, RedisJobLeaseStore
@@ -44,8 +42,6 @@ from intelegent_data_catalog.jobs.trace import (
 from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
-    ScopeContextOptions,
-    SpaceContextOptions,
     TableContextOptions,
 )
 from intelegent_data_catalog.persistence.clock import utc_now
@@ -57,16 +53,12 @@ _LOGGER: logging.Logger = logging.getLogger(LOGGER_NAME)
 
 _FAILURE_LOG: dict[str, str] = {
     CatalogJobKind.KNOWLEDGE.value: "knowledge context build failed",
-    CatalogJobKind.SCOPE.value: "scope context build failed",
-    CatalogJobKind.SPACE.value: "space context build failed",
     CatalogJobKind.CONTEXT.value: "context generation failed",
     CatalogJobKind.AIRFLOW.value: "airflow context build failed",
     CatalogJobKind.ASSET.value: "asset context build failed",
 }
 _FAILURE_MESSAGE: dict[str, str] = {
     CatalogJobKind.KNOWLEDGE.value: "context build failed",
-    CatalogJobKind.SCOPE.value: "scope context build failed",
-    CatalogJobKind.SPACE.value: "space context build failed",
     CatalogJobKind.CONTEXT.value: "context generation failed",
     CatalogJobKind.AIRFLOW.value: "airflow context build failed",
     CatalogJobKind.ASSET.value: "asset context build failed",
@@ -244,16 +236,6 @@ def _execute(
             CatalogKnowledgeBuild(container).run(
                 subject_id,
                 TableContextOptions.model_validate(options),
-            )
-        case CatalogJobKind.SCOPE.value:
-            CatalogScopeBuild(container).run(
-                subject_id,
-                ScopeContextOptions.model_validate(options),
-            )
-        case CatalogJobKind.SPACE.value:
-            CatalogSpaceBuild(container).run(
-                subject_id,
-                SpaceContextOptions.model_validate(options),
             )
         case CatalogJobKind.CONTEXT.value:
             CatalogContextGeneration(container).run(

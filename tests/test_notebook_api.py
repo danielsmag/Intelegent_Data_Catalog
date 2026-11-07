@@ -336,7 +336,6 @@ def _seed_sales(database: CatalogDatabase) -> None:
                 binding_key="appdb",
                 engine_type=engine.engine_type,
                 configuration={},
-                default_scope_id=None,
                 capabilities={},
                 created_at=utc_now(),
                 updated_at=utc_now(),

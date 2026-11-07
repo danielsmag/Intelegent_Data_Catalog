@@ -368,11 +368,6 @@ function NodeDetails(props: {
         <dt>resolved</dt>
         <dd>{node.resolved ? "true" : "false"}</dd>
       </dl>
-      {node.kind === "scope" && node.catalog_id !== null ? (
-        <Link className="subgraph-open" to={`/scopes/${node.catalog_id}`}>
-          Open scope
-        </Link>
-      ) : null}
       {node.kind === "table" && node.catalog_id !== null ? (
         <Link className="subgraph-open" to={`/registry/tables/${node.catalog_id}`}>
           Open table

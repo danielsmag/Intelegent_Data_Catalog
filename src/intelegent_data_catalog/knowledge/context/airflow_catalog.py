@@ -18,12 +18,10 @@ from intelegent_data_catalog.knowledge.models import (
 from intelegent_data_catalog.knowledge.store import SavedAirflowContext
 from intelegent_data_catalog.persistence.enums import AirflowMappingDirection, AirflowMappingOrigin
 from intelegent_data_catalog.persistence.models import (
-    AirflowAttachmentRow,
     AirflowDagRow,
     AirflowDagTableRow,
     AirflowInstanceRow,
     CatalogTableRow,
-    ScopeRow,
 )
 from intelegent_data_catalog.registry.repository import RegistryRepository
 
@@ -125,39 +123,12 @@ class PostgresAirflowCatalogContextProvider:
             )
             capped: list[CatalogTableRow] = ordered[: self._limits.airflow_max_candidate_tables]
             return [_candidate(row, self._limits.text_chars) for row in capped]
-        preferred_scopes: set[UUID] = self._attached_scopes(instance_id, dags)
-        preferred: list[CatalogTableRow] = []
-        scope_id: UUID
-        for scope_id in sorted(preferred_scopes, key=str):
-            preferred.extend(self._registry.list_tables(scope_id))
-        rest: list[CatalogTableRow] = [
-            row
-            for row in self._airflow.list_catalog_tables()
-            if row.scope_id not in preferred_scopes
-        ]
-        combined: list[CatalogTableRow] = preferred + rest
+        del instance_id, dags
+        combined: list[CatalogTableRow] = self._airflow.list_catalog_tables()
         return [
             _candidate(row, self._limits.text_chars)
             for row in combined[: self._limits.airflow_max_candidate_tables]
         ]
-
-    def _attached_scopes(self, instance_id: UUID, dags: list[AirflowDagRow]) -> set[UUID]:
-        attachments: list[AirflowAttachmentRow] = self._airflow.list_attachments_touching(
-            instance_id,
-            {row.id for row in dags},
-        )
-        scopes: set[UUID] = set()
-        attachment: AirflowAttachmentRow
-        for attachment in attachments:
-            if attachment.scope_id is not None:
-                scopes.add(attachment.scope_id)
-                continue
-            if attachment.space_id is None:
-                continue
-            scope: ScopeRow
-            for scope in self._registry.list_scopes(attachment.space_id):
-                scopes.add(scope.id)
-        return scopes
 
 
 def _dag_input(
@@ -214,7 +185,6 @@ def _candidate(row: CatalogTableRow, text_chars: int) -> DagCandidateTable:
     return DagCandidateTable(
         id=row.id,
         qualified_name=_qualified(row),
-        scope_id=row.scope_id,
         description=_short_text(row.description or row.source_description, text_chars),
     )
 

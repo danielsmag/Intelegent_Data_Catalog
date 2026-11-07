@@ -171,7 +171,7 @@ def test_gpt_4_1_completion_budget_is_capped() -> None:
         max_tokens=100_000,
     )
     models: CatalogModels = CatalogModels(settings, text_chars=20, column_graph=False)
-    assert models.space_describer._call._settings["max_tokens"] == 32_768
+    assert models.dag_describer._call._settings["max_tokens"] == 32_768
     plain: LlmSettings = LlmSettings(
         provider="openai",
         model="gpt-4.1",
@@ -179,7 +179,7 @@ def test_gpt_4_1_completion_budget_is_capped() -> None:
         max_tokens=100_000,
     )
     plain_models: CatalogModels = CatalogModels(plain, text_chars=20, column_graph=False)
-    assert plain_models.space_describer._call._settings["max_tokens"] == 32_768
+    assert plain_models.dag_describer._call._settings["max_tokens"] == 32_768
 
 
 def test_smaller_completion_budget_is_kept() -> None:
@@ -191,7 +191,7 @@ def test_smaller_completion_budget_is_kept() -> None:
         max_tokens=2048,
     )
     models: CatalogModels = CatalogModels(settings, text_chars=20, column_graph=False)
-    assert models.space_describer._call._settings["max_tokens"] == 2048
+    assert models.dag_describer._call._settings["max_tokens"] == 2048
 
 
 def test_gpt_6_astra_keeps_the_configured_completion_budget() -> None:
@@ -203,7 +203,7 @@ def test_gpt_6_astra_keeps_the_configured_completion_budget() -> None:
         max_tokens=100_000,
     )
     models: CatalogModels = CatalogModels(settings, text_chars=20, column_graph=False)
-    assert models.space_describer._call._settings["max_tokens"] == 100_000
+    assert models.dag_describer._call._settings["max_tokens"] == 100_000
 
 
 def test_claude_completion_budget_follows_the_model_profile() -> None:
@@ -216,7 +216,7 @@ def test_claude_completion_budget_follows_the_model_profile() -> None:
     models: CatalogModels = CatalogModels(settings, text_chars=20, column_graph=False)
     cap: object = build_model(settings).profile.get("anthropic_max_output_tokens")
     assert isinstance(cap, int)
-    assert models.space_describer._call._settings["max_tokens"] == cap
+    assert models.dag_describer._call._settings["max_tokens"] == cap
 
 
 def test_specific_model_ids_keep_their_names() -> None:

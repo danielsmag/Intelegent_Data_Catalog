@@ -27,29 +27,12 @@ def test_health_stays_up_with_the_catalog_database(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_space_scope_and_table_crud(tmp_path: Path) -> None:
-    """Create and browse a space, scope, and table without exposing a source key rewrite."""
+def test_source_and_table_crud(tmp_path: Path) -> None:
+    """Create a data source and table without exposing a source key rewrite."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
     try:
-        created: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
-        assert created.status_code == 201
-        space: dict[str, object] = _object(created)
-        assert space["slug"] == "commerce"
-        space_id: str = _text(space, "id")
-        duplicate: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
-        assert duplicate.status_code == 409
-        scope: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{space_id}/scopes",
-            {"name": "Ordering"},
-        )
-        assert scope.status_code == 201
-        scope_id: str = _text(_object(scope), "id")
-        blocked: httpx.Response = _send(app, "DELETE", f"/api/v1/spaces/{space_id}")
-        assert blocked.status_code == 409
         source: httpx.Response = _send(
             app,
             "POST",
@@ -87,7 +70,7 @@ def test_space_scope_and_table_crud(tmp_path: Path) -> None:
         table: httpx.Response = _send(
             app,
             "POST",
-            f"/api/v1/scopes/{scope_id}/tables",
+            "/api/v1/tables",
             _table_payload(_text(source_body, "id"), "Lakehouse", "Sales", "Orders"),
         )
         assert table.status_code == 201
@@ -117,90 +100,6 @@ def test_space_scope_and_table_crud(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_rename_refreshes_space_and_scope_slugs(tmp_path: Path) -> None:
-    """A name patch refreshes the slug. Explicit slug, description, and clashes stay distinct."""
-    app: FastAPI
-    database: CatalogDatabase
-    app, database = _app(tmp_path)
-    try:
-        created: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
-        assert created.status_code == 201
-        space_id: str = _text(_object(created), "id")
-        renamed: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/spaces/{space_id}",
-            {"name": "  Retail Ops  "},
-        )
-        assert renamed.status_code == 200
-        renamed_body: dict[str, object] = _object(renamed)
-        assert renamed_body["name"] == "Retail Ops"
-        assert renamed_body["slug"] == "retail-ops"
-        described: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/spaces/{space_id}",
-            {"description": "Selling"},
-        )
-        assert described.status_code == 200
-        described_body: dict[str, object] = _object(described)
-        assert described_body["name"] == "Retail Ops"
-        assert described_body["slug"] == "retail-ops"
-        custom: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/spaces/{space_id}",
-            {"name": "Storefront", "slug": "shop"},
-        )
-        assert custom.status_code == 200
-        assert _object(custom)["slug"] == "shop"
-        blank: httpx.Response = _send(app, "PATCH", f"/api/v1/spaces/{space_id}", {"name": "   "})
-        assert blank.status_code == 422
-        other: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Billing"})
-        assert other.status_code == 201
-        clash: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/spaces/{_text(_object(other), 'id')}",
-            {"name": "Shop"},
-        )
-        assert clash.status_code == 409
-        scope: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{space_id}/scopes",
-            {"name": "Ordering"},
-        )
-        assert scope.status_code == 201
-        scope_id: str = _text(_object(scope), "id")
-        scope_renamed: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/scopes/{scope_id}",
-            {"name": "Checkout"},
-        )
-        assert scope_renamed.status_code == 200
-        scope_body: dict[str, object] = _object(scope_renamed)
-        assert scope_body["name"] == "Checkout"
-        assert scope_body["slug"] == "checkout"
-        sibling: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{space_id}/scopes",
-            {"name": "Inventory"},
-        )
-        assert sibling.status_code == 201
-        scope_clash: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/scopes/{_text(_object(sibling), 'id')}",
-            {"name": "Checkout"},
-        )
-        assert scope_clash.status_code == 409
-    finally:
-        database.dispose()
-
-
 def test_bindings_keep_spark_and_trino_addresses_explicit(tmp_path: Path) -> None:
     """A query binding stores the Spark key it was given and cannot borrow Trino."""
     app: FastAPI
@@ -209,8 +108,7 @@ def test_bindings_keep_spark_and_trino_addresses_explicit(tmp_path: Path) -> Non
     try:
         source_id: str
         table_id: str
-        _scope_id: str
-        _scope_id, source_id, table_id = _hierarchy(app)
+        source_id, table_id = _hierarchy(app)
         trino: dict[str, object] = _object(
             _send(
                 app,
@@ -320,7 +218,7 @@ def test_bindings_keep_spark_and_trino_addresses_explicit(tmp_path: Path) -> Non
         column_body: dict[str, object] = _object(column)
         assert column_body["nullable"] is None
         assert column_body["is_primary_key"] is None
-        missing: httpx.Response = _send(app, "GET", f"/api/v1/spaces/{UUID(int=4)}")
+        missing: httpx.Response = _send(app, "GET", f"/api/v1/data-sources/{UUID(int=4)}")
         assert missing.status_code == 404
     finally:
         database.dispose()
@@ -332,15 +230,14 @@ def test_composite_relationship_lists_incoming_and_outgoing(tmp_path: Path) -> N
     database: CatalogDatabase
     app, database = _app(tmp_path)
     try:
-        scope_id: str
         source_id: str
         orders_id: str
-        scope_id, source_id, orders_id = _hierarchy(app)
+        source_id, orders_id = _hierarchy(app)
         customers: dict[str, object] = _object(
             _send(
                 app,
                 "POST",
-                f"/api/v1/scopes/{scope_id}/tables",
+                "/api/v1/tables",
                 _table_payload(source_id, "Lakehouse", "Sales", "Customers"),
             )
         )
@@ -439,11 +336,7 @@ def test_composite_relationship_lists_incoming_and_outgoing(tmp_path: Path) -> N
         database.dispose()
 
 
-def _hierarchy(app: FastAPI) -> tuple[str, str, str]:
-    space: dict[str, object] = _object(_send(app, "POST", "/api/v1/spaces", {"name": "Commerce"}))
-    scope: dict[str, object] = _object(
-        _send(app, "POST", f"/api/v1/spaces/{_text(space, 'id')}/scopes", {"name": "Ordering"})
-    )
+def _hierarchy(app: FastAPI) -> tuple[str, str]:
     source: dict[str, object] = _object(
         _send(
             app,
@@ -456,11 +349,11 @@ def _hierarchy(app: FastAPI) -> tuple[str, str, str]:
         _send(
             app,
             "POST",
-            f"/api/v1/scopes/{_text(scope, 'id')}/tables",
+            "/api/v1/tables",
             _table_payload(_text(source, "id"), "Lakehouse", "Sales", "Orders"),
         )
     )
-    return _text(scope, "id"), _text(source, "id"), _text(table, "id")
+    return _text(source, "id"), _text(table, "id")
 
 
 def _table_payload(

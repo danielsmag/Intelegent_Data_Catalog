@@ -20,11 +20,7 @@ def test_table_and_manual_create_do_not_add_an_asset(tmp_path: Path) -> None:
     database: CatalogDatabase
     app, database = _app(tmp_path)
     try:
-        scope_id: str
-        scope_id, _table_id = _table(app)
-        listed: httpx.Response = _send(app, "GET", f"/api/v1/scopes/{scope_id}/assets")
-        assert listed.status_code == 200
-        assert listed.json() == []
+        _table(app)
         found: httpx.Response = _send(app, "GET", "/api/v1/assets?q=orders&sort=name&order=asc")
         assert found.status_code == 200
         body: dict[str, object] = found.json()
@@ -69,18 +65,7 @@ def test_workspace_file_is_not_an_asset(tmp_path: Path) -> None:
         database.dispose()
 
 
-def _table(app: FastAPI) -> tuple[str, str]:
-    space: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
-    assert space.status_code == 201
-    space_id: str = str(space.json()["id"])
-    scope: httpx.Response = _send(
-        app,
-        "POST",
-        f"/api/v1/spaces/{space_id}/scopes",
-        {"name": "Sales"},
-    )
-    assert scope.status_code == 201
-    scope_id: str = str(scope.json()["id"])
+def _table(app: FastAPI) -> str:
     source: httpx.Response = _send(
         app,
         "POST",
@@ -91,7 +76,7 @@ def _table(app: FastAPI) -> tuple[str, str]:
     table: httpx.Response = _send(
         app,
         "POST",
-        f"/api/v1/scopes/{scope_id}/tables",
+        "/api/v1/tables",
         {
             "data_source_id": source.json()["id"],
             "name": "orders",
@@ -104,7 +89,7 @@ def _table(app: FastAPI) -> tuple[str, str]:
         },
     )
     assert table.status_code == 201
-    return scope_id, str(table.json()["id"])
+    return str(table.json()["id"])
 
 
 def _app(tmp_path: Path) -> tuple[FastAPI, CatalogDatabase]:

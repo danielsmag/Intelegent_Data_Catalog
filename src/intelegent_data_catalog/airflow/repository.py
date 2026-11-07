@@ -4,21 +4,18 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Select, delete, func, or_, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import InstrumentedAttribute, Session
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AirflowMappingOrigin, AssetStatus
 from intelegent_data_catalog.persistence.models import (
-    AirflowAttachmentRow,
     AirflowDagRow,
     AirflowDagTableRow,
     AirflowInstanceRow,
     AirflowSyncRunRow,
-    AssetMembershipRow,
     AssetRow,
     CatalogTableRow,
 )
@@ -64,16 +61,6 @@ class LlmMappingWrite:
     table_id: uuid.UUID
     direction: str
     evidence: str | None
-
-
-@dataclass(frozen=True)
-class AttachedDag:
-    """One DAG reached through a space or scope attachment."""
-
-    dag: AirflowDagRow
-    instance: AirflowInstanceRow
-    via: str
-    attachment_id: uuid.UUID
 
 
 @dataclass(frozen=True)
@@ -414,184 +401,13 @@ class AirflowRepository:
         """Drop uncommitted work so a failed sync can record its error."""
         self._session.rollback()
 
-    def add_attachment(
-        self,
-        *,
-        instance_id: uuid.UUID | None,
-        dag_row_id: uuid.UUID | None,
-        space_id: uuid.UUID | None,
-        scope_id: uuid.UUID | None,
-    ) -> AirflowAttachmentRow:
-        """Insert one instance or DAG attachment."""
-        row: AirflowAttachmentRow = AirflowAttachmentRow(
-            id=uuid.uuid4(),
-            airflow_instance_id=instance_id,
-            dag_row_id=dag_row_id,
-            space_id=space_id,
-            scope_id=scope_id,
-            created_at=utc_now(),
-        )
-        return self._add(row)
 
-    def get_attachment(self, attachment_id: uuid.UUID) -> AirflowAttachmentRow | None:
-        """Return one attachment."""
-        return self._session.get(AirflowAttachmentRow, attachment_id)
 
-    def find_attachment(
-        self,
-        *,
-        instance_id: uuid.UUID | None,
-        dag_row_id: uuid.UUID | None,
-        space_id: uuid.UUID | None,
-        scope_id: uuid.UUID | None,
-    ) -> AirflowAttachmentRow | None:
-        """Return the attachment for this source and target, if one exists."""
-        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow).where(
-            _id_match(AirflowAttachmentRow.airflow_instance_id, instance_id),
-            _id_match(AirflowAttachmentRow.dag_row_id, dag_row_id),
-            _id_match(AirflowAttachmentRow.space_id, space_id),
-            _id_match(AirflowAttachmentRow.scope_id, scope_id),
-        )
-        return self._session.scalar(statement)
 
-    def list_attachments(
-        self,
-        *,
-        space_id: uuid.UUID | None,
-        scope_id: uuid.UUID | None,
-    ) -> list[AirflowAttachmentRow]:
-        """Return attachments for one space or one scope."""
-        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow)
-        if space_id is not None:
-            statement = statement.where(AirflowAttachmentRow.space_id == space_id)
-        if scope_id is not None:
-            statement = statement.where(AirflowAttachmentRow.scope_id == scope_id)
-        statement = statement.order_by(AirflowAttachmentRow.created_at)
-        return list(self._session.scalars(statement))
 
-    def list_attachments_touching(
-        self,
-        instance_id: uuid.UUID,
-        dag_row_ids: set[uuid.UUID],
-    ) -> list[AirflowAttachmentRow]:
-        """Return attachments of this instance or of the given DAG rows."""
-        clauses = [AirflowAttachmentRow.airflow_instance_id == instance_id]
-        if len(dag_row_ids) > 0:
-            clauses.append(AirflowAttachmentRow.dag_row_id.in_(dag_row_ids))
-        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow).where(
-            or_(*clauses),
-        )
-        return list(self._session.scalars(statement))
 
-    def list_attached_dags(
-        self,
-        scope_ids: set[uuid.UUID],
-        space_ids: set[uuid.UUID],
-    ) -> list[AttachedDag]:
-        """Expand instance attachments to every synced DAG. Direct DAG rows win on overlap."""
-        if len(scope_ids) == 0 and len(space_ids) == 0:
-            return []
-        clauses = []
-        if len(scope_ids) > 0:
-            clauses.append(AirflowAttachmentRow.scope_id.in_(scope_ids))
-        if len(space_ids) > 0:
-            clauses.append(AirflowAttachmentRow.space_id.in_(space_ids))
-        statement: Select[tuple[AirflowAttachmentRow]] = select(AirflowAttachmentRow).where(
-            or_(*clauses),
-        )
-        attachments: list[AirflowAttachmentRow] = list(self._session.scalars(statement))
-        direct: dict[uuid.UUID, uuid.UUID] = {}
-        by_instance: dict[uuid.UUID, uuid.UUID] = {}
-        attachment: AirflowAttachmentRow
-        for attachment in attachments:
-            if attachment.dag_row_id is not None:
-                direct[attachment.dag_row_id] = attachment.id
-            elif attachment.airflow_instance_id is not None:
-                by_instance[attachment.airflow_instance_id] = attachment.id
-        self._merge_dag_memberships(scope_ids, space_ids, direct)
-        self._merge_instance_memberships(scope_ids, space_ids, by_instance)
-        dags: dict[uuid.UUID, AirflowDagRow] = self.dags_by_row_ids(set(direct))
-        instance_id: uuid.UUID
-        for instance_id in by_instance:
-            dag: AirflowDagRow
-            for dag in self.list_dags(instance_id):
-                dags.setdefault(dag.id, dag)
-        instances: dict[uuid.UUID, AirflowInstanceRow] = self.instances_by_ids(
-            {dag.instance_id for dag in dags.values()},
-        )
-        found: list[AttachedDag] = []
-        dag_row: AirflowDagRow
-        for dag_row in dags.values():
-            instance: AirflowInstanceRow | None = instances.get(dag_row.instance_id)
-            if instance is None:
-                continue
-            if dag_row.id in direct:
-                found.append(
-                    AttachedDag(
-                        dag=dag_row,
-                        instance=instance,
-                        via="dag",
-                        attachment_id=direct[dag_row.id],
-                    )
-                )
-                continue
-            owner: uuid.UUID | None = by_instance.get(dag_row.instance_id)
-            if owner is None:
-                continue
-            found.append(
-                AttachedDag(
-                    dag=dag_row,
-                    instance=instance,
-                    via="instance",
-                    attachment_id=owner,
-                )
-            )
-        found.sort(key=lambda item: (item.instance.name, item.dag.dag_id))
-        return found
 
-    def _merge_dag_memberships(
-        self,
-        scope_ids: set[uuid.UUID],
-        space_ids: set[uuid.UUID],
-        direct: dict[uuid.UUID, uuid.UUID],
-    ) -> None:
-        clauses: list[ColumnElement[bool]] = []
-        if len(scope_ids) > 0:
-            clauses.append(AssetMembershipRow.scope_id.in_(scope_ids))
-        if len(space_ids) > 0:
-            clauses.append(AssetMembershipRow.space_id.in_(space_ids))
-        if len(clauses) == 0:
-            return
-        statement = (
-            select(AssetMembershipRow, AirflowDagRow)
-            .join(AirflowDagRow, AirflowDagRow.asset_id == AssetMembershipRow.asset_id)
-            .where(or_(*clauses))
-        )
-        pair: tuple[AssetMembershipRow, AirflowDagRow]
-        for pair in self._session.execute(statement):
-            direct.setdefault(pair[1].id, pair[0].id)
 
-    def _merge_instance_memberships(
-        self,
-        scope_ids: set[uuid.UUID],
-        space_ids: set[uuid.UUID],
-        by_instance: dict[uuid.UUID, uuid.UUID],
-    ) -> None:
-        clauses: list[ColumnElement[bool]] = []
-        if len(scope_ids) > 0:
-            clauses.append(AssetMembershipRow.scope_id.in_(scope_ids))
-        if len(space_ids) > 0:
-            clauses.append(AssetMembershipRow.space_id.in_(space_ids))
-        if len(clauses) == 0:
-            return
-        statement = (
-            select(AssetMembershipRow, AirflowInstanceRow)
-            .join(AirflowInstanceRow, AirflowInstanceRow.asset_id == AssetMembershipRow.asset_id)
-            .where(or_(*clauses))
-        )
-        pair: tuple[AssetMembershipRow, AirflowInstanceRow]
-        for pair in self._session.execute(statement):
-            by_instance.setdefault(pair[1].id, pair[0].id)
 
     def dag_by_asset(self, asset_id: uuid.UUID) -> AirflowDagRow | None:
         """Return the DAG snapshot linked to an asset."""
@@ -701,10 +517,3 @@ class AirflowRepository:
             raise ConflictError(_CONFLICT) from err
 
 
-def _id_match(
-    column: InstrumentedAttribute[uuid.UUID | None],
-    value: uuid.UUID | None,
-) -> ColumnElement[bool]:
-    if value is None:
-        return column.is_(None)
-    return column == value

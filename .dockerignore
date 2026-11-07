@@ -12,3 +12,4 @@ logs
 web/node_modules
 web/dist
 docs/_build
+docs/reference/_autosummary

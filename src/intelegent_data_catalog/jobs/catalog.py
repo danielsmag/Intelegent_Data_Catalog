@@ -15,8 +15,6 @@ from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
-    ScopeContextOptions,
-    SpaceContextOptions,
     TableContextOptions,
 )
 from intelegent_data_catalog.persistence.database import CatalogDatabase
@@ -41,54 +39,6 @@ class CatalogKnowledgeBuild:
                 self._container.query_service(),
             )
             platform.build_knowledge_context(table_id, options)
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-
-class CatalogScopeBuild:
-    """Adapter from the scope job queue to ``RequestPlatform``."""
-
-    def __init__(self, container: AppContainer) -> None:
-        self._container: AppContainer = container
-
-    def run(self, subject_id: UUID, options: ScopeContextOptions) -> None:
-        """Build and save a scope context. The request session is already closed."""
-        database: CatalogDatabase = self._container.database()
-        session: Session = database.session()
-        try:
-            platform: RequestPlatform = RequestPlatform(
-                session,
-                self._container.settings(),
-                self._container.query_service(),
-            )
-            platform.build_scope_context(subject_id, options)
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-
-class CatalogSpaceBuild:
-    """Adapter from the space job queue to ``RequestPlatform``."""
-
-    def __init__(self, container: AppContainer) -> None:
-        self._container: AppContainer = container
-
-    def run(self, subject_id: UUID, options: SpaceContextOptions) -> None:
-        """Build and save a space context. The request session is already closed."""
-        database: CatalogDatabase = self._container.database()
-        session: Session = database.session()
-        try:
-            platform: RequestPlatform = RequestPlatform(
-                session,
-                self._container.settings(),
-                self._container.query_service(),
-            )
-            platform.build_space_context(subject_id, options)
         except Exception:
             session.rollback()
             raise

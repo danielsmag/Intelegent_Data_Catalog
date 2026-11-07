@@ -11,7 +11,6 @@ from intelegent_data_catalog.persistence.models import (
     CatalogTableRow,
     DataSourceRow,
     EngineConnectionRow,
-    ScopeRow,
     SourceEngineBindingRow,
 )
 from intelegent_data_catalog.registry.reads import (
@@ -41,8 +40,6 @@ class BindingService:
         """Bind a data source to an engine. Engine type is copied from the connection."""
         self._data_source(body.data_source_id)
         engine: EngineConnectionRow = self._engine(body.engine_connection_id)
-        if body.default_scope_id is not None:
-            self._scope(body.default_scope_id)
         self._ensure_binding_key(body.engine_connection_id, body.binding_key, None)
         now: datetime = utc_now()
         row: SourceEngineBindingRow = SourceEngineBindingRow(
@@ -52,7 +49,6 @@ class BindingService:
             binding_key=body.binding_key,
             engine_type=engine.engine_type,
             configuration=dump_model(body.configuration),
-            default_scope_id=body.default_scope_id,
             capabilities=dump_model(body.capabilities),
             created_at=now,
             updated_at=now,
@@ -97,10 +93,6 @@ class BindingService:
             if patch.configuration is None:
                 raise ValidationAppError("configuration cannot be null", field="configuration")
             row.configuration = dump_model(patch.configuration)
-        if "default_scope_id" in changes:
-            if patch.default_scope_id is not None:
-                self._scope(patch.default_scope_id)
-            row.default_scope_id = patch.default_scope_id
         if "capabilities" in changes:
             if patch.capabilities is None:
                 raise ValidationAppError("capabilities cannot be null", field="capabilities")
@@ -251,10 +243,6 @@ class BindingService:
     def _engine(self, engine_connection_id: UUID) -> EngineConnectionRow:
         row: EngineConnectionRow | None = self._repo.get_engine_connection(engine_connection_id)
         return require_row(row, "engine connection", engine_connection_id)
-
-    def _scope(self, scope_id: UUID) -> ScopeRow:
-        row: ScopeRow | None = self._repo.get_scope(scope_id)
-        return require_row(row, "scope", scope_id)
 
     def _table(self, table_id: UUID) -> CatalogTableRow:
         row: CatalogTableRow | None = self._repo.get_table(table_id)

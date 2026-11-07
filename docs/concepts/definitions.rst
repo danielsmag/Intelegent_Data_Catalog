@@ -21,12 +21,6 @@ stored as an error.
    * - Folder
      - File name
      - Declares
-   * - ``spaces/``
-     - ``space_*.py``
-     - :class:`~intelegent_data_catalog.assets.dsl.nodes.Space`
-   * - ``scopes/``
-     - ``scope_*.py``
-     - :class:`~intelegent_data_catalog.assets.dsl.nodes.Scope`
    * - ``assets/``
      - ``asset_*.py``
      - :class:`~intelegent_data_catalog.assets.dsl.nodes.Asset`
@@ -35,22 +29,19 @@ stored as an error.
 same prefix is ignored. ``assets/orders.py`` fails the name check because the
 name does not start with ``asset_``.
 
-A spaces file may only construct spaces. A scopes file may only construct
-scopes. An assets file may only construct assets. The worker executes the
+An assets file may only construct assets. The worker executes the
 file, the same way an Airflow worker executes a DAG file. Execution stops at
 ``exec_timeout_seconds``. A file larger than ``max_file_bytes`` is an error.
 
 Create and patch
 ----------------
 
-Constructing ``Space``, ``Scope``, or ``Asset`` registers the declaration
-with the file that is running. A missing space or scope is created. An
-existing one is patched.
+Constructing ``Asset`` registers the declaration with the file that is
+running. A missing asset is created. An existing one is patched.
 
 Only arguments the file passed are written. Omit ``description`` and the
 stored description stays as it is. Pass ``description=None`` and the stored
-description is cleared. A new space with no ``name`` uses the slug as its
-label.
+description is cleared.
 
 The Lumen sales declarations are the ``lumen-sales`` project next to this
 repository. They belong under the prefix in the definition bucket. The catalog

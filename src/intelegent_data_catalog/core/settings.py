@@ -395,11 +395,6 @@ class ContextSettings(BaseModel):
     airflow_max_tasks: int = Field(default=60, ge=1)
     airflow_max_candidate_tables: int = Field(default=300, ge=1)
     max_pipelines: int = Field(default=30, ge=1)
-    scope_max_tables: int = Field(default=40, ge=1)
-    scope_max_columns: int = Field(default=400, ge=1)
-    space_max_scopes: int = Field(default=20, ge=1)
-    space_max_tables: int = Field(default=60, ge=1)
-    space_max_columns: int = Field(default=600, ge=1)
     trace_detail_chars: int = Field(default=2000, ge=1)
 
 
@@ -463,7 +458,7 @@ class AuthSettings(BaseModel):
 
 
 class AssetDefinitionsSettings(BaseModel):
-    """S3 prefix of Python files that declare spaces, scopes, and assets.
+    """S3 prefix of Python files that declare assets.
 
     Beat polls the prefix every ``poll_interval_seconds`` when ``enabled`` is true.
     Each pass keeps only assets named by a file under ``assets_folder``. A script
@@ -479,8 +474,6 @@ class AssetDefinitionsSettings(BaseModel):
     bucket: str = ""
     region: str = ""
     prefix: str = "asset-definitions/"
-    spaces_folder: str = Field(default="spaces", min_length=1)
-    scopes_folder: str = Field(default="scopes", min_length=1)
     assets_folder: str = Field(default="assets", min_length=1)
     poll_interval_seconds: float = Field(default=10.0, gt=0)
     exec_timeout_seconds: float = Field(default=30.0, gt=0)
@@ -491,13 +484,7 @@ class AssetDefinitionsSettings(BaseModel):
     def _normalize_prefix_and_folders(self) -> AssetDefinitionsSettings:
         prefix: str = self.prefix.strip().strip("/")
         self.prefix = f"{prefix}/" if prefix != "" else ""
-        folders: tuple[str, str, str] = (
-            self.spaces_folder,
-            self.scopes_folder,
-            self.assets_folder,
-        )
-        if len(set(folders)) != 3:
-            raise ValueError("spaces_folder, scopes_folder, and assets_folder must be distinct")
+        folders: tuple[str, ...] = (self.assets_folder,)
         folder: str
         for folder in folders:
             if folder != folder.strip() or "/" in folder or folder in {"", ".", ".."}:

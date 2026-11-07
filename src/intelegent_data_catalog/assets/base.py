@@ -12,13 +12,12 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.assets.models import (
     AssetAnalysisContext,
     AssetContextOptions,
-    AssetMembershipRead,
 )
 from intelegent_data_catalog.assets.repository import AssetRepository
 from intelegent_data_catalog.assets.store import AssetKnowledgeStore
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus, ContextOrigin
-from intelegent_data_catalog.persistence.models import AssetMembershipRow, AssetRow
+from intelegent_data_catalog.persistence.models import AssetRow
 
 if TYPE_CHECKING:
     from intelegent_data_catalog.assets.strategies.protocol import KindStrategy
@@ -124,10 +123,6 @@ class Asset:
         """Persistence row. Callers that sync source rows use this."""
         return self._row
 
-    def memberships(self) -> list[AssetMembershipRead]:
-        """Spaces and scopes that hold this asset."""
-        rows: list[AssetMembershipRow] = self._repository.memberships(self.id)
-        return [_membership(row) for row in rows]
 
     def saved_context(self) -> AssetAnalysisContext | None:
         """Return the last snapshot, or none."""
@@ -157,11 +152,3 @@ class Asset:
         return self._strategy.detail(self._session, self.id)
 
 
-def _membership(row: AssetMembershipRow) -> AssetMembershipRead:
-    return AssetMembershipRead(
-        id=row.id,
-        asset_id=row.asset_id,
-        space_id=row.space_id,
-        scope_id=row.scope_id,
-        created_at=row.created_at,
-    )

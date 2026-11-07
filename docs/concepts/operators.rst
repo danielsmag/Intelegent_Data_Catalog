@@ -213,12 +213,11 @@ clipped at 20,000 characters. Other types contribute no body.
      - Notebook cell outputs in the extracted text.
    * - ``include_table_links``
      - ``True``
-     - Catalog tables named in the text that share a scope with this asset.
+     - Catalog tables named in the text.
 
 Table names are taken from ``spark.table`` and ``read.table`` calls, from
-``FROM`` and ``JOIN``, and from ``catalog.namespace.table`` paths. Links are
-matched by table name inside scopes this asset already belongs to. With no
-scope membership, the link list is empty.
+``FROM`` and ``JOIN``, and from ``catalog.namespace.table`` paths. A name
+matches a catalog table when the table name is the same, ignoring case.
 
 ``describe`` always reads notebook outputs, even when ``include_outputs``
 is false on the build. It still keeps a context a person already wrote.

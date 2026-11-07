@@ -145,7 +145,8 @@ def _create_members(bind: Connection) -> None:
 
 def _create_bindings(bind: Connection) -> None:
     inspector: Inspector = inspect(bind)
-    if "workspace_space_bindings" in set(inspector.get_table_names()):
+    tables: set[str] = set(inspector.get_table_names())
+    if "workspace_space_bindings" in tables or "spaces" not in tables:
         return
     op.create_table(
         "workspace_space_bindings",

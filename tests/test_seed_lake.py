@@ -1,8 +1,7 @@
-"""Seeded Iceberg tables become registry rows the Spaces tree can list."""
+"""Seeded Iceberg tables become registry rows the catalog can list."""
 
 import logging
 from pathlib import Path
-from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -12,7 +11,7 @@ from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import CapabilitySupport, TableKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.query.spark_bridge import SparkQueryPreview, spark_preview
-from intelegent_data_catalog.registry.schemas import CatalogTableRead, SpaceRead
+from intelegent_data_catalog.registry.schemas import CatalogTableRead
 from intelegent_data_catalog.registry.seed_lake import SeedLakeRegistrar, project_seed_lake
 from intelegent_data_catalog.sources.discovery import (
     DiscoveryBatch,
@@ -58,12 +57,7 @@ def test_publish_lists_seed_tables_and_spark_sql(tmp_path: Path) -> None:
         session: Session = database.session()
         try:
             service: OpenRegistry = open_registry(session)
-            spaces: list[SpaceRead] = service.spaces.list_spaces()
-            space: SpaceRead = next(item for item in spaces if item.slug == "sales")
-            scope_id: UUID = next(
-                item.id for item in service.scopes.list_scopes(space.id) if item.slug == "sales"
-            )
-            tables: list[CatalogTableRead] = service.tables.list_tables(scope_id)
+            tables: list[CatalogTableRead] = service.tables.list_tables()
             names: set[str] = {table.name for table in tables}
             assert names == {"customers", "orders", "customer_spend"}
             customers: CatalogTableRead = next(

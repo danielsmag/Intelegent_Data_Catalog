@@ -39,8 +39,6 @@ from intelegent_data_catalog.exceptions import (
 from intelegent_data_catalog.graph.neo4j_store import (
     Neo4jColumnSubgraph,
     Neo4jProjection,
-    Neo4jScopeSubgraph,
-    Neo4jSpaceSubgraph,
 )
 from intelegent_data_catalog.graph.service import GraphService
 from intelegent_data_catalog.knowledge.context.airflow_catalog import (
@@ -48,50 +46,14 @@ from intelegent_data_catalog.knowledge.context.airflow_catalog import (
 )
 from intelegent_data_catalog.knowledge.context.airflow_graph import AirflowGraphBuilder
 from intelegent_data_catalog.knowledge.context.column_graph import (
+    ColumnCatalog,
     ColumnSubgraphBuilder,
-    KnowledgeSubgraphWriter,
-    ScopeColumnCatalog,
+    Neo4jTableKnowledgeReader,
 )
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
-from intelegent_data_catalog.knowledge.context.pipelines import (
-    AttachedPipelineReader,
-    AttachedPipelineRunner,
-    AttachedPipelineSource,
-)
-from intelegent_data_catalog.knowledge.context.scope_catalog import (
-    MergedTableKnowledgeReader,
-    Neo4jTableKnowledgeReader,
-    PostgresScopeCatalogContextProvider,
-    PostgresTableKnowledgeReader,
-    TableKnowledgeReader,
-)
-from intelegent_data_catalog.knowledge.context.scope_graph import (
-    EmptyKnowledgeSubgraphWriter,
-    ScopeGraphAppender,
-    ScopeGraphBuilder,
-)
-from intelegent_data_catalog.knowledge.context.space_catalog import (
-    MergedScopeKnowledgeReader,
-    Neo4jScopeKnowledgeReader,
-    PostgresScopeKnowledgeReader,
-    PostgresSpaceCatalogContextProvider,
-    ScopeKnowledgeReader,
-)
-from intelegent_data_catalog.knowledge.context.space_graph import (
-    SpaceGraphAppender,
-    SpaceGraphBuilder,
-)
 from intelegent_data_catalog.knowledge.factories.airflow_agent_factory import (
     AirflowAgentFactory,
     build_airflow_agent_factory,
-)
-from intelegent_data_catalog.knowledge.factories.scope_agent_factory import (
-    ScopeAgentFactory,
-    build_scope_agent_factory,
-)
-from intelegent_data_catalog.knowledge.factories.space_agent_factory import (
-    SpaceAgentFactory,
-    build_space_agent_factory,
 )
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     TableAgentFactory,
@@ -102,29 +64,18 @@ from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ColumnRelation,
     ContextGenerationOptions,
-    PipelineSummary,
-    ScopeAnalysisContext,
-    ScopeContextOptions,
-    SpaceAnalysisContext,
-    SpaceContextOptions,
     TableAnalysisContext,
     TableContextOptions,
-    apply_instance_summaries,
-    pipelines_missing_instance_summary,
 )
 from intelegent_data_catalog.knowledge.operations.airflow_operation import AirflowInstanceAgent
 from intelegent_data_catalog.knowledge.operations.dag_operation import AirflowDagAgent
 from intelegent_data_catalog.knowledge.operations.file_operation import FileAgent
-from intelegent_data_catalog.knowledge.operations.scope_operation import ScopeAgent
-from intelegent_data_catalog.knowledge.operations.space_operation import SpaceAgent
 from intelegent_data_catalog.knowledge.operations.table_operation import TableAgent
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
 from intelegent_data_catalog.knowledge.store import (
     AirflowKnowledgeContextStore,
     KnowledgeContextStore,
-    ScopeKnowledgeContextStore,
     SemanticContextStore,
-    SpaceKnowledgeContextStore,
 )
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.factory import CatalogModels, thinking_level
@@ -138,11 +89,8 @@ from intelegent_data_catalog.persistence.models import (
     EntityConfigurationRow,
 )
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
-from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.services.bindings import BindingService
-from intelegent_data_catalog.services.scopes import ScopeService
-from intelegent_data_catalog.services.spaces import SpaceService
 from intelegent_data_catalog.services.tables import TableService
 from intelegent_data_catalog.sources.discovery import DiscoveryBatch, DiscoveryRequest
 from intelegent_data_catalog.sources.enrichment import PostgresForeignKeyEnricher
@@ -169,7 +117,6 @@ def _job_access() -> AccessContext:
         workspace_id=None,
         member_workspace_ids=frozenset(),
         admin_workspace_ids=frozenset(),
-        visible_space_ids=None,
     )
 
 
@@ -188,8 +135,6 @@ class RequestPlatform:
         self._definitions: ObjectStore | None = definitions
         self._settings: AppSettings = settings
         repo: RegistryRepository = RegistryRepository(session)
-        self.spaces: SpaceService = SpaceService(repo)
-        self.scopes: ScopeService = ScopeService(repo)
         self.tables: TableService = TableService(repo)
         self.bindings: BindingService = BindingService(repo)
         self.annotations: CatalogAnnotations = CatalogAnnotations(session)
@@ -251,7 +196,7 @@ class RequestPlatform:
         column_graph: ColumnSubgraphBuilder | None = None
         if self._neo4j is not None and models.column is not None:
             column_graph = ColumnSubgraphBuilder(
-                candidates=ScopeColumnCatalog(RegistryRepository(self._session)),
+                candidates=ColumnCatalog(RegistryRepository(self._session)),
                 proposer=models.column,
                 writer=Neo4jColumnSubgraph(self._neo4j),
             )
@@ -273,126 +218,12 @@ class RequestPlatform:
             raise EntityNotFoundError("knowledge context", str(table_id))
         return saved
 
-    def build_scope_context(
-        self,
-        scope_id: UUID,
-        options: ScopeContextOptions,
-    ) -> ScopeAnalysisContext:
-        """Build one scope context and store it.
-
-        The model reads saved table contexts and, when Neo4j is configured, each
-        table's knowledge subgraph. Accepted links replace prior LLM relationships.
-        """
-        logger.info("build scope context start scope_id=%s", scope_id)
-        models: CatalogModels = self._models(options.model, options.effort)
-        writer: KnowledgeSubgraphWriter
-        if self._neo4j is not None:
-            writer = Neo4jScopeSubgraph(self._neo4j)
-        else:
-            writer = EmptyKnowledgeSubgraphWriter()
-        builder: ScopeGraphBuilder = ScopeGraphBuilder(
-            proposer=models.scope_proposer,
-            writer=writer,
-            relationships=LlmRelationshipStore(self._session),
-            publisher=self.graph,
-        )
-        agent: ScopeAgent = self._scope_factory(builder, models).create(scope_id)
-        built: ScopeAnalysisContext = agent.build_context(options)
-        ScopeKnowledgeContextStore(self._session).save(built)
-        logger.info(
-            "build scope context done scope_id=%s links=%s missing=%s",
-            scope_id,
-            len(built.table_links),
-            len(built.tables_without_context),
-        )
-        return built
-
-    def read_scope_context(self, scope_id: UUID) -> ScopeAnalysisContext:
-        """Return the last context saved for this scope."""
-        saved: ScopeAnalysisContext | None = ScopeKnowledgeContextStore(self._session).get(scope_id)
-        if saved is None:
-            raise EntityNotFoundError("knowledge context", str(scope_id))
-        filled: list[PipelineSummary] = self._fill_instance_summaries(saved.pipelines)
-        if filled is saved.pipelines:
-            return saved
-        return saved.model_copy(update={"pipelines": filled})
-
-    def build_space_context(
-        self,
-        space_id: UUID,
-        options: SpaceContextOptions,
-    ) -> SpaceAnalysisContext:
-        """Build one space context and store it.
-
-        The model reads each scope's saved context and, when Neo4j is configured,
-        that scope's knowledge subgraph. Accepted links replace prior cross-scope
-        LLM relationships.
-        """
-        logger.info("build space context start space_id=%s", space_id)
-        models: CatalogModels = self._models(options.model, options.effort)
-        writer: KnowledgeSubgraphWriter
-        if self._neo4j is not None:
-            writer = Neo4jSpaceSubgraph(self._neo4j)
-        else:
-            writer = EmptyKnowledgeSubgraphWriter()
-        builder: SpaceGraphBuilder = SpaceGraphBuilder(
-            proposer=models.space_proposer,
-            writer=writer,
-            relationships=LlmRelationshipStore(self._session),
-            publisher=self.graph,
-        )
-        agent: SpaceAgent = self._space_factory(builder, models).create(space_id)
-        built: SpaceAnalysisContext = agent.build_context(options)
-        SpaceKnowledgeContextStore(self._session).save(built)
-        logger.info(
-            "build space context done space_id=%s links=%s missing=%s",
-            space_id,
-            len(built.table_links),
-            len(built.scopes_without_context),
-        )
-        return built
-
-    def read_space_context(self, space_id: UUID) -> SpaceAnalysisContext:
-        """Return the last context saved for this space."""
-        saved: SpaceAnalysisContext | None = SpaceKnowledgeContextStore(self._session).get(space_id)
-        if saved is None:
-            raise EntityNotFoundError("knowledge context", str(space_id))
-        filled: list[PipelineSummary] = self._fill_instance_summaries(saved.pipelines)
-        if filled is saved.pipelines:
-            return saved
-        return saved.model_copy(update={"pipelines": filled})
-
-    def _fill_instance_summaries(self, pipelines: list[PipelineSummary]) -> list[PipelineSummary]:
-        missing: set[str] = pipelines_missing_instance_summary(pipelines)
-        if len(missing) == 0:
-            return pipelines
-        return apply_instance_summaries(pipelines, self._airflow_summaries(missing))
-
-    def _airflow_summaries(self, names: set[str]) -> dict[str, str]:
-        found: dict[str, str] = {}
-        store: AirflowKnowledgeContextStore = AirflowKnowledgeContextStore(self._session)
-        row: AirflowInstanceRow
-        for row in AirflowRepository(self._session).list_instances():
-            if row.name not in names or row.name in found:
-                continue
-            saved: AirflowAnalysisContext | None = store.get(row.id)
-            if saved is None or saved.summary is None:
-                continue
-            text: str = saved.summary.strip()
-            if text == "":
-                continue
-            found[row.name] = text
-        return found
 
     def generate_context(self, subject_id: UUID, options: ContextGenerationOptions) -> None:
-        """Ask the space, table, or scope agent for business context. Origin is ``LLM``."""
+        """Ask the table, column, asset, or Airflow agent for business context."""
         logger.info("generate context start kind=%s subject_id=%s", options.kind, subject_id)
         models: CatalogModels = self._models(options.model, options.effort)
         match options.kind:
-            case "space":
-                self._space_factory(None, models).create(subject_id).describe()
-            case "scope":
-                self._scope_factory(None, models).create(subject_id).describe()
             case "airflow":
                 self._airflow_factory(None, models).create(subject_id).describe()
             case "table":
@@ -540,54 +371,6 @@ class RequestPlatform:
             subgraph=None if self._neo4j is None else _TableSubgraph(self._neo4j),
         )
 
-    def _scope_factory(
-        self,
-        graph_builder: ScopeGraphAppender | None,
-        models: CatalogModels,
-    ) -> ScopeAgentFactory:
-        readers: list[TableKnowledgeReader] = [
-            PostgresTableKnowledgeReader(KnowledgeContextStore(self._session)),
-        ]
-        if self._neo4j is not None:
-            readers.append(Neo4jTableKnowledgeReader(self._neo4j))
-        return build_scope_agent_factory(
-            PostgresScopeCatalogContextProvider(
-                RegistryRepository(self._session),
-                MergedTableKnowledgeReader(readers),
-                ScopeKnowledgeContextStore(self._session),
-                pipelines=self._pipelines(graph_builder is not None, models),
-                max_tables=self._settings.context.scope_max_tables,
-                max_columns=self._settings.context.scope_max_columns,
-            ),
-            graph_builder,
-            describer=models.scope_describer,
-            context_writer=SemanticContextStore(self._session),
-        )
-
-    def _space_factory(
-        self,
-        graph_builder: SpaceGraphAppender | None,
-        models: CatalogModels,
-    ) -> SpaceAgentFactory:
-        readers: list[ScopeKnowledgeReader] = [
-            PostgresScopeKnowledgeReader(ScopeKnowledgeContextStore(self._session)),
-        ]
-        if self._neo4j is not None:
-            readers.append(Neo4jScopeKnowledgeReader(self._neo4j))
-        return build_space_agent_factory(
-            PostgresSpaceCatalogContextProvider(
-                RegistryRepository(self._session),
-                MergedScopeKnowledgeReader(readers),
-                SpaceKnowledgeContextStore(self._session),
-                pipelines=self._pipelines(graph_builder is not None, models),
-                max_scopes=self._settings.context.space_max_scopes,
-                max_tables=self._settings.context.space_max_tables,
-                max_columns=self._settings.context.space_max_columns,
-            ),
-            graph_builder,
-            describer=models.space_describer,
-            context_writer=SemanticContextStore(self._session),
-        )
 
     def build_airflow_context(
         self,
@@ -646,26 +429,6 @@ class RequestPlatform:
             context_writer=SemanticContextStore(self._session),
         )
 
-    def _pipelines(self, analyze: bool, models: CatalogModels) -> AttachedPipelineSource:
-        repository: AirflowRepository = AirflowRepository(self._session)
-        snapshots: AirflowKnowledgeContextStore = AirflowKnowledgeContextStore(self._session)
-        if not analyze:
-            reader: AttachedPipelineReader = AttachedPipelineReader(
-                repository,
-                snapshots,
-                max_pipelines=self._settings.context.max_pipelines,
-                max_tasks=self._settings.context.airflow_max_tasks,
-            )
-            return reader
-        builder: AirflowGraphBuilder = AirflowGraphBuilder(models.airflow_proposer, repository)
-        runner: AttachedPipelineRunner = AttachedPipelineRunner(
-            repository,
-            self._airflow_factory(builder, models),
-            snapshots,
-            max_pipelines=self._settings.context.max_pipelines,
-            max_tasks=self._settings.context.airflow_max_tasks,
-        )
-        return runner
 
 
 class _PlatformAgents(AssetAgentProvider):
@@ -686,7 +449,7 @@ class _PlatformAgents(AssetAgentProvider):
         column_graph: ColumnSubgraphBuilder | None = None
         if self._platform._neo4j is not None and models.column is not None:
             column_graph = ColumnSubgraphBuilder(
-                candidates=ScopeColumnCatalog(RegistryRepository(self._platform._session)),
+                candidates=ColumnCatalog(RegistryRepository(self._platform._session)),
                 proposer=models.column,
                 writer=Neo4jColumnSubgraph(self._platform._neo4j),
             )

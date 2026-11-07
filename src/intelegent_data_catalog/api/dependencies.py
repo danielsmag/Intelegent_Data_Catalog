@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
-from intelegent_data_catalog.api.visibility import SpaceResolver
 from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
 from intelegent_data_catalog.assets.definitions.listing import AssetDefinitionListing
 from intelegent_data_catalog.assets.definitions.service import AssetDefinitionService
@@ -23,7 +22,6 @@ from intelegent_data_catalog.auth.service import AccessService
 from intelegent_data_catalog.catalog.services.catalog_service import CatalogService
 from intelegent_data_catalog.catalog.services.explorer_service import ExplorerService
 from intelegent_data_catalog.catalog.services.query_service import QueryService
-from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.entity_configuration import EntityConfigurationService
 from intelegent_data_catalog.exceptions import AuthenticationError, PersistenceUnavailableError
@@ -38,8 +36,6 @@ from intelegent_data_catalog.services.bindings import BindingService
 from intelegent_data_catalog.services.data_sources import DataSourceService
 from intelegent_data_catalog.services.engines import EngineService
 from intelegent_data_catalog.services.relationships import RelationshipService
-from intelegent_data_catalog.services.scopes import ScopeService
-from intelegent_data_catalog.services.spaces import SpaceService
 from intelegent_data_catalog.services.sync_runs import SyncRunService
 from intelegent_data_catalog.services.tables import TableService
 
@@ -97,16 +93,6 @@ def get_catalog_session(
 CatalogSessionDep = Annotated[Session, Depends(get_catalog_session)]
 
 
-def get_space_service(session: CatalogSessionDep) -> SpaceService:
-    """Return the space service for this request."""
-    return SpaceService(RegistryRepository(session))
-
-
-def get_scope_service(session: CatalogSessionDep) -> ScopeService:
-    """Return the scope service for this request."""
-    return ScopeService(RegistryRepository(session))
-
-
 def get_data_source_service(session: CatalogSessionDep) -> DataSourceService:
     """Return the data source service for this request."""
     return DataSourceService(RegistryRepository(session))
@@ -140,43 +126,12 @@ def get_sync_run_service(session: CatalogSessionDep) -> SyncRunService:
 CatalogServiceDep = Annotated[CatalogService, Depends(get_catalog_service)]
 QueryServiceDep = Annotated[QueryService, Depends(get_query_service)]
 ExplorerServiceDep = Annotated[ExplorerService, Depends(get_explorer_service)]
-SpaceServiceDep = Annotated[SpaceService, Depends(get_space_service)]
-ScopeServiceDep = Annotated[ScopeService, Depends(get_scope_service)]
 DataSourceServiceDep = Annotated[DataSourceService, Depends(get_data_source_service)]
 TableServiceDep = Annotated[TableService, Depends(get_table_service)]
 RelationshipServiceDep = Annotated[RelationshipService, Depends(get_relationship_service)]
 EngineServiceDep = Annotated[EngineService, Depends(get_engine_service)]
 BindingServiceDep = Annotated[BindingService, Depends(get_binding_service)]
 SyncRunServiceDep = Annotated[SyncRunService, Depends(get_sync_run_service)]
-
-
-def get_scope_attachment(
-    container: Annotated[AppContainer, Depends(get_container)],
-) -> Iterator[ScopeAttachmentService]:
-    """Open one catalog session and attach source tables into a scope."""
-    database: CatalogDatabase = container.database()
-    session: Session = database.session()
-    repo: RegistryRepository = RegistryRepository(session)
-    explorer: ExplorerService = container.explorer_service()
-    service: ScopeAttachmentService = ScopeAttachmentService(
-        ScopeService(repo),
-        TableService(repo),
-        DataSourceService(repo),
-        explorer,
-    )
-    try:
-        yield service
-    except SQLAlchemyError as err:
-        session.rollback()
-        raise PersistenceUnavailableError("catalog database unavailable") from err
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-ScopeAttachmentDep = Annotated[ScopeAttachmentService, Depends(get_scope_attachment)]
 
 
 def get_airflow_service(
@@ -322,19 +277,6 @@ def get_access(
 
 
 AccessDep = Annotated[AccessContext, Depends(get_access)]
-
-
-def enforce_request_visibility(
-    request: Request,
-    access: AccessDep,
-    container: Annotated[AppContainer, Depends(get_container)],
-) -> None:
-    """404 path ids that sit in a space the active workspace cannot see."""
-    session: Session = container.database().session()
-    try:
-        SpaceResolver(session).enforce(request.path_params, access)
-    finally:
-        session.close()
 
 
 def get_workspace_service(

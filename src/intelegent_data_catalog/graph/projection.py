@@ -10,8 +10,6 @@ from intelegent_data_catalog.persistence.models import (
     MarquezMappingRow,
     RelationshipColumnMappingRow,
     RelationshipRow,
-    ScopeRow,
-    SpaceRow,
 )
 
 
@@ -36,8 +34,6 @@ class LineageLink:
 
 
 def build_catalog_graph(
-    spaces: list[SpaceRow],
-    scopes: list[ScopeRow],
     tables: list[CatalogTableRow],
     columns: list[ColumnRow],
     relationships: list[RelationshipRow],
@@ -46,17 +42,9 @@ def build_catalog_graph(
     """Project catalog identity. Node ids are the PostgreSQL UUIDs, not names."""
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
-    space: SpaceRow
-    for space in spaces:
-        nodes.append(_node("space", space.id, "space", space.name))
-    scope: ScopeRow
-    for scope in scopes:
-        nodes.append(_node("scope", scope.id, "scope", scope.name))
-        edges.append(_edge(f"space:{scope.space_id}", f"scope:{scope.id}", "HAS_SCOPE"))
     table: CatalogTableRow
     for table in tables:
         nodes.append(_node("table", table.id, "table", table.name))
-        edges.append(_edge(f"scope:{table.scope_id}", f"table:{table.id}", "HAS_TABLE"))
     column: ColumnRow
     for column in columns:
         nodes.append(_node("column", column.id, "column", column.name))

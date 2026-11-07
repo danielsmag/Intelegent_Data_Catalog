@@ -1,4 +1,4 @@
-"""Workspace, membership, and space-binding use cases."""
+"""Workspace and membership use cases."""
 
 from uuid import UUID
 
@@ -15,14 +15,11 @@ from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.constants import SHARED_WORKSPACE_SLUG
 from intelegent_data_catalog.persistence.enums import WorkspaceRole
 from intelegent_data_catalog.persistence.models import (
-    SpaceRow,
     UserRow,
     WorkspaceMemberRow,
     WorkspaceRow,
-    WorkspaceSpaceBindingRow,
 )
 from intelegent_data_catalog.registry.identifiers import slugify
-from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
     MembershipRead,
     MeRead,
@@ -41,7 +38,6 @@ class WorkspaceService:
 
     def __init__(self, session: Session, objects: ObjectStore) -> None:
         self._store: WorkspaceStore = WorkspaceStore(session)
-        self._registry: RegistryRepository = RegistryRepository(session)
         self._objects: ObjectStore = objects
 
     def me(self, access: AccessContext) -> MeRead:
@@ -116,12 +112,10 @@ class WorkspaceService:
         return self._read(row, access)
 
     def delete_workspace(self, workspace_id: UUID, access: AccessContext) -> None:
-        """Delete a workspace that has no space bindings."""
+        """Delete a workspace."""
         row: WorkspaceRow = self._managed_workspace(workspace_id, access)
         if row.is_system:
             raise ConflictError("shared workspace cannot be deleted")
-        if self._store.count_bindings(workspace_id) > 0:
-            raise ConflictError("workspace still has bound spaces")
         keys: list[str] = self._store.object_keys(workspace_id)
         self._store.delete(row)
         self._store.commit()
@@ -188,30 +182,8 @@ class WorkspaceService:
         self._store.delete(member)
         self._store.commit()
 
-    def list_bound_spaces(self, workspace_id: UUID, access: AccessContext) -> list[UUID]:
-        """Return space ids bound to a workspace the caller can open."""
-        self._visible_workspace(workspace_id, access)
-        return self._store.list_bound_space_ids(workspace_id)
 
-    def bind_space(self, workspace_id: UUID, space_id: UUID, access: AccessContext) -> None:
-        """Bind a visible space to a workspace."""
-        self._managed_workspace(workspace_id, access)
-        space: SpaceRow | None = self._registry.get_space(space_id)
-        if space is None or not access.allows_space(space_id):
-            raise EntityNotFoundError("space", str(space_id))
-        if self._store.find_binding(workspace_id, space_id) is not None:
-            return
-        self._store.add_binding(workspace_id, space_id)
-        self._store.commit()
 
-    def unbind_space(self, workspace_id: UUID, space_id: UUID, access: AccessContext) -> None:
-        """Remove a space binding."""
-        self._managed_workspace(workspace_id, access)
-        binding: WorkspaceSpaceBindingRow | None = self._store.find_binding(workspace_id, space_id)
-        if binding is None:
-            raise EntityNotFoundError("binding", str(space_id))
-        self._store.delete(binding)
-        self._store.commit()
 
     def _memberships(self, access: AccessContext) -> list[MembershipRead]:
         found: list[MembershipRead] = []

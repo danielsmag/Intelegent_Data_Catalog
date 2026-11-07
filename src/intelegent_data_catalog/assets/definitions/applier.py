@@ -1,4 +1,4 @@
-"""Apply declarations: ensure spaces and scopes, link assets, drop removed memberships."""
+"""Apply asset declarations and drop assets no file still names."""
 
 import logging
 from datetime import datetime
@@ -14,8 +14,6 @@ from intelegent_data_catalog.assets.definitions.models import (
     AssetSpec,
     DefinitionSpec,
     SchemaSourceRef,
-    ScopeSpec,
-    SpaceSpec,
     TableSourceRef,
 )
 from intelegent_data_catalog.assets.definitions.repository import AssetDefinitionRepository
@@ -35,18 +33,14 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionItemStatus,
     DefinitionKind,
     DefinitionRunStatus,
-    SpaceIsolationMode,
 )
 from intelegent_data_catalog.persistence.models import (
     AirflowDagRow,
     AirflowInstanceRow,
     AssetDefinitionFileRow,
     AssetDefinitionItemRow,
-    AssetMembershipRow,
     AssetRow,
     CatalogTableRow,
-    ScopeRow,
-    SpaceRow,
     WorkspaceNodeRow,
 )
 from intelegent_data_catalog.registry.repository import RegistryRepository
@@ -103,7 +97,7 @@ class AssetDefinitionApplier:
             self._apply_model(file_row, kind, model, prior_item)
 
     def retire_file(self, file_row: AssetDefinitionFileRow) -> None:
-        """Detach memberships this file created and delete its items. Spaces and scopes stay."""
+        """Delete the items this file created."""
         item: AssetDefinitionItemRow
         for item in self._repo.items_for(file_row.id):
             self._retire_item(item)
@@ -167,13 +161,9 @@ class AssetDefinitionApplier:
         if file_row is None or file_row.status == DefinitionFileStatus.REMOVED.value:
             return DefinitionItemStatus.UNRESOLVED
         kind: DefinitionKind = DefinitionKind(item.kind)
-        match kind:
-            case DefinitionKind.SPACE:
-                return self._apply_space(file_row, SpaceSpec.model_validate(item.declaration), item)
-            case DefinitionKind.SCOPE:
-                return self._apply_scope(file_row, ScopeSpec.model_validate(item.declaration), item)
-            case DefinitionKind.ASSET:
-                return self._apply_asset(file_row, AssetSpec.model_validate(item.declaration), item)
+        if kind is not DefinitionKind.ASSET:
+            return DefinitionItemStatus.ERROR
+        return self._apply_asset(file_row, AssetSpec.model_validate(item.declaration), item)
 
     def _apply_model(
         self,
@@ -182,87 +172,12 @@ class AssetDefinitionApplier:
         model: BaseModel,
         prior: AssetDefinitionItemRow | None,
     ) -> None:
-        match kind:
-            case DefinitionKind.SPACE if isinstance(model, SpaceSpec):
-                self._apply_space(file_row, model, prior)
-            case DefinitionKind.SCOPE if isinstance(model, ScopeSpec):
-                self._apply_scope(file_row, model, prior)
-            case DefinitionKind.ASSET if isinstance(model, AssetSpec):
-                self._apply_asset(file_row, model, prior)
-            case _:
-                raise CatalogError(f"declaration kind does not match {kind.value}")
+        if kind is DefinitionKind.ASSET and isinstance(model, AssetSpec):
+            self._apply_asset(file_row, model, prior)
+            return
+        raise CatalogError(f"declaration kind does not match {kind.value}")
 
-    def _apply_space(
-        self,
-        file_row: AssetDefinitionFileRow,
-        spec: SpaceSpec,
-        prior: AssetDefinitionItemRow | None,
-    ) -> DefinitionItemStatus:
-        row: SpaceRow | None = self._registry.find_space_by_slug(spec.slug)
-        if row is None:
-            label: str = spec.slug if spec.name is None else spec.name
-            description: str | None = spec.description if "description" in spec.set_fields else None
-            row = self._registry.add_space(
-                name=_clip(label),
-                slug=spec.slug,
-                description=description,
-                isolation_mode=SpaceIsolationMode.OPEN.value,
-            )
-        self._patch_space(row, spec)
-        self._record(
-            file_row,
-            DefinitionKind.SPACE,
-            spec.slug,
-            spec,
-            DefinitionItemStatus.APPLIED,
-            None,
-            prior,
-            space_id=row.id,
-        )
-        return DefinitionItemStatus.APPLIED
 
-    def _apply_scope(
-        self,
-        file_row: AssetDefinitionFileRow,
-        spec: ScopeSpec,
-        prior: AssetDefinitionItemRow | None,
-    ) -> DefinitionItemStatus:
-        item_key: str = f"{spec.space_slug}/{spec.slug}"
-        space: SpaceRow | None = self._registry.find_space_by_slug(spec.space_slug)
-        if space is None:
-            self._record(
-                file_row,
-                DefinitionKind.SCOPE,
-                item_key,
-                spec,
-                DefinitionItemStatus.UNRESOLVED,
-                f"space not found: {spec.space_slug}",
-                prior,
-            )
-            return DefinitionItemStatus.UNRESOLVED
-        scope: ScopeRow | None = self._registry.find_scope_by_slug(space.id, spec.slug)
-        if scope is None:
-            label: str = spec.slug if spec.name is None else spec.name
-            description: str | None = spec.description if "description" in spec.set_fields else None
-            scope = self._registry.add_scope(
-                space_id=space.id,
-                name=_clip(label),
-                slug=spec.slug,
-                description=description,
-            )
-        self._patch_scope(scope, spec)
-        self._record(
-            file_row,
-            DefinitionKind.SCOPE,
-            item_key,
-            spec,
-            DefinitionItemStatus.APPLIED,
-            None,
-            prior,
-            space_id=space.id,
-            scope_id=scope.id,
-        )
-        return DefinitionItemStatus.APPLIED
 
     def _apply_asset(
         self,
@@ -305,8 +220,6 @@ class AssetDefinitionApplier:
             return DefinitionItemStatus.ERROR
         asset: AssetRow = self._ensure_asset(resolved, spec, prior)
         self._overlay(asset, spec, file_row.key)
-        if prior is not None and (prior.scope_id is not None or prior.space_id is not None):
-            self._detach_claim(prior)
         recorded: AssetDefinitionItemRow
         changed: bool
         recorded, changed = self._record(
@@ -462,39 +375,7 @@ class AssetDefinitionApplier:
         asset.properties = properties
         asset.updated_at = utc_now()
 
-    def _patch_space(self, row: SpaceRow, spec: SpaceSpec) -> None:
-        changed: bool = False
-        if "name" in spec.set_fields and spec.name is not None and row.name != spec.name:
-            row.name = _clip(spec.name)
-            changed = True
-        if "description" in spec.set_fields and row.description != spec.description:
-            row.description = spec.description
-            changed = True
-        if "context" in spec.set_fields:
-            before: str | None = row.context
-            before_origin: str | None = row.context_origin
-            apply_user_context(row, spec.context)
-            if row.context != before or row.context_origin != before_origin:
-                changed = True
-        if changed:
-            row.updated_at = utc_now()
 
-    def _patch_scope(self, row: ScopeRow, spec: ScopeSpec) -> None:
-        changed: bool = False
-        if "name" in spec.set_fields and spec.name is not None and row.name != spec.name:
-            row.name = _clip(spec.name)
-            changed = True
-        if "description" in spec.set_fields and row.description != spec.description:
-            row.description = spec.description
-            changed = True
-        if "context" in spec.set_fields:
-            before: str | None = row.context
-            before_origin: str | None = row.context_origin
-            apply_user_context(row, spec.context)
-            if row.context != before or row.context_origin != before_origin:
-                changed = True
-        if changed:
-            row.updated_at = utc_now()
 
     def _retire_item(self, item: AssetDefinitionItemRow) -> None:
         asset_id: UUID | None = item.asset_id if item.kind == DefinitionKind.ASSET.value else None
@@ -505,7 +386,7 @@ class AssetDefinitionApplier:
             self._delete_asset_if_undeclared(asset_id)
 
     def drop_undeclared_assets(self) -> int:
-        """Delete assets no applied asset script still names. Spaces and scopes stay."""
+        """Delete assets no applied asset script still names."""
         declared: set[UUID] = self._repo.applied_asset_ids()
         removed: int = 0
         asset: AssetRow
@@ -524,19 +405,7 @@ class AssetDefinitionApplier:
             self._assets.delete(asset)
 
     def _detach_claim(self, item: AssetDefinitionItemRow) -> None:
-        if item.asset_id is None or item.status != DefinitionItemStatus.APPLIED.value:
-            return
-        if item.scope_id is None and item.space_id is None:
-            return
-        if self._repo.other_applied_claim(item):
-            return
-        membership: AssetMembershipRow | None = self._assets.membership_for(
-            item.asset_id,
-            scope_id=item.scope_id,
-            space_id=item.space_id,
-        )
-        if membership is not None:
-            self._assets.detach(membership)
+        del item
 
     def _record(
         self,
@@ -548,22 +417,12 @@ class AssetDefinitionApplier:
         error: str | None,
         prior: AssetDefinitionItemRow | None,
         *,
-        space_id: UUID | None = None,
-        scope_id: UUID | None = None,
         asset_id: UUID | None = None,
     ) -> tuple[AssetDefinitionItemRow, bool]:
         digest: str = fingerprint(spec)
         payload: dict[str, object] = declaration_payload(spec)
         message: str | None = _clip_error(error)
-        if prior is not None and _same_record(
-            prior,
-            status,
-            digest,
-            message,
-            space_id,
-            scope_id,
-            asset_id,
-        ):
+        if prior is not None and _same_record(prior, status, digest, message, asset_id):
             return prior, False
         now: datetime = utc_now()
         if prior is None:
@@ -574,8 +433,6 @@ class AssetDefinitionApplier:
                 item_key=item_key,
                 declaration=payload,
                 fingerprint=digest,
-                space_id=space_id,
-                scope_id=scope_id,
                 asset_id=asset_id,
                 status=status.value,
                 error=message,
@@ -589,8 +446,6 @@ class AssetDefinitionApplier:
         prior.item_key = item_key
         prior.declaration = payload
         prior.fingerprint = digest
-        prior.space_id = space_id
-        prior.scope_id = scope_id
         prior.asset_id = asset_id
         prior.status = status.value
         prior.error = message
@@ -610,12 +465,6 @@ class AssetDefinitionApplier:
 
 def _declared(spec: DefinitionSpec) -> list[tuple[str, DefinitionKind, BaseModel]]:
     declared: list[tuple[str, DefinitionKind, BaseModel]] = []
-    space: SpaceSpec
-    for space in spec.spaces:
-        declared.append((space.slug, DefinitionKind.SPACE, space))
-    scope: ScopeSpec
-    for scope in spec.scopes:
-        declared.append((f"{scope.space_slug}/{scope.slug}", DefinitionKind.SCOPE, scope))
     asset: AssetSpec
     for asset in spec.assets:
         declared.append((asset.key, DefinitionKind.ASSET, asset))
@@ -634,16 +483,12 @@ def _same_record(
     status: DefinitionItemStatus,
     digest: str,
     message: str | None,
-    space_id: UUID | None,
-    scope_id: UUID | None,
     asset_id: UUID | None,
 ) -> bool:
     return (
         prior.status == status.value
         and prior.fingerprint == digest
         and prior.error == message
-        and prior.space_id == space_id
-        and prior.scope_id == scope_id
         and prior.asset_id == asset_id
     )
 

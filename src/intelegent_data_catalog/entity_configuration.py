@@ -1,4 +1,4 @@
-"""Saved refresh interval and build options for a space, scope, or table."""
+"""Saved refresh interval and build options for a table or asset."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -34,26 +34,10 @@ from intelegent_data_catalog.persistence.models import (
     CatalogJobRow,
     CatalogTableRow,
     EntityConfigurationRow,
-    ScopeRow,
-    SpaceRow,
 )
 
 _DEFAULT_INTERVAL_SECONDS: int = 600
-_SPACE_OPTIONS: dict[str, bool] = {
-    "include_scope_knowledge": True,
-    "include_previous": True,
-    "include_summary": True,
-    "include_airflow": True,
-}
-_SCOPE_OPTIONS: dict[str, bool] = {
-    "include_table_knowledge": True,
-    "include_previous": True,
-    "include_summary": True,
-    "include_airflow": True,
-}
 _DEFAULTS: dict[RefreshSubjectKind, dict[str, bool]] = {
-    RefreshSubjectKind.SPACE: _SPACE_OPTIONS,
-    RefreshSubjectKind.SCOPE: _SCOPE_OPTIONS,
     RefreshSubjectKind.TABLE: TABLE_FLAGS,
 }
 _ASSET_DEFAULTS: dict[AssetKind, dict[str, bool]] = {
@@ -176,14 +160,6 @@ class EntityConfigurationService:
         )
 
     def _require(self, kind: RefreshSubjectKind, subject_id: UUID) -> None:
-        if kind is RefreshSubjectKind.SPACE:
-            if self._session.get(SpaceRow, subject_id) is None:
-                raise EntityNotFoundError("space", str(subject_id))
-            return
-        if kind is RefreshSubjectKind.SCOPE:
-            if self._session.get(ScopeRow, subject_id) is None:
-                raise EntityNotFoundError("scope", str(subject_id))
-            return
         if kind is RefreshSubjectKind.TABLE:
             if self._session.get(CatalogTableRow, subject_id) is None:
                 raise EntityNotFoundError("catalog table", str(subject_id))
@@ -212,15 +188,7 @@ class EntityConfigurationService:
         return asset.kind
 
     def _find(self, kind: RefreshSubjectKind, subject_id: UUID) -> EntityConfigurationRow | None:
-        if kind is RefreshSubjectKind.SPACE:
-            statement = select(EntityConfigurationRow).where(
-                EntityConfigurationRow.space_id == subject_id,
-            )
-        elif kind is RefreshSubjectKind.SCOPE:
-            statement = select(EntityConfigurationRow).where(
-                EntityConfigurationRow.scope_id == subject_id,
-            )
-        elif kind is RefreshSubjectKind.ASSET:
+        if kind is RefreshSubjectKind.ASSET:
             statement = select(EntityConfigurationRow).where(
                 EntityConfigurationRow.asset_id == subject_id,
             )
@@ -296,8 +264,6 @@ class EntityConfigurationService:
     ) -> EntityConfigurationRow:
         return EntityConfigurationRow(
             id=uuid4(),
-            space_id=subject_id if kind is RefreshSubjectKind.SPACE else None,
-            scope_id=subject_id if kind is RefreshSubjectKind.SCOPE else None,
             catalog_table_id=subject_id if kind is RefreshSubjectKind.TABLE else None,
             asset_id=subject_id if kind is RefreshSubjectKind.ASSET else None,
             refresh_mode=refresh_mode.value,
@@ -374,10 +340,6 @@ def _context_target(
         if table is not None and table.asset_id is not None:
             return CatalogJobKind.ASSET, table.asset_id
         return CatalogJobKind.KNOWLEDGE, row.catalog_table_id
-    if row.scope_id is not None:
-        return CatalogJobKind.SCOPE, row.scope_id
-    if row.space_id is not None:
-        return CatalogJobKind.SPACE, row.space_id
     return None, None
 
 

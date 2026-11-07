@@ -18,7 +18,6 @@ from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
-    SpaceIsolationMode,
     SyncRunStatus,
     TableKind,
     TableStatus,
@@ -32,9 +31,7 @@ from intelegent_data_catalog.persistence.models import (
     MetadataSyncRunRow,
     RelationshipColumnMappingRow,
     RelationshipRow,
-    ScopeRow,
     SourceEngineBindingRow,
-    SpaceRow,
 )
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingRead,
@@ -46,12 +43,10 @@ from intelegent_data_catalog.registry.schemas import (
     EngineRef,
     RelationshipRead,
     ScanScope,
-    ScopeRead,
     SourceBindingConfig,
     SourceBindingRead,
     SourceCapabilities,
     SourceRef,
-    SpaceRead,
     SyncCounts,
     SyncRunRead,
 )
@@ -82,38 +77,6 @@ def dump_json_dict(value: dict[str, JsonValue]) -> dict[str, object]:
     return stored
 
 
-def space_read(row: SpaceRow, bound_workspace_ids: list[UUID] | None = None) -> SpaceRead:
-    """Map a space row."""
-    bound: list[UUID] = [] if bound_workspace_ids is None else list(bound_workspace_ids)
-    return SpaceRead(
-        id=row.id,
-        name=row.name,
-        slug=row.slug,
-        description=row.description,
-        isolation_mode=SpaceIsolationMode(row.isolation_mode),
-        bound_workspace_ids=bound,
-        context=row.context,
-        context_origin=_context_origin(row.context_origin),
-        created_at=_aware(row.created_at),
-        updated_at=_aware(row.updated_at),
-    )
-
-
-def scope_read(row: ScopeRow) -> ScopeRead:
-    """Map a scope row."""
-    return ScopeRead(
-        id=row.id,
-        space_id=row.space_id,
-        name=row.name,
-        slug=row.slug,
-        description=row.description,
-        context=row.context,
-        context_origin=_context_origin(row.context_origin),
-        created_at=_aware(row.created_at),
-        updated_at=_aware(row.updated_at),
-    )
-
-
 def data_source_read(row: DataSourceRow) -> DataSourceRead:
     """Map a data source row."""
     return DataSourceRead(
@@ -132,7 +95,6 @@ def table_read(row: CatalogTableRow) -> CatalogTableRead:
     return CatalogTableRead(
         id=row.id,
         asset_id=row.asset_id,
-        scope_id=row.scope_id,
         data_source_id=row.data_source_id,
         name=row.name,
         display_name=row.display_name,
@@ -238,7 +200,6 @@ def source_binding_read(row: SourceEngineBindingRow) -> SourceBindingRead:
         binding_key=row.binding_key,
         engine_type=EngineType(row.engine_type),
         configuration=_load(SourceBindingConfig, row.configuration),
-        default_scope_id=row.default_scope_id,
         capabilities=_load(SourceCapabilities, row.capabilities),
         created_at=_aware(row.created_at),
         updated_at=_aware(row.updated_at),

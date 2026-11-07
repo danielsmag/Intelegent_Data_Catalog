@@ -23,18 +23,12 @@ from intelegent_data_catalog.entity_configuration import (
 )
 from intelegent_data_catalog.exceptions import CatalogError
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
-from intelegent_data_catalog.knowledge.models import (
-    ScopeContextOptions,
-    SpaceContextOptions,
-    TableContextOptions,
-)
+from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.enums import AssetStatus, RefreshSubjectKind, TableStatus
 from intelegent_data_catalog.persistence.models import (
     AssetRow,
     CatalogTableRow,
     EntityConfigurationRow,
-    ScopeRow,
-    SpaceRow,
 )
 
 _LOGGER: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.jobs")
@@ -137,33 +131,7 @@ class ContextRefreshService:
                 parse_model_id(row.model),
                 parse_effort(row.effort),
             )
-        scope_id: UUID | None = row.scope_id
-        if scope_id is not None:
-            scope: ScopeRow | None = self._session.get(ScopeRow, scope_id)
-            if scope is None:
-                return None
-            return _QueuedRebuild(
-                RefreshSubjectKind.SCOPE,
-                scope.id,
-                scope.name,
-                options,
-                parse_model_id(row.model),
-                parse_effort(row.effort),
-            )
-        space_id: UUID | None = row.space_id
-        if space_id is None:
-            return None
-        space: SpaceRow | None = self._session.get(SpaceRow, space_id)
-        if space is None:
-            return None
-        return _QueuedRebuild(
-            RefreshSubjectKind.SPACE,
-            space.id,
-            space.name,
-            options,
-            parse_model_id(row.model),
-            parse_effort(row.effort),
-        )
+        return None
 
     def _start(self, planned: _QueuedRebuild) -> None:
         if planned.kind is RefreshSubjectKind.ASSET:
@@ -188,20 +156,6 @@ class ContextRefreshService:
             )
             _LOGGER.info("queued table context rebuild table_id=%s", planned.subject_id)
             return
-        if planned.kind is RefreshSubjectKind.SCOPE:
-            self._jobs.start_scope(
-                planned.subject_id,
-                planned.name,
-                _scope_options(planned.options, planned.model, planned.effort),
-            )
-            _LOGGER.info("queued scope context rebuild scope_id=%s", planned.subject_id)
-            return
-        self._jobs.start_space(
-            planned.subject_id,
-            planned.name,
-            _space_options(planned.options, planned.model, planned.effort),
-        )
-        _LOGGER.info("queued space context rebuild space_id=%s", planned.subject_id)
 
 
 def _table_options(
@@ -218,34 +172,3 @@ def _table_options(
         effort=effort,
     )
 
-
-def _scope_options(
-    raw: dict[str, object],
-    model: ModelId,
-    effort: ReasoningEffort,
-) -> ScopeContextOptions:
-    values: dict[str, bool] = option_values(RefreshSubjectKind.SCOPE, raw)
-    return ScopeContextOptions(
-        include_table_knowledge=values["include_table_knowledge"],
-        include_previous=values["include_previous"],
-        include_summary=values["include_summary"],
-        include_airflow=values["include_airflow"],
-        model=model,
-        effort=effort,
-    )
-
-
-def _space_options(
-    raw: dict[str, object],
-    model: ModelId,
-    effort: ReasoningEffort,
-) -> SpaceContextOptions:
-    values: dict[str, bool] = option_values(RefreshSubjectKind.SPACE, raw)
-    return SpaceContextOptions(
-        include_scope_knowledge=values["include_scope_knowledge"],
-        include_previous=values["include_previous"],
-        include_summary=values["include_summary"],
-        include_airflow=values["include_airflow"],
-        model=model,
-        effort=effort,
-    )

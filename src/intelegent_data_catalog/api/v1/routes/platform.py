@@ -5,7 +5,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.dependencies import (
@@ -16,7 +15,6 @@ from intelegent_data_catalog.api.dependencies import (
     SyncScheduleDep,
     get_container,
 )
-from intelegent_data_catalog.api.visibility import filter_trace_job_ids
 from intelegent_data_catalog.catalog.models import QueryResult
 from intelegent_data_catalog.core.settings import CelerySettings, ModelId, ReasoningEffort
 from intelegent_data_catalog.exceptions import (
@@ -32,8 +30,6 @@ from intelegent_data_catalog.jobs.models import (
     CatalogJobCancelRead,
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
-    ScopeBuildJobRead,
-    SpaceBuildJobRead,
 )
 from intelegent_data_catalog.jobs.trace import (
     BuildTraceEvent,
@@ -46,10 +42,6 @@ from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
     ContextSubjectKind,
-    ScopeAnalysisContext,
-    ScopeContextOptions,
-    SpaceAnalysisContext,
-    SpaceContextOptions,
     TableAnalysisContext,
     TableContextOptions,
 )
@@ -93,26 +85,8 @@ class KnowledgeContextRequest(BaseModel):
     include_lineage: bool = True
 
 
-class ScopeContextRequest(BaseModel):
-    """Which slices a scope build should load."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    include_table_knowledge: bool = True
-    include_previous: bool = True
-    include_summary: bool = True
-    include_airflow: bool = True
 
 
-class SpaceContextRequest(BaseModel):
-    """Which slices a space build should load."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    include_scope_knowledge: bool = True
-    include_previous: bool = True
-    include_summary: bool = True
-    include_airflow: bool = True
 
 
 class AirflowContextRequest(BaseModel):
@@ -143,11 +117,10 @@ def sync_source_binding(source_binding_id: UUID, platform: PlatformDep) -> SyncR
 @router.get("/search", response_model=SearchResponse)
 def search_catalog(
     platform: PlatformDep,
-    access: AccessDep,
     q: Annotated[str, Query(min_length=1, max_length=200)],
 ) -> SearchResponse:
-    """Search PostgreSQL catalog text the active workspace can see."""
-    return platform.annotations.search(q, space_ids=access.visible_space_ids)
+    """Search PostgreSQL catalog text."""
+    return platform.annotations.search(q)
 
 
 @router.get("/tags", response_model=list[TagRead])
@@ -296,119 +269,24 @@ def read_knowledge_graph(table_id: UUID, platform: PlatformDep) -> GraphView:
     return platform.graph.knowledge_subgraph(table_id)
 
 
-@router.get("/scopes/{scope_id}/graph", response_model=GraphView)
-def read_scope_graph(scope_id: UUID, platform: PlatformDep) -> GraphView:
-    """Return tables in a scope and the relationships between them."""
-    return platform.graph.scope_overview(scope_id)
 
 
-@router.get("/spaces/{space_id}/graph", response_model=GraphView)
-def read_space_graph(space_id: UUID, platform: PlatformDep) -> GraphView:
-    """Return scopes, tables, and catalog relationships in one space."""
-    return platform.graph.space_overview(space_id)
 
 
-@router.get("/scopes/{scope_id}/knowledge-graph", response_model=GraphView)
-def read_scope_knowledge_graph(scope_id: UUID, platform: PlatformDep) -> GraphView:
-    """Return the Neo4j table subgraph owned by this scope."""
-    return platform.graph.scope_knowledge_subgraph(scope_id)
 
 
-@router.get("/scopes/{scope_id}/knowledge-context", response_model=ScopeAnalysisContext)
-def read_scope_knowledge_context(scope_id: UUID, platform: PlatformDep) -> ScopeAnalysisContext:
-    """Return the context last built for this scope."""
-    return platform.read_scope_context(scope_id)
 
 
-@router.post(
-    "/scopes/{scope_id}/knowledge-context",
-    response_model=ScopeBuildJobRead,
-    status_code=202,
-)
-def build_scope_knowledge_context(
-    scope_id: UUID,
-    platform: PlatformDep,
-    builds: CatalogJobsDep,
-    configurations: EntityConfigurationDep,
-    body: ScopeContextRequest | None = None,
-) -> ScopeBuildJobRead:
-    """Start a scope build and return before the model finishes.
-
-    Accepted links replace prior LLM relationships for tables in this scope.
-    """
-    scope_name: str = platform.scopes.get_scope(scope_id).name
-    selected: ScopeContextRequest = body if body is not None else ScopeContextRequest()
-    options: ScopeContextOptions = ScopeContextOptions(
-        include_table_knowledge=selected.include_table_knowledge,
-        include_previous=selected.include_previous,
-        include_summary=selected.include_summary,
-        include_airflow=selected.include_airflow,
-        model=configurations.saved_model(RefreshSubjectKind.SCOPE, scope_id),
-        effort=configurations.saved_effort(RefreshSubjectKind.SCOPE, scope_id),
-    )
-    return builds.start_scope(scope_id, scope_name, options)
 
 
-@router.get("/scope-builds/{job_id}", response_model=ScopeBuildJobRead)
-def read_scope_build(job_id: UUID, builds: CatalogJobsDep) -> ScopeBuildJobRead:
-    """Return one background scope build."""
-    job: ScopeBuildJobRead | None = builds.get_scope(job_id)
-    if job is None:
-        raise EntityNotFoundError("scope build", str(job_id))
-    return job
 
 
-@router.get(
-    "/scopes/{scope_id}/knowledge-context/build",
-    response_model=ScopeBuildJobRead,
-)
-def read_latest_scope_build(scope_id: UUID, builds: CatalogJobsDep) -> ScopeBuildJobRead:
-    """Return the newest context build for a scope."""
-    job: ScopeBuildJobRead | None = builds.latest_scope(scope_id)
-    if job is None:
-        raise EntityNotFoundError("scope build", str(scope_id))
-    return job
 
 
-@router.get("/spaces/{space_id}/knowledge-graph", response_model=GraphView)
-def read_space_knowledge_graph(space_id: UUID, platform: PlatformDep) -> GraphView:
-    """Return the Neo4j subgraph owned by this space."""
-    return platform.graph.space_knowledge_subgraph(space_id)
 
 
-@router.get("/spaces/{space_id}/knowledge-context", response_model=SpaceAnalysisContext)
-def read_space_knowledge_context(space_id: UUID, platform: PlatformDep) -> SpaceAnalysisContext:
-    """Return the context last built for this space."""
-    return platform.read_space_context(space_id)
 
 
-@router.post(
-    "/spaces/{space_id}/knowledge-context",
-    response_model=SpaceBuildJobRead,
-    status_code=202,
-)
-def build_space_knowledge_context(
-    space_id: UUID,
-    platform: PlatformDep,
-    builds: CatalogJobsDep,
-    configurations: EntityConfigurationDep,
-    body: SpaceContextRequest | None = None,
-) -> SpaceBuildJobRead:
-    """Start a space build and return before the model finishes.
-
-    Accepted links replace prior cross-scope LLM relationships in this space.
-    """
-    space_name: str = platform.spaces.get_space(space_id).name
-    selected: SpaceContextRequest = body if body is not None else SpaceContextRequest()
-    options: SpaceContextOptions = SpaceContextOptions(
-        include_scope_knowledge=selected.include_scope_knowledge,
-        include_previous=selected.include_previous,
-        include_summary=selected.include_summary,
-        include_airflow=selected.include_airflow,
-        model=configurations.saved_model(RefreshSubjectKind.SPACE, space_id),
-        effort=configurations.saved_effort(RefreshSubjectKind.SPACE, space_id),
-    )
-    return builds.start_space(space_id, space_name, options)
 
 
 @router.post("/catalog-jobs/{job_id}/cancel", response_model=CatalogJobCancelRead)
@@ -432,80 +310,14 @@ def cancel_catalog_job(
     return cancelled
 
 
-@router.get("/space-builds/{job_id}", response_model=SpaceBuildJobRead)
-def read_space_build(job_id: UUID, builds: CatalogJobsDep) -> SpaceBuildJobRead:
-    """Return one background space build."""
-    job: SpaceBuildJobRead | None = builds.get_space(job_id)
-    if job is None:
-        raise EntityNotFoundError("space build", str(job_id))
-    return job
 
 
-@router.get(
-    "/spaces/{space_id}/knowledge-context/build",
-    response_model=SpaceBuildJobRead,
-)
-def read_latest_space_build(space_id: UUID, builds: CatalogJobsDep) -> SpaceBuildJobRead:
-    """Return the newest context build for a space."""
-    job: SpaceBuildJobRead | None = builds.latest_space(space_id)
-    if job is None:
-        raise EntityNotFoundError("space build", str(space_id))
-    return job
 
 
-@router.post(
-    "/spaces/{space_id}/context/generate",
-    response_model=ContextGenerationJobRead,
-    status_code=202,
-)
-def generate_space_context(
-    space_id: UUID,
-    platform: PlatformDep,
-    builds: CatalogJobsDep,
-    configurations: EntityConfigurationDep,
-) -> ContextGenerationJobRead:
-    """Start a space context write and return before the model finishes."""
-    space_name: str = platform.spaces.get_space(space_id).name
-    return _start_context(
-        builds,
-        space_id,
-        space_name,
-        "space",
-        configurations.saved_model(RefreshSubjectKind.SPACE, space_id),
-        configurations.saved_effort(RefreshSubjectKind.SPACE, space_id),
-    )
 
 
-@router.get("/spaces/{space_id}/context/generation", response_model=ContextGenerationJobRead)
-def read_latest_space_context_generation(
-    space_id: UUID,
-    builds: CatalogJobsDep,
-) -> ContextGenerationJobRead:
-    """Return the newest space context generation."""
-    return _latest_context(builds, space_id, "space")
 
 
-@router.post(
-    "/scopes/{scope_id}/context/generate",
-    response_model=ContextGenerationJobRead,
-    status_code=202,
-)
-def generate_scope_context(
-    scope_id: UUID,
-    platform: PlatformDep,
-    builds: CatalogJobsDep,
-    configurations: EntityConfigurationDep,
-) -> ContextGenerationJobRead:
-    """Start a scope context write and return before the model finishes."""
-    scope_name: str = platform.scopes.get_scope(scope_id).name
-    return _start_context(
-        builds,
-        scope_id,
-        scope_name,
-        "scope",
-        configurations.saved_model(RefreshSubjectKind.SCOPE, scope_id),
-        configurations.saved_effort(RefreshSubjectKind.SCOPE, scope_id),
-    )
 
 
 @router.post(
@@ -586,13 +398,6 @@ def read_context_generation(job_id: UUID, builds: CatalogJobsDep) -> ContextGene
     return job
 
 
-@router.get("/scopes/{scope_id}/context/generation", response_model=ContextGenerationJobRead)
-def read_latest_scope_context_generation(
-    scope_id: UUID,
-    builds: CatalogJobsDep,
-) -> ContextGenerationJobRead:
-    """Return the newest scope context generation."""
-    return _latest_context(builds, scope_id, "scope")
 
 
 @router.get("/tables/{table_id}/context/generation", response_model=ContextGenerationJobRead)
@@ -713,7 +518,6 @@ def read_latest_airflow_context_generation(
 @router.get("/build-traces", response_model=BuildTraceList)
 def read_build_traces(
     container: Annotated[AppContainer, Depends(get_container)],
-    access: AccessDep,
     after: Annotated[str | None, Query()] = None,
     jobs: Annotated[str | None, Query()] = None,
 ) -> BuildTraceList:
@@ -728,14 +532,7 @@ def read_build_traces(
     wanted: set[UUID] = {event.job_id for event in events}
     wanted.update(_trace_job_ids(jobs))
     loaded: list[CatalogJobRow] = CatalogJobStore(container.database()).statuses(wanted)
-    trace_session: Session = container.database().session()
-    try:
-        allowed_jobs: set[UUID] = filter_trace_job_ids(trace_session, loaded, access)
-    finally:
-        trace_session.close()
-    rows: list[CatalogJobRow] = [row for row in loaded if row.id in allowed_jobs]
-    hidden_jobs: set[UUID] = {row.id for row in loaded if row.id not in allowed_jobs}
-    events = [event for event in events if event.job_id not in hidden_jobs]
+    rows: list[CatalogJobRow] = loaded
     states: list[BuildTraceJob] = []
     row: CatalogJobRow
     for row in rows:

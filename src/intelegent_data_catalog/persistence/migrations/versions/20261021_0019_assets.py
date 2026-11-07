@@ -154,6 +154,8 @@ def _create_assets(bind: Connection) -> None:
 def _create_memberships(bind: Connection) -> None:
     if "asset_memberships" in _tables(bind):
         return
+    if "spaces" not in _tables(bind) or "scopes" not in _tables(bind):
+        return
     op.create_table(
         "asset_memberships",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -298,9 +300,12 @@ def _backfill_tables(bind: Connection) -> None:
     if workspace_id is None:
         return
     used: set[tuple[str, str]] = _used_slugs(bind)
+    has_scope: bool = "scope_id" in _column_names(bind, "catalog_tables")
+    scope_sql: str = "scope_id" if has_scope else "NULL"
     rows: CursorResult[tuple[object, ...]] = bind.execute(
         sa.text(
-            "SELECT id, name, description, context, context_origin, scope_id, status, "
+            "SELECT id, name, description, context, context_origin, "
+            f"{scope_sql}, status, "
             "source_key, table_format, last_synced_at, created_at, updated_at "
             "FROM catalog_tables WHERE asset_id IS NULL"
         )
@@ -633,6 +638,8 @@ def _insert_membership(
     scope_id: uuid.UUID | None,
     created_at: datetime,
 ) -> None:
+    if "asset_memberships" not in _tables(bind):
+        return
     if space_id is None and scope_id is None:
         return
     if scope_id is not None:

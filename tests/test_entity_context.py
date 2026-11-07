@@ -1,4 +1,4 @@
-"""Business context written through the table and scope agents."""
+"""Business context written through the table agent."""
 
 import json
 from collections.abc import Callable
@@ -19,20 +19,6 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.graph.document import GraphView
 from intelegent_data_catalog.knowledge.context.catalog import PostgresCatalogContextProvider
 from intelegent_data_catalog.knowledge.context.lineage import EmptyLineageReader
-from intelegent_data_catalog.knowledge.context.scope_catalog import (
-    MergedTableKnowledgeReader,
-    PostgresScopeCatalogContextProvider,
-)
-from intelegent_data_catalog.knowledge.context.space_catalog import (
-    MergedScopeKnowledgeReader,
-    PostgresSpaceCatalogContextProvider,
-)
-from intelegent_data_catalog.knowledge.factories.scope_agent_factory import (
-    build_scope_agent_factory,
-)
-from intelegent_data_catalog.knowledge.factories.space_agent_factory import (
-    build_space_agent_factory,
-)
 from intelegent_data_catalog.knowledge.factories.table_agent_factory import (
     TableAgentFactory,
     build_table_agent_factory,
@@ -54,29 +40,20 @@ from intelegent_data_catalog.knowledge.models import (
     TableDataProfile,
 )
 from intelegent_data_catalog.knowledge.profiling.profiler import UnconfiguredDataProfiler
-from intelegent_data_catalog.knowledge.store import (
-    KnowledgeContextStore,
-    ScopeKnowledgeContextStore,
-    SemanticContextStore,
-    SpaceKnowledgeContextStore,
-)
+from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
 from intelegent_data_catalog.llm.agent import TableModelAgent
 from intelegent_data_catalog.llm.catalog import TableOperationAgent
-from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
-from intelegent_data_catalog.llm.space_context import SpaceContextAgent
 from intelegent_data_catalog.llm.tools.table import TableToolSource
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import ContextOrigin, DataSourceType, TableKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
-from intelegent_data_catalog.persistence.models import ColumnRow, ScopeRow, SpaceRow
+from intelegent_data_catalog.persistence.models import ColumnRow
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
     CatalogTableCreate,
     ColumnCreate,
     DataSourceCreate,
-    ScopeCreate,
     SourceRef,
-    SpaceCreate,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_knowledge_builder import _context
@@ -97,25 +74,9 @@ def test_context_writers_disable_thinking() -> None:
         max_tokens=32,
         timeout_seconds=1.0,
     )
-    scope: ScopeContextAgent = ScopeContextAgent(
-        model,
-        max_requests=1,
-        temperature=0.0,
-        max_tokens=32,
-        timeout_seconds=1.0,
-    )
-    space: SpaceContextAgent = SpaceContextAgent(
-        model,
-        max_requests=1,
-        temperature=0.0,
-        max_tokens=32,
-        timeout_seconds=1.0,
-    )
     assert table._table._settings["thinking"] is False
     assert table._columns._settings["thinking"] is False
     assert table._column._settings["thinking"] is False
-    assert scope._call._settings["thinking"] is False
-    assert space._call._settings["thinking"] is False
 
 
 def test_table_agent_retries_an_invented_column() -> None:
@@ -227,98 +188,6 @@ def test_table_agent_describes_columns_in_batches(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_scope_agent_describes_the_scope(tmp_path: Path) -> None:
-    """The scope prompt carries table names and the row stores LLM origin."""
-    database: CatalogDatabase = _database(tmp_path)
-    session: Session = database.session()
-    try:
-        table_id: UUID = _table(session)
-        scope_id: UUID = open_registry(session).tables.get_table(table_id).scope_id
-        prompts: list[str] = []
-
-        def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-            del info
-            prompts.append(_user_text(messages))
-            return _text_response("Ordering covers checkout.")
-
-        agent: ScopeContextAgent = ScopeContextAgent(
-            FunctionModel(respond),
-            max_requests=2,
-            temperature=0.0,
-            max_tokens=256,
-            timeout_seconds=5.0,
-        )
-        written: str = (
-            build_scope_agent_factory(
-                PostgresScopeCatalogContextProvider(
-                    RegistryRepository(session),
-                    MergedTableKnowledgeReader([]),
-                    ScopeKnowledgeContextStore(session),
-                ),
-                describer=agent,
-                context_writer=SemanticContextStore(session),
-            )
-            .create(scope_id)
-            .describe()
-        )
-        assert written == "Ordering covers checkout."
-        stored: ScopeRow | None = session.get(ScopeRow, scope_id)
-        assert stored is not None
-        assert stored.context == "Ordering covers checkout."
-        assert stored.context_origin == ContextOrigin.LLM.value
-        assert "orders" in prompts[0]
-    finally:
-        session.close()
-        database.dispose()
-
-
-def test_space_agent_describes_the_space(tmp_path: Path) -> None:
-    """The space prompt carries scope and table names and the row stores LLM origin."""
-    database: CatalogDatabase = _database(tmp_path)
-    session: Session = database.session()
-    try:
-        table_id: UUID = _table(session)
-        scope_id: UUID = open_registry(session).tables.get_table(table_id).scope_id
-        space_id: UUID = open_registry(session).scopes.get_scope(scope_id).space_id
-        prompts: list[str] = []
-
-        def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-            del info
-            prompts.append(_user_text(messages))
-            return _text_response("Commerce covers sales.")
-
-        agent: SpaceContextAgent = SpaceContextAgent(
-            FunctionModel(respond),
-            max_requests=2,
-            temperature=0.0,
-            max_tokens=256,
-            timeout_seconds=5.0,
-        )
-        written: str = (
-            build_space_agent_factory(
-                PostgresSpaceCatalogContextProvider(
-                    RegistryRepository(session),
-                    MergedScopeKnowledgeReader([]),
-                    SpaceKnowledgeContextStore(session),
-                ),
-                describer=agent,
-                context_writer=SemanticContextStore(session),
-            )
-            .create(space_id)
-            .describe()
-        )
-        assert written == "Commerce covers sales."
-        stored: SpaceRow | None = session.get(SpaceRow, space_id)
-        assert stored is not None
-        assert stored.context == "Commerce covers sales."
-        assert stored.context_origin == ContextOrigin.LLM.value
-        assert "Ordering" in prompts[0]
-        assert "orders" in prompts[0]
-    finally:
-        session.close()
-        database.dispose()
-
-
 class _NoGraph:
     def relationships(self, table_id: UUID, depth: int) -> GraphView:
         del table_id, depth
@@ -400,13 +269,10 @@ def _database(tmp_path: Path) -> CatalogDatabase:
 
 def _table(session: Session) -> UUID:
     service: OpenRegistry = open_registry(session)
-    space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-    scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
     source_id: UUID = service.sources.create_data_source(
         DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
     ).id
     return service.tables.create_table(
-        scope_id,
         CatalogTableCreate(
             data_source_id=source_id,
             name="orders",

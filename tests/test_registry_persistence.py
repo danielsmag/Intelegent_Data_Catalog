@@ -6,16 +6,11 @@ from uuid import UUID
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import delete, inspect
+from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.exceptions import (
-    ConflictError,
-    EntityNotFoundError,
-    ValidationAppError,
-)
+from intelegent_data_catalog.exceptions import ConflictError, ValidationAppError
 from intelegent_data_catalog.persistence import migrate as migrate_module
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import (
@@ -24,14 +19,11 @@ from intelegent_data_catalog.persistence.enums import (
     ContextOrigin,
     DataSourceType,
     EngineType,
-    RelationshipOrigin,
-    RelationshipStatus,
-    RelationshipType,
     TableKind,
     TableStatus,
 )
 from intelegent_data_catalog.persistence.migrate import upgrade_database
-from intelegent_data_catalog.persistence.models import AssetEngineBindingRow, SpaceRow
+from intelegent_data_catalog.persistence.models import AssetEngineBindingRow
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingCreate,
@@ -39,29 +31,19 @@ from intelegent_data_catalog.registry.schemas import (
     CatalogTableRead,
     CatalogTableUpdate,
     ColumnCreate,
-    ColumnMappingWrite,
     ColumnObservation,
     ColumnUpdate,
     DataSourceCreate,
     EngineConnectionCreate,
     EngineRef,
-    RelationshipCreate,
-    RelationshipRead,
-    ScopeCreate,
-    ScopeUpdate,
     SourceBindingCreate,
-    SourceBindingRead,
     SourceRef,
     SourceSnapshot,
-    SpaceCreate,
-    SpaceUpdate,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 
 _CORE_TABLES: frozenset[str] = frozenset(
     {
-        "spaces",
-        "scopes",
         "data_sources",
         "catalog_tables",
         "columns",
@@ -71,8 +53,6 @@ _CORE_TABLES: frozenset[str] = frozenset(
         "source_engine_bindings",
         "asset_engine_bindings",
         "metadata_sync_runs",
-        "scope_knowledge_contexts",
-        "space_knowledge_contexts",
     }
 )
 
@@ -98,53 +78,15 @@ def test_scope_migration_allows_llm_origin_after_upgrade(tmp_path: Path) -> None
     config.set_main_option("script_location", str(script))
     config.set_main_option("sqlalchemy.url", url)
     command.downgrade(config, "20261007_0003")
-    command.upgrade(config, "head")
+    command.upgrade(config, "20261009_0004")
     database: CatalogDatabase = CatalogDatabase(url)
-    session: Session = database.session()
-    service: OpenRegistry = open_registry(session)
     engine: Engine = _engine(database)
     try:
         names: set[str] = set(inspect(engine).get_table_names())
         assert "scope_knowledge_contexts" in names
-        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-        scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        source_id: UUID = service.sources.create_data_source(
-            DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
-        ).id
-        orders: CatalogTableRead = _table(
-            service, scope_id, source_id, "polaris", "sales", "orders"
-        )
-        customers: CatalogTableRead = _table(
-            service, scope_id, source_id, "polaris", "sales", "customers"
-        )
-        source_column: UUID = service.tables.create_column(
-            orders.id,
-            ColumnCreate(name="customer_id", data_type="bigint", ordinal_position=0),
-        ).id
-        target_column: UUID = service.tables.create_column(
-            customers.id,
-            ColumnCreate(name="id", data_type="bigint", ordinal_position=0, is_primary_key=True),
-        ).id
-        created: RelationshipRead = service.relationships.create_relationship(
-            RelationshipCreate(
-                source_table_id=orders.id,
-                target_table_id=customers.id,
-                relationship_type=RelationshipType.FOREIGN_KEY,
-                origin=RelationshipOrigin.LLM,
-                status=RelationshipStatus.UNVERIFIED,
-                description="customer_id points at the customer key",
-                column_mappings=[
-                    ColumnMappingWrite(
-                        source_column_id=source_column,
-                        target_column_id=target_column,
-                        position=0,
-                    )
-                ],
-            )
-        )
-        assert created.origin == RelationshipOrigin.LLM
+        origin: str = _check_sql(engine, "relationships", "ck_relationships_origin")
+        assert "LLM" in origin
     finally:
-        session.close()
         engine.dispose()
         database.dispose()
 
@@ -168,7 +110,7 @@ def test_space_migration_adds_context_and_the_snapshot_table(tmp_path: Path) -> 
     finally:
         engine.dispose()
         database.dispose()
-    command.upgrade(config, "head")
+    command.upgrade(config, "20261011_0006")
     upgraded: CatalogDatabase = CatalogDatabase(url)
     upgraded_engine: Engine = _engine(upgraded)
     try:
@@ -204,7 +146,7 @@ def test_airflow_knowledge_migration_adds_attachments_and_widens_checks(tmp_path
     finally:
         engine.dispose()
         database.dispose()
-    command.upgrade(config, "head")
+    command.upgrade(config, "20261013_0012")
     upgraded: CatalogDatabase = CatalogDatabase(url)
     upgraded_engine: Engine = _engine(upgraded)
     try:
@@ -239,117 +181,41 @@ def _check_sql(engine: Engine, table: str, name: str) -> str:
     raise AssertionError(f"missing check {name}")
 
 
-def test_space_delete_is_restricted_while_a_scope_exists(tmp_path: Path) -> None:
-    """A space row cannot disappear while a scope still points at it."""
-    database: CatalogDatabase = _database(tmp_path)
-    session: Session = database.session()
-    service: OpenRegistry = open_registry(session)
-    try:
-        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-        service.scopes.create_scope(space_id, ScopeCreate(name="Ordering"))
-        with pytest.raises(IntegrityError):
-            session.execute(delete(SpaceRow).where(SpaceRow.id == space_id))
-            session.commit()
-    finally:
-        session.close()
-        database.dispose()
-
-
-def test_scope_delete_clears_default_on_source_bindings(tmp_path: Path) -> None:
-    """Dropping a scope unsets it as the default. Other defaults stay."""
-    database: CatalogDatabase = _database(tmp_path)
-    session: Session = database.session()
-    service: OpenRegistry = open_registry(session)
-    try:
-        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-        dropped_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        kept_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Billing")).id
-        source_id: UUID = service.sources.create_data_source(
-            DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
-        ).id
-        engine_id: UUID = service.engines.create_engine_connection(
-            EngineConnectionCreate(
-                name="Trino",
-                engine_type=EngineType.TRINO,
-                endpoint="http://trino:8080",
-            )
-        ).id
-        dropped_binding: SourceBindingRead = service.bindings.create_source_binding(
-            SourceBindingCreate(
-                data_source_id=source_id,
-                engine_connection_id=engine_id,
-                binding_key="lake",
-                default_scope_id=dropped_id,
-            )
-        )
-        kept_binding: SourceBindingRead = service.bindings.create_source_binding(
-            SourceBindingCreate(
-                data_source_id=source_id,
-                engine_connection_id=engine_id,
-                binding_key="billing",
-                default_scope_id=kept_id,
-            )
-        )
-        service.scopes.delete_scope(dropped_id)
-        cleared: SourceBindingRead = service.bindings.get_source_binding(dropped_binding.id)
-        assert cleared.default_scope_id is None
-        untouched: SourceBindingRead = service.bindings.get_source_binding(kept_binding.id)
-        assert untouched.default_scope_id == kept_id
-        with pytest.raises(EntityNotFoundError, match="scope"):
-            service.scopes.get_scope(dropped_id)
-    finally:
-        session.close()
-        database.dispose()
-
-
 def test_source_key_is_case_sensitive_per_data_source(tmp_path: Path) -> None:
     """Identical names stay distinct across sources, and key case is preserved."""
     database: CatalogDatabase = _database(tmp_path)
     session: Session = database.session()
     service: OpenRegistry = open_registry(session)
     try:
-        scope_id: UUID = _scope(service)
         iceberg_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
         postgres_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="App", type=DataSourceType.POSTGRES)
         ).id
-        first: str = _table(
-            service, scope_id, iceberg_id, "Lakehouse", "Sales", "Orders"
-        ).source_key
-        second: str = _table(
-            service, scope_id, iceberg_id, "lakehouse", "sales", "orders"
-        ).source_key
-        third: str = _table(
-            service, scope_id, postgres_id, "Lakehouse", "Sales", "Orders"
-        ).source_key
+        first: str = _table(service, iceberg_id, "Lakehouse", "Sales", "Orders").source_key
+        second: str = _table(service, iceberg_id, "lakehouse", "sales", "orders").source_key
+        third: str = _table(service, postgres_id, "Lakehouse", "Sales", "Orders").source_key
         assert first == "Lakehouse.Sales.Orders"
         assert second == "lakehouse.sales.orders"
         assert third == first
         with pytest.raises(ConflictError, match="source_key already exists"):
-            _table(service, scope_id, iceberg_id, "Lakehouse", "Sales", "Orders")
+            _table(service, iceberg_id, "Lakehouse", "Sales", "Orders")
     finally:
         session.close()
         database.dispose()
 
 
-def test_snapshot_preserves_user_description_scope_and_deprecated(tmp_path: Path) -> None:
-    """Imported fields change. User description, scope, and DEPRECATED do not."""
+def test_snapshot_preserves_user_description_and_deprecated(tmp_path: Path) -> None:
+    """Imported fields change. User description and DEPRECATED do not."""
     database: CatalogDatabase = _database(tmp_path)
     session: Session = database.session()
     service: OpenRegistry = open_registry(session)
     try:
-        scope_id: UUID = _scope(service)
-        other_scope: UUID = service.scopes.create_scope(
-            service.spaces.list_spaces()[0].id,
-            ScopeCreate(name="Payments"),
-        ).id
         source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
         table = service.tables.create_table(
-            scope_id,
             _table_body(source_id, "Lakehouse", "Sales", "Orders", description="User orders"),
         )
         service.tables.create_column(
@@ -358,9 +224,9 @@ def test_snapshot_preserves_user_description_scope_and_deprecated(tmp_path: Path
         )
         moved = service.tables.update_table(
             table.id,
-            _status_patch(TableStatus.DEPRECATED, other_scope),
+            CatalogTableUpdate(status=TableStatus.DEPRECATED),
         )
-        assert moved.scope_id == other_scope
+        assert moved.status is TableStatus.DEPRECATED
         observed = service.tables.apply_source_snapshot(
             table.id,
             SourceSnapshot(
@@ -380,7 +246,6 @@ def test_snapshot_preserves_user_description_scope_and_deprecated(tmp_path: Path
         assert observed.description == "User orders"
         assert observed.source_description == "Imported orders"
         assert observed.status is TableStatus.DEPRECATED
-        assert observed.scope_id == other_scope
         assert observed.row_count == 10
         assert observed.last_seen_at is not None
         columns = service.tables.list_columns(table.id)
@@ -410,24 +275,10 @@ def test_manual_context_records_user_origin_and_clearing_resets_it(tmp_path: Pat
     session: Session = database.session()
     service: OpenRegistry = open_registry(session)
     try:
-        scope_id: UUID = _scope(service)
-        written = service.scopes.update_scope(scope_id, ScopeUpdate(context="  Checkout scope.  "))
-        assert written.context == "Checkout scope."
-        assert written.context_origin is ContextOrigin.USER
-        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Retail")).id
-        space_written = service.spaces.update_space(
-            space_id,
-            SpaceUpdate(context="  Retail space.  "),
-        )
-        assert space_written.context == "Retail space."
-        assert space_written.context_origin is ContextOrigin.USER
-        cleared = service.scopes.update_scope(scope_id, ScopeUpdate(context="   "))
-        assert cleared.context is None
-        assert cleared.context_origin is None
         source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
-        table: CatalogTableRead = _table(service, scope_id, source_id, "polaris", "sales", "orders")
+        table: CatalogTableRead = _table(service, source_id, "polaris", "sales", "orders")
         table_written = service.tables.update_table(
             table.id,
             CatalogTableUpdate(context="Order facts."),
@@ -456,11 +307,10 @@ def test_selected_query_binding_is_unique_and_role_matches_engine(tmp_path: Path
     service: OpenRegistry = open_registry(session)
     repo: RegistryRepository = RegistryRepository(session)
     try:
-        scope_id: UUID = _scope(service)
         source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
-        table_id: UUID = _table(service, scope_id, source_id, "polaris", "sales", "orders").id
+        table_id: UUID = _table(service, source_id, "polaris", "sales", "orders").id
         spark_id: UUID = service.engines.create_engine_connection(
             EngineConnectionCreate(
                 name="Spark",
@@ -539,21 +389,15 @@ def _engine(database: CatalogDatabase) -> Engine:
     return create_engine(database.url)
 
 
-def _scope(service: OpenRegistry) -> UUID:
-    space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-    return service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
-
-
 def _table(
     service: OpenRegistry,
-    scope_id: UUID,
     data_source_id: UUID,
     catalog: str,
     namespace: str,
     table: str,
 ) -> CatalogTableRead:
     body: CatalogTableCreate = _table_body(data_source_id, catalog, namespace, table)
-    return service.tables.create_table(scope_id, body)
+    return service.tables.create_table(body)
 
 
 def _table_body(
@@ -575,10 +419,6 @@ def _table_body(
         source_ref=SourceRef(catalog=catalog, namespace=namespace, table=table),
         table_format="ICEBERG",
     )
-
-
-def _status_patch(status: TableStatus, scope_id: UUID) -> CatalogTableUpdate:
-    return CatalogTableUpdate(status=status, scope_id=scope_id)
 
 
 def _asset_body(

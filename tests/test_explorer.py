@@ -1,13 +1,10 @@
-"""Explorer tree, Trino browsing, and attaching source tables into a scope."""
+"""Explorer tree and Trino browsing."""
 
 import asyncio
 import logging
 from collections.abc import Callable
-from pathlib import Path
-from uuid import UUID
 
 import httpx
-import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
 
@@ -27,17 +24,11 @@ from intelegent_data_catalog.catalog.models import (
 )
 from intelegent_data_catalog.catalog.repositories.trino_browser import TrinoCatalogBrowser
 from intelegent_data_catalog.catalog.services.explorer_service import ExplorerService
-from intelegent_data_catalog.catalog.services.scope_attachment import ScopeAttachmentService
 from intelegent_data_catalog.exceptions import (
     PolarisError,
     TableNotFoundError,
     TrinoUnavailableError,
 )
-from intelegent_data_catalog.persistence.database import CatalogDatabase
-from intelegent_data_catalog.persistence.enums import DataSourceType, MetadataOrigin
-from intelegent_data_catalog.persistence.migrate import upgrade_database
-from intelegent_data_catalog.registry.schemas import ScopeAttachmentCreate, ScopeCreate, SpaceCreate
-from tests.registry_factory import OpenRegistry, open_registry
 
 
 def test_tree_keeps_trino_when_polaris_is_down() -> None:
@@ -82,135 +73,6 @@ def test_trino_sample_returns_rows() -> None:
     result: QueryResult = browser.sample("polaris", "sales", "customers", 10)
     assert result.rows == [[1, "Ada"]]
     assert [column.name for column in result.columns] == ["customer_id", "name"]
-
-
-def test_attach_schema_creates_tables_and_skips_duplicates(tmp_path: Path) -> None:
-    """Attaching a schema copies tables once, then reports tables already in the scope."""
-    database: CatalogDatabase = _database(tmp_path)
-    session = database.session()
-    registry: OpenRegistry = open_registry(session)
-    try:
-        scope_id: UUID = _scope(registry, "Sales")
-        service: ScopeAttachmentService = ScopeAttachmentService(
-            registry.scopes,
-            registry.tables,
-            registry.sources,
-            _service(_Browser([_customers(), _orders()], "iceberg"), None),
-        )
-        body: ScopeAttachmentCreate = ScopeAttachmentCreate(
-            source_id=POLARIS_SOURCE_ID,
-            catalog="catalog",
-            namespace="sales",
-            tables=None,
-        )
-        first = service.attach(scope_id, body)
-        assert [item.outcome.value for item in first.items] == ["created", "created"]
-        columns = registry.tables.list_columns(first.items[0].table_id or scope_id)
-        assert columns[0].name == "customer_id"
-        assert columns[0].data_type == "long"
-        assert columns[0].metadata_origin is MetadataOrigin.NATIVE
-        second = service.attach(scope_id, body)
-        outcomes: list[str] = [item.outcome.value for item in second.items]
-        assert outcomes == ["already_in_scope", "already_in_scope"]
-        sources = registry.sources.list_data_sources()
-        assert len(sources) == 1
-        assert sources[0].type is DataSourceType.ICEBERG_REST
-        assert sources[0].name == "Polaris catalog"
-    finally:
-        session.close()
-        database.dispose()
-
-
-def test_attach_reports_a_table_that_already_belongs_to_another_scope(tmp_path: Path) -> None:
-    """A table is not moved when another scope already registered it."""
-    database: CatalogDatabase = _database(tmp_path)
-    session = database.session()
-    registry: OpenRegistry = open_registry(session)
-    try:
-        first_scope: UUID = _scope(registry, "Sales")
-        second_scope: UUID = _scope(registry, "Finance")
-        service: ScopeAttachmentService = ScopeAttachmentService(
-            registry.scopes,
-            registry.tables,
-            registry.sources,
-            _service(_Browser([_customers()], "iceberg"), None),
-        )
-        body: ScopeAttachmentCreate = ScopeAttachmentCreate(
-            source_id=POLARIS_SOURCE_ID,
-            catalog="catalog",
-            namespace="sales",
-            tables=["customers"],
-        )
-        service.attach(first_scope, body)
-        moved = service.attach(second_scope, body)
-        assert moved.items[0].outcome.value == "already_elsewhere"
-        assert moved.items[0].scope_id == first_scope
-        assert len(registry.tables.list_tables(second_scope)) == 0
-    finally:
-        session.close()
-        database.dispose()
-
-
-def test_trino_postgres_catalog_uses_a_postgres_data_source(tmp_path: Path) -> None:
-    """A PostgreSQL Trino catalog is stored as a Postgres data source."""
-    database: CatalogDatabase = _database(tmp_path)
-    session = database.session()
-    registry: OpenRegistry = open_registry(session)
-    try:
-        scope_id: UUID = _scope(registry, "App")
-        service: ScopeAttachmentService = ScopeAttachmentService(
-            registry.scopes,
-            registry.tables,
-            registry.sources,
-            _service(_Browser([], "iceberg"), _Browser([_customers()], "postgresql")),
-        )
-        result = service.attach(
-            scope_id,
-            ScopeAttachmentCreate(
-                source_id=TRINO_SOURCE_ID,
-                catalog="appdb",
-                namespace="public",
-                tables=["customers"],
-            ),
-        )
-        assert result.items[0].outcome.value == "created"
-        stored = registry.tables.get_table(result.items[0].table_id or scope_id)
-        assert stored.table_format is None
-        assert stored.physical_catalog == "appdb"
-        source = registry.sources.list_data_sources()[0]
-        assert source.type is DataSourceType.POSTGRES
-        assert source.configuration["connector"] == "postgresql"
-    finally:
-        session.close()
-        database.dispose()
-
-
-def test_missing_table_is_not_attached(tmp_path: Path) -> None:
-    """A table name the source does not contain is a 404-class error."""
-    database: CatalogDatabase = _database(tmp_path)
-    session = database.session()
-    registry: OpenRegistry = open_registry(session)
-    try:
-        scope_id: UUID = _scope(registry, "Sales")
-        service: ScopeAttachmentService = ScopeAttachmentService(
-            registry.scopes,
-            registry.tables,
-            registry.sources,
-            _service(_Browser([_customers()], "iceberg"), None),
-        )
-        with pytest.raises(TableNotFoundError):
-            service.attach(
-                scope_id,
-                ScopeAttachmentCreate(
-                    source_id=POLARIS_SOURCE_ID,
-                    catalog="catalog",
-                    namespace="sales",
-                    tables=["missing"],
-                ),
-            )
-    finally:
-        session.close()
-        database.dispose()
 
 
 def test_explorer_route_returns_sources() -> None:
@@ -316,26 +178,6 @@ class _ScriptedTrino:
         return self._rows_for(sql)
 
 
-def _customers() -> ObservedTable:
-    return ObservedTable(
-        name="customers",
-        kind="TABLE",
-        columns=[
-            ObservedColumn(
-                name="customer_id",
-                type_name="long",
-                nullable=False,
-                comment=None,
-                ordinal_position=0,
-            )
-        ],
-    )
-
-
-def _orders() -> ObservedTable:
-    return ObservedTable(name="orders", kind="TABLE", columns=[])
-
-
 def _service(polaris: _Browser | _DownBrowser, trino: _Browser | None) -> ExplorerService:
     return ExplorerService(
         polaris=polaris,
@@ -358,6 +200,22 @@ def _tree_rows(sql: str) -> list[dict[str, object]]:
     raise TrinoUnavailableError(sql)
 
 
+def _customers() -> ObservedTable:
+    return ObservedTable(
+        name="customers",
+        kind="TABLE",
+        columns=[
+            ObservedColumn(
+                name="customer_id",
+                type_name="long",
+                nullable=False,
+                comment=None,
+                ordinal_position=0,
+            )
+        ],
+    )
+
+
 def _sample_rows(sql: str) -> list[dict[str, object]]:
     if "SHOW TABLES" in sql:
         return [{"table": "customers"}]
@@ -366,19 +224,10 @@ def _sample_rows(sql: str) -> list[dict[str, object]]:
     raise TrinoUnavailableError(sql)
 
 
-def _database(tmp_path: Path) -> CatalogDatabase:
-    url: str = f"sqlite:///{tmp_path / 'catalog.db'}"
-    upgrade_database(url)
-    return CatalogDatabase(url)
-
-
-def _scope(service: OpenRegistry, name: str) -> UUID:
-    space_id: UUID = service.spaces.create_space(SpaceCreate(name=name)).id
-    return service.scopes.create_scope(space_id, ScopeCreate(name=name)).id
-
-
 async def _request(app: FastAPI, path: str) -> httpx.Response:
     transport: httpx.ASGITransport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response: httpx.Response = await client.get(path)
         return response
+
+

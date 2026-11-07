@@ -28,7 +28,6 @@ class TableAssetDetail(BaseModel):
     table_id: UUID
     source_key: str
     table_format: str | None
-    scope_id: UUID | None
 
 
 class TableAssetAgentAdapter(AssetAgent):
@@ -109,7 +108,6 @@ class TableStrategy:
             table_id=table.id,
             source_key=table.source_key,
             table_format=table.table_format,
-            scope_id=table.scope_id,
         )
 
 

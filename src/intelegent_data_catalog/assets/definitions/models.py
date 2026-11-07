@@ -14,7 +14,7 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionRunStatus,
 )
 
-DefinitionFolder = Literal["spaces", "scopes", "assets"]
+DefinitionFolder = Literal["assets"]
 
 
 class TableSourceRef(BaseModel):
@@ -91,33 +91,8 @@ class OperatorRef(BaseModel):
     params: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-class SpaceSpec(BaseModel):
-    """One space declaration. ``set_fields`` lists arguments the file passed."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    slug: str
-    name: str | None = None
-    description: str | None = None
-    context: str | None = None
-    set_fields: list[str] = Field(default_factory=list)
-
-
-class ScopeSpec(BaseModel):
-    """One scope declaration inside a space slug."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    slug: str
-    space_slug: str
-    name: str | None = None
-    description: str | None = None
-    context: str | None = None
-    set_fields: list[str] = Field(default_factory=list)
-
-
 class AssetSpec(BaseModel):
-    """One asset declaration. The asset is not attached to a space or scope.
+    """One asset declaration.
 
     ``operator`` is absent only on items stored before operators ran. ``schedule``
     is a five-field cron, or null when the operator runs once on first apply.
@@ -158,8 +133,6 @@ class DefinitionSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    spaces: list[SpaceSpec] = Field(default_factory=list)
-    scopes: list[ScopeSpec] = Field(default_factory=list)
     assets: list[AssetSpec] = Field(default_factory=list)
 
 
@@ -190,8 +163,6 @@ class AssetDefinitionItemRead(BaseModel):
     item_key: str
     status: DefinitionItemStatus
     error: str | None
-    space_id: UUID | None
-    scope_id: UUID | None
     asset_id: UUID | None
     run_status: DefinitionRunStatus | None = None
     run_error: str | None = None

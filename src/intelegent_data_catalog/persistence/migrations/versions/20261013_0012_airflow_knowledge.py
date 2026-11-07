@@ -121,7 +121,10 @@ def _drop_context(bind: Connection) -> None:
 
 def _create_attachments(bind: Connection) -> None:
     inspector = inspect(bind)
-    if "airflow_attachments" in set(inspector.get_table_names()):
+    tables: set[str] = set(inspector.get_table_names())
+    if "airflow_attachments" in tables:
+        return
+    if "spaces" not in tables or "scopes" not in tables:
         return
     op.create_table(
         "airflow_attachments",

@@ -122,7 +122,7 @@ class AssetDefinitionRepository:
         return found
 
     def unresolved(self) -> list[AssetDefinitionItemRow]:
-        """Return unresolved items, spaces first, then scopes, then assets."""
+        """Return unresolved items."""
         statement = select(AssetDefinitionItemRow).where(
             AssetDefinitionItemRow.status == DefinitionItemStatus.UNRESOLVED.value,
         )
@@ -145,7 +145,7 @@ class AssetDefinitionRepository:
         return found
 
     def other_applied_claim(self, item: AssetDefinitionItemRow) -> bool:
-        """True when another applied item still holds this asset membership."""
+        """True when another applied item still names this asset."""
         if item.asset_id is None:
             return False
         statement = select(AssetDefinitionItemRow.id).where(
@@ -153,10 +153,6 @@ class AssetDefinitionRepository:
             AssetDefinitionItemRow.asset_id == item.asset_id,
             AssetDefinitionItemRow.status == DefinitionItemStatus.APPLIED.value,
         )
-        if item.scope_id is not None:
-            statement = statement.where(AssetDefinitionItemRow.scope_id == item.scope_id)
-        else:
-            statement = statement.where(AssetDefinitionItemRow.space_id == item.space_id)
         found: UUID | None = self._session.scalar(statement)
         return found is not None
 

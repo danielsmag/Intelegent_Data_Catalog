@@ -1,10 +1,10 @@
-"""Space, scope, and asset declarations. Constructing one registers it with the open file."""
+"""Asset declarations. Constructing one registers it with the open file."""
 
 import re
 
 from pydantic import JsonValue, ValidationError
 
-from intelegent_data_catalog.assets.definitions.models import AssetSpec, ScopeSpec, SpaceSpec
+from intelegent_data_catalog.assets.definitions.models import AssetSpec
 from intelegent_data_catalog.assets.dsl.collector import current_collector
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
 from intelegent_data_catalog.assets.dsl.operators import Operator
@@ -25,59 +25,10 @@ class _UnsetType:
 _UNSET: _UnsetType = _UnsetType()
 
 
-class Space:
-    """Declare a space. Missing spaces are created. Existing spaces are patched."""
-
-    def __init__(
-        self,
-        slug: str,
-        *,
-        name: str | _UnsetType | None = _UNSET,
-        description: str | _UnsetType | None = _UNSET,
-        context: str | _UnsetType | None = _UNSET,
-    ) -> None:
-        checked: str = _slug(slug, "slug")
-        spec: SpaceSpec = SpaceSpec(
-            slug=checked,
-            name=_optional_text(name, "name", required=True),
-            description=_optional_text(description, "description", required=False),
-            context=_optional_text(context, "context", required=False),
-            set_fields=_set_fields(
-                (("name", name), ("description", description), ("context", context)),
-            ),
-        )
-        current_collector().add_space(spec)
-
-
-class Scope:
-    """Declare a scope inside a space slug."""
-
-    def __init__(
-        self,
-        slug: str,
-        *,
-        space: str,
-        name: str | _UnsetType | None = _UNSET,
-        description: str | _UnsetType | None = _UNSET,
-        context: str | _UnsetType | None = _UNSET,
-    ) -> None:
-        spec: ScopeSpec = ScopeSpec(
-            slug=_slug(slug, "slug"),
-            space_slug=_slug(space, "space"),
-            name=_optional_text(name, "name", required=True),
-            description=_optional_text(description, "description", required=False),
-            context=_optional_text(context, "context", required=False),
-            set_fields=_set_fields(
-                (("name", name), ("description", description), ("context", context)),
-            ),
-        )
-        current_collector().add_scope(spec)
-
-
 class Asset:
     """Declare one asset and the operator that names its source and builds its context.
 
-    Assign the object to ``asset``. The asset is not placed in a space or scope.
+    Assign the object to ``asset``.
     ``key`` is the stable id and the visible name. There is no separate name argument.
     ``schedule`` is a five-field cron; omit it to run once when the asset is first applied.
     ``context`` is a manual override. Without it, the operator writes the context.

@@ -1,4 +1,4 @@
-"""Resolve a principal into a user row, memberships, and visible spaces."""
+"""Resolve a principal into a user row and workspace memberships."""
 
 from uuid import UUID, uuid4
 
@@ -14,24 +14,22 @@ from intelegent_data_catalog.exceptions import (
 )
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.constants import SHARED_WORKSPACE_ID
-from intelegent_data_catalog.persistence.enums import SpaceIsolationMode, WorkspaceRole
+from intelegent_data_catalog.persistence.enums import WorkspaceRole
 from intelegent_data_catalog.persistence.models import (
-    SpaceRow,
     UserRow,
     WorkspaceMemberRow,
     WorkspaceRow,
-    WorkspaceSpaceBindingRow,
 )
 
 
 class AccessService:
-    """Upsert the caller and decide which spaces the active workspace may see."""
+    """Upsert the caller and load workspace memberships."""
 
     def __init__(self, session: Session) -> None:
         self._session: Session = session
 
     def resolve(self, principal: Principal, workspace_header: str | None) -> AccessContext:
-        """Persist the user, check the workspace header, and load visible space ids."""
+        """Persist the user and check the workspace header."""
         user: UserRow = self._upsert(principal)
         self._session.commit()
         workspace_id: UUID | None = self._workspace_id(workspace_header, principal, user.id)
@@ -43,15 +41,12 @@ class AccessService:
         }
         if principal.is_admin:
             admin_ids.add(SHARED_WORKSPACE_ID)
-        unrestricted: bool = principal.is_admin and workspace_id is None
-        visible: frozenset[UUID] | None = self._visible(workspace_id, unrestricted)
         return AccessContext(
             principal=principal,
             user_id=user.id,
             workspace_id=workspace_id,
             member_workspace_ids=frozenset(member_ids),
             admin_workspace_ids=frozenset(admin_ids),
-            visible_space_ids=visible,
         )
 
     def _upsert(self, principal: Principal) -> UserRow:
@@ -111,23 +106,3 @@ class AccessService:
             )
         )
 
-    def _visible(self, workspace_id: UUID | None, unrestricted: bool) -> frozenset[UUID] | None:
-        if unrestricted:
-            return None
-        open_ids: set[UUID] = set(
-            self._session.scalars(
-                select(SpaceRow.id).where(
-                    SpaceRow.isolation_mode == SpaceIsolationMode.OPEN.value
-                )
-            )
-        )
-        if workspace_id is None:
-            return frozenset(open_ids)
-        bound: set[UUID] = set(
-            self._session.scalars(
-                select(WorkspaceSpaceBindingRow.space_id).where(
-                    WorkspaceSpaceBindingRow.workspace_id == workspace_id
-                )
-            )
-        )
-        return frozenset(open_ids | bound)

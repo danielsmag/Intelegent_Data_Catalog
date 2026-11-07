@@ -24,8 +24,6 @@ from intelegent_data_catalog.persistence.models import (
 )
 
 _FOLDERS: dict[DefinitionFolder, DefinitionKind] = {
-    "spaces": DefinitionKind.SPACE,
-    "scopes": DefinitionKind.SCOPE,
     "assets": DefinitionKind.ASSET,
 }
 
@@ -90,8 +88,6 @@ def _item_read(row: AssetDefinitionItemRow) -> AssetDefinitionItemRead:
         item_key=row.item_key,
         status=DefinitionItemStatus(row.status),
         error=row.error,
-        space_id=row.space_id,
-        scope_id=row.scope_id,
         asset_id=row.asset_id,
         run_status=None if row.run_status is None else DefinitionRunStatus(row.run_status),
         run_error=row.run_error,

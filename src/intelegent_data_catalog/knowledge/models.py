@@ -1,4 +1,4 @@
-"""Context objects for one catalog table or scope. Identifiers are catalog ids."""
+"""Context objects for catalog tables, columns, assets, and Airflow. Identifiers are catalog ids."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -68,31 +68,6 @@ class DataProfileOptions(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0, le=600)
 
 
-class ScopeSummary(BaseModel):
-    """Scope that owns a table."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    space_id: UUID
-    name: str
-    slug: str
-    description: str | None
-    context: str | None = None
-
-
-class SpaceSummary(BaseModel):
-    """Space that owns the scope."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    name: str
-    slug: str
-    description: str | None
-    context: str | None = None
-
-
 class TagSummary(BaseModel):
     """Tag attached to a table. The id is the catalog tag id."""
 
@@ -150,7 +125,7 @@ class TableRelation(BaseModel):
 
 
 class TableMetadata(BaseModel):
-    """Table identity plus the scope, space, and tags around it."""
+    """Table identity and the tags attached to it."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -162,16 +137,12 @@ class TableMetadata(BaseModel):
     table_type: TableKind
     status: TableStatus
     data_source_id: UUID
-    scope_id: UUID
-    space_id: UUID
     physical_catalog: str
     physical_namespace: str
     physical_table: str
     source_key: str
     row_count: int | None
     context: str | None = None
-    scope: ScopeSummary
-    space: SpaceSummary
     tags: list[TagSummary]
 
 
@@ -371,41 +342,6 @@ class TableLink(BaseModel):
         return cleaned
 
 
-class ScopeTableSummary(BaseModel):
-    """One table inside a scope, with the columns the scope agent may link."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    name: str
-    display_name: str | None
-    description: str | None
-    status: TableStatus
-    row_count: int | None
-    context: str | None = None
-    columns: list[ColumnMetadata]
-
-
-class TableKnowledgeInput(BaseModel):
-    """Column relations the table agent already stored for one table."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    table_id: UUID
-    column_relations: list[ColumnRelation]
-    source: Literal["postgres", "neo4j", "both"]
-
-
-class PreviousScopeFindings(BaseModel):
-    """Summary and links from the last scope build. The model may revise them."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    summary: str | None
-    links: list[TableLink]
-    built_at: datetime | None
-
-
 class PipelineTask(BaseModel):
     """One task on an attached DAG."""
 
@@ -566,169 +502,6 @@ def omitted_pipeline_names(text: str, pipelines: list[PipelineInput]) -> list[st
     return missing
 
 
-class AssetSummary(BaseModel):
-    """A non-table asset attached to a scope or space."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    kind: str
-    name: str
-    summary: str | None = None
-
-
-class ScopeCatalogContext(BaseModel):
-    """Everything known about one scope before the scope agent proposes links."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    scope: ScopeSummary
-    space: SpaceSummary
-    tables: list[ScopeTableSummary]
-    relationships: list[TableRelation]
-    table_knowledge: list[TableKnowledgeInput]
-    tables_without_context: list[UUID]
-    previous: PreviousScopeFindings | None
-    pipelines: list[PipelineInput] = Field(default_factory=list)
-    assets: list[AssetSummary] = Field(default_factory=list)
-
-
-class ScopeContextOptions(BaseModel):
-    """Which parts of scope context to load."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    include_table_knowledge: bool = True
-    include_previous: bool = True
-    include_summary: bool = True
-    include_airflow: bool = True
-    model: StoredModelId = "gpt-4.1"
-    effort: StoredEffort = "low"
-
-
-class ScopeProposal(BaseModel):
-    """Links and summary the scope model selected."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    summary: str = Field(default="", max_length=1200)
-    links: list[TableLink] = Field(default_factory=list, max_length=60)
-
-
-class ScopeAnalysisContext(BaseModel):
-    """Scope metadata, catalog relationships, accepted links, and the written summary."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    scope: ScopeSummary
-    space: SpaceSummary
-    tables: list[ScopeTableSummary]
-    existing_relationships: list[TableRelation]
-    table_links: list[TableLink] = Field(default_factory=list)
-    summary: str | None = None
-    tables_without_context: list[UUID] = Field(default_factory=list)
-    previous_links_kept: int = Field(default=0, ge=0)
-    pipelines: list[PipelineSummary] = Field(default_factory=list)
-
-
-class ScopeGraphEdge(BaseModel):
-    """Table-level edge from a scope knowledge subgraph. Scope nodes carry no column ids."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_table_id: UUID
-    target_table_id: UUID
-    kind: TableLinkKind
-    reason: str = Field(default="", max_length=280)
-
-
-class ScopeKnowledgeInput(BaseModel):
-    """What the scope agent already stored: column links plus the drawn table graph."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    scope_id: UUID
-    summary: str | None
-    links: list[TableLink] = Field(default_factory=list)
-    graph: list[ScopeGraphEdge] = Field(default_factory=list)
-    source: Literal["postgres", "neo4j", "both"]
-
-
-class SpaceScopeSummary(BaseModel):
-    """One scope inside a space, with the tables the space agent may link."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    name: str
-    slug: str
-    description: str | None
-    context: str | None = None
-    tables: list[ScopeTableSummary]
-
-
-class PreviousSpaceFindings(BaseModel):
-    """Summary and links from the last space build. The model may revise them."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    summary: str | None
-    links: list[TableLink]
-    built_at: datetime | None
-
-
-class SpaceCatalogContext(BaseModel):
-    """Everything known about one space before the space agent proposes links."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    space: SpaceSummary
-    scopes: list[SpaceScopeSummary]
-    relationships: list[TableRelation]
-    scope_knowledge: list[ScopeKnowledgeInput]
-    scopes_without_context: list[UUID]
-    previous: PreviousSpaceFindings | None
-    pipelines: list[PipelineInput] = Field(default_factory=list)
-    assets: list[AssetSummary] = Field(default_factory=list)
-
-
-class SpaceContextOptions(BaseModel):
-    """Which parts of space context to load."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    include_scope_knowledge: bool = True
-    include_previous: bool = True
-    include_summary: bool = True
-    include_airflow: bool = True
-    model: StoredModelId = "gpt-4.1"
-    effort: StoredEffort = "low"
-
-
-class SpaceProposal(BaseModel):
-    """Links and summary the space model selected."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    summary: str = Field(default="", max_length=1200)
-    links: list[TableLink] = Field(default_factory=list, max_length=60)
-
-
-class SpaceAnalysisContext(BaseModel):
-    """Space metadata, catalog relationships, accepted links, and the written summary."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    space: SpaceSummary
-    scopes: list[SpaceScopeSummary]
-    existing_relationships: list[TableRelation]
-    table_links: list[TableLink] = Field(default_factory=list)
-    summary: str | None = None
-    scopes_without_context: list[UUID] = Field(default_factory=list)
-    previous_links_kept: int = Field(default=0, ge=0)
-    pipelines: list[PipelineSummary] = Field(default_factory=list)
-
-
 class DagTaskSummary(BaseModel):
     """One task from a synced DAG, reduced for the Airflow agent."""
 
@@ -757,7 +530,6 @@ class DagCandidateTable(BaseModel):
 
     id: UUID
     qualified_name: str
-    scope_id: UUID
     description: str | None = None
 
 
@@ -867,8 +639,6 @@ class AirflowAnalysisContext(BaseModel):
 
 
 ContextSubjectKind = Literal[
-    "space",
-    "scope",
     "table",
     "table_columns",
     "column",
@@ -940,14 +710,6 @@ class TableColumnsContextProposal(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     columns: list[ColumnContextItem] = Field(default_factory=list, max_length=40)
-
-
-class ScopeContextProposal(_ContextText):
-    """Business meaning the model wrote for one scope."""
-
-
-class SpaceContextProposal(_ContextText):
-    """Business meaning the model wrote for one space."""
 
 
 class AirflowContextProposal(_ContextText):

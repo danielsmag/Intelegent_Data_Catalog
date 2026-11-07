@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Select, delete, func, or_, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,7 +11,6 @@ from intelegent_data_catalog.exceptions import ConflictError
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.models import (
     AssetEngineBindingRow,
-    AssetMembershipRow,
     CatalogTableRow,
     ColumnRow,
     DataSourceRow,
@@ -20,12 +19,9 @@ from intelegent_data_catalog.persistence.models import (
     MetadataSyncRunRow,
     RelationshipColumnMappingRow,
     RelationshipRow,
-    ScopeRow,
     SourceEngineBindingRow,
-    SpaceRow,
     TableTagRow,
     TagRow,
-    WorkspaceSpaceBindingRow,
 )
 
 _CONFLICT: str = "catalog record conflicts with an existing record"
@@ -42,164 +38,19 @@ class RegistryRepository:
         """Session this repository writes."""
         return self._session
 
-    def add_space(
-        self,
-        *,
-        name: str,
-        slug: str,
-        description: str | None,
-        isolation_mode: str,
-    ) -> SpaceRow:
-        """Insert a space."""
-        now: datetime = utc_now()
-        row: SpaceRow = SpaceRow(
-            id=uuid.uuid4(),
-            name=name,
-            slug=slug,
-            description=description,
-            isolation_mode=isolation_mode,
-            created_at=now,
-            updated_at=now,
-        )
-        return self._add(row)
 
-    def list_spaces(self, space_ids: set[uuid.UUID] | None = None) -> list[SpaceRow]:
-        """Return spaces in name order. ``space_ids`` limits the set when set."""
-        statement: Select[SpaceRow] = select(SpaceRow).order_by(SpaceRow.name)
-        if space_ids is not None:
-            if len(space_ids) == 0:
-                return []
-            statement = statement.where(SpaceRow.id.in_(space_ids))
-        return list[SpaceRow](self._session.scalars(statement))
 
-    def bindings_for_spaces(self, space_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
-        """Return workspace ids bound to each space."""
-        found: dict[uuid.UUID, list[uuid.UUID]] = {space_id: [] for space_id in space_ids}
-        if len(space_ids) == 0:
-            return found
-        rows: list[WorkspaceSpaceBindingRow] = list(
-            self._session.scalars(
-                select(WorkspaceSpaceBindingRow).where(
-                    WorkspaceSpaceBindingRow.space_id.in_(space_ids)
-                )
-            )
-        )
-        row: WorkspaceSpaceBindingRow
-        for row in rows:
-            found.setdefault(row.space_id, []).append(row.workspace_id)
-        return found
 
-    def add_space_binding(self, workspace_id: uuid.UUID, space_id: uuid.UUID) -> None:
-        """Bind a space to a workspace. A duplicate pair is ignored."""
-        existing: WorkspaceSpaceBindingRow | None = self._session.scalar(
-            select(WorkspaceSpaceBindingRow).where(
-                WorkspaceSpaceBindingRow.workspace_id == workspace_id,
-                WorkspaceSpaceBindingRow.space_id == space_id,
-            )
-        )
-        if existing is not None:
-            return
-        now: datetime = utc_now()
-        self._add(
-            WorkspaceSpaceBindingRow(
-                id=uuid.uuid4(),
-                workspace_id=workspace_id,
-                space_id=space_id,
-                created_at=now,
-            )
-        )
 
-    def count_space_bindings(self, space_id: uuid.UUID) -> int:
-        """Count workspaces bound to one space."""
-        statement: Select[int] = (
-            select(func.count())
-            .select_from(WorkspaceSpaceBindingRow)
-            .where(WorkspaceSpaceBindingRow.space_id == space_id)
-        )
-        return self._count(statement)
 
-    def get_space(self, space_id: uuid.UUID) -> SpaceRow | None:
-        """Return one space or none."""
-        return self._session.get(SpaceRow, space_id)
 
-    def find_space_by_slug(self, slug: str) -> SpaceRow | None:
-        """Return the space that owns a slug."""
-        return self._session.scalar(select(SpaceRow).where(SpaceRow.slug == slug))
 
-    def count_scopes(self, space_id: uuid.UUID) -> int:
-        """Count scopes in a space."""
-        statement: Select[int] = (
-            select(func.count()).select_from(ScopeRow).where(ScopeRow.space_id == space_id)
-        )
-        return self._count(statement)
 
-    def add_scope(
-        self,
-        *,
-        space_id: uuid.UUID,
-        name: str,
-        slug: str,
-        description: str | None,
-    ) -> ScopeRow:
-        """Insert a scope."""
-        now: datetime = utc_now()
-        row: ScopeRow = ScopeRow(
-            id=uuid.uuid4(),
-            space_id=space_id,
-            name=name,
-            slug=slug,
-            description=description,
-            created_at=now,
-            updated_at=now,
-        )
-        return self._add(row)
 
-    def list_scopes(self, space_id: uuid.UUID) -> list[ScopeRow]:
-        """Return scopes in one space in name order."""
-        statement: Select[ScopeRow] = (
-            select(ScopeRow).where(ScopeRow.space_id == space_id).order_by(ScopeRow.name)
-        )
-        return list[ScopeRow](self._session.scalars(statement))
 
-    def get_scope(self, scope_id: uuid.UUID) -> ScopeRow | None:
-        """Return one scope or none."""
-        return self._session.get(ScopeRow, scope_id)
 
-    def find_scope_by_slug(self, space_id: uuid.UUID, slug: str) -> ScopeRow | None:
-        """Return a scope slug inside one space."""
-        statement: Select[ScopeRow] = select(ScopeRow).where(
-            ScopeRow.space_id == space_id,
-            ScopeRow.slug == slug,
-        )
-        return self._session.scalar(statement)
 
-    def count_tables_in_scope(self, scope_id: uuid.UUID) -> int:
-        """Count tables assigned to a scope, including membership links."""
-        member_ids: Select[tuple[uuid.UUID]] = select(AssetMembershipRow.asset_id).where(
-            AssetMembershipRow.scope_id == scope_id,
-        )
-        statement: Select[int] = (
-            select(func.count())
-            .select_from(CatalogTableRow)
-            .where(
-                or_(
-                    CatalogTableRow.scope_id == scope_id,
-                    CatalogTableRow.asset_id.in_(member_ids),
-                ),
-            )
-        )
-        return self._count(statement)
 
-    def clear_default_scope(self, scope_id: uuid.UUID) -> None:
-        """Unset this scope as the default on every source binding."""
-        statement: Select[SourceEngineBindingRow] = select(SourceEngineBindingRow).where(
-            SourceEngineBindingRow.default_scope_id == scope_id
-        )
-        now: datetime = utc_now()
-        for row in self._session.scalars(statement):
-            row.default_scope_id = None
-            row.updated_at = now
-        self._flush()
 
     def add_data_source(
         self,
@@ -253,21 +104,9 @@ class RegistryRepository:
         """Insert a fully populated catalog table."""
         return self._add(row)
 
-    def list_tables(self, scope_id: uuid.UUID) -> list[CatalogTableRow]:
-        """Return tables in one scope in name order, including membership links."""
-        member_ids: Select[tuple[uuid.UUID]] = select(AssetMembershipRow.asset_id).where(
-            AssetMembershipRow.scope_id == scope_id,
-        )
-        statement: Select[CatalogTableRow] = (
-            select(CatalogTableRow)
-            .where(
-                or_(
-                    CatalogTableRow.scope_id == scope_id,
-                    CatalogTableRow.asset_id.in_(member_ids),
-                ),
-            )
-            .order_by(CatalogTableRow.name)
-        )
+    def list_tables(self) -> list[CatalogTableRow]:
+        """Return catalog tables in name order."""
+        statement: Select[CatalogTableRow] = select(CatalogTableRow).order_by(CatalogTableRow.name)
         return list[CatalogTableRow](self._session.scalars(statement))
 
     def get_table(self, table_id: uuid.UUID) -> CatalogTableRow | None:
@@ -569,13 +408,7 @@ class RegistryRepository:
         )
         return list[RelationshipRow](self._session.scalars(statement))
 
-    def list_all_spaces(self) -> list[SpaceRow]:
-        """Return every space."""
-        return list[SpaceRow](self._session.scalars(select(SpaceRow).order_by(SpaceRow.name)))
 
-    def list_all_scopes(self) -> list[ScopeRow]:
-        """Return every scope."""
-        return list[ScopeRow](self._session.scalars(select(ScopeRow).order_by(ScopeRow.name)))
 
     def list_all_tables(self) -> list[CatalogTableRow]:
         """Return every catalog table."""
@@ -649,84 +482,34 @@ class RegistryRepository:
         )
         return self._session.scalar(statement)
 
-    def search_spaces(
-        self,
-        pattern: str,
-        limit: int,
-        space_ids: set[uuid.UUID] | None = None,
-    ) -> list[SpaceRow]:
-        """Search space names and descriptions."""
-        if space_ids is not None and len(space_ids) == 0:
-            return []
-        statement: Select[SpaceRow] = select(SpaceRow).where(
-            SpaceRow.name.ilike(pattern, escape="\\")
-            | SpaceRow.slug.ilike(pattern, escape="\\")
-            | SpaceRow.description.ilike(pattern, escape="\\")
-        )
-        if space_ids is not None:
-            statement = statement.where(SpaceRow.id.in_(space_ids))
-        return list[SpaceRow](self._session.scalars(statement.limit(limit)))
 
-    def search_scopes(
-        self,
-        pattern: str,
-        limit: int,
-        space_ids: set[uuid.UUID] | None = None,
-    ) -> list[ScopeRow]:
-        """Search scope names and descriptions."""
-        if space_ids is not None and len(space_ids) == 0:
-            return []
-        statement: Select[ScopeRow] = select(ScopeRow).where(
-            ScopeRow.name.ilike(pattern, escape="\\")
-            | ScopeRow.slug.ilike(pattern, escape="\\")
-            | ScopeRow.description.ilike(pattern, escape="\\")
-        )
-        if space_ids is not None:
-            statement = statement.where(ScopeRow.space_id.in_(space_ids))
-        return list[ScopeRow](self._session.scalars(statement.limit(limit)))
 
-    def search_tables(
-        self,
-        pattern: str,
-        limit: int,
-        space_ids: set[uuid.UUID] | None = None,
-    ) -> list[CatalogTableRow]:
+    def search_tables(self, pattern: str, limit: int) -> list[CatalogTableRow]:
         """Search table names and both description fields."""
-        if space_ids is not None and len(space_ids) == 0:
-            return []
-        statement: Select[CatalogTableRow] = select(CatalogTableRow).where(
-            CatalogTableRow.name.ilike(pattern, escape="\\")
-            | CatalogTableRow.display_name.ilike(pattern, escape="\\")
-            | CatalogTableRow.description.ilike(pattern, escape="\\")
-            | CatalogTableRow.source_description.ilike(pattern, escape="\\")
-        )
-        if space_ids is not None:
-            statement = statement.join(ScopeRow, CatalogTableRow.scope_id == ScopeRow.id).where(
-                ScopeRow.space_id.in_(space_ids)
+        statement: Select[CatalogTableRow] = (
+            select(CatalogTableRow)
+            .where(
+                CatalogTableRow.name.ilike(pattern, escape="\\")
+                | CatalogTableRow.display_name.ilike(pattern, escape="\\")
+                | CatalogTableRow.description.ilike(pattern, escape="\\")
+                | CatalogTableRow.source_description.ilike(pattern, escape="\\")
             )
-        return list[CatalogTableRow](self._session.scalars(statement.limit(limit)))
+            .limit(limit)
+        )
+        return list[CatalogTableRow](self._session.scalars(statement))
 
-    def search_columns(
-        self,
-        pattern: str,
-        limit: int,
-        space_ids: set[uuid.UUID] | None = None,
-    ) -> list[ColumnRow]:
+    def search_columns(self, pattern: str, limit: int) -> list[ColumnRow]:
         """Search column names and both description fields."""
-        if space_ids is not None and len(space_ids) == 0:
-            return []
-        statement: Select[ColumnRow] = select(ColumnRow).where(
-            ColumnRow.name.ilike(pattern, escape="\\")
-            | ColumnRow.description.ilike(pattern, escape="\\")
-            | ColumnRow.source_description.ilike(pattern, escape="\\")
-        )
-        if space_ids is not None:
-            statement = (
-                statement.join(CatalogTableRow, ColumnRow.table_id == CatalogTableRow.id)
-                .join(ScopeRow, CatalogTableRow.scope_id == ScopeRow.id)
-                .where(ScopeRow.space_id.in_(space_ids))
+        statement: Select[ColumnRow] = (
+            select(ColumnRow)
+            .where(
+                ColumnRow.name.ilike(pattern, escape="\\")
+                | ColumnRow.description.ilike(pattern, escape="\\")
+                | ColumnRow.source_description.ilike(pattern, escape="\\")
             )
-        return list[ColumnRow](self._session.scalars(statement.limit(limit)))
+            .limit(limit)
+        )
+        return list[ColumnRow](self._session.scalars(statement))
 
     def search_tags(self, pattern: str, limit: int) -> list[TagRow]:
         """Search tag names and descriptions."""

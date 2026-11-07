@@ -14,9 +14,7 @@ matching view on their own. ``/sources`` opens Catalog.
    * - Workspace
      - Folder tree for the active workspace. ``Shared/`` and ``Users/<you>/`` live here. Files and notebooks open in the editor.
    * - Assets
-     - Definition files under ``spaces/``, ``scopes/``, and ``assets/``.
-   * - Spaces
-     - Registry tree of spaces, scopes, and attached tables.
+     - Assets in the active workspace, and definition files under ``assets/``.
    * - Catalog
      - Physical catalogs, namespaces, and tables from the explorer.
    * - Search

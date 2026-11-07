@@ -21,8 +21,6 @@ from intelegent_data_catalog.jobs.models import (
     ContextGenerationJobRead,
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
-    ScopeBuildJobRead,
-    SpaceBuildJobRead,
 )
 from intelegent_data_catalog.jobs.publisher import BuildJobPublisher
 from intelegent_data_catalog.jobs.trace import BuildTraceSink, TraceStep, close_build_trace
@@ -30,8 +28,6 @@ from intelegent_data_catalog.knowledge.models import (
     AirflowContextOptions,
     ContextGenerationOptions,
     ContextSubjectKind,
-    ScopeContextOptions,
-    SpaceContextOptions,
     TableContextOptions,
 )
 from intelegent_data_catalog.persistence.clock import utc_now
@@ -230,53 +226,11 @@ class CatalogJobs:
         row: CatalogJobRow | None = self._store.latest(CatalogJobKind.KNOWLEDGE, subject_id, "")
         return _knowledge_read_optional(row)
 
-    def start_scope(
-        self,
-        subject_id: UUID,
-        subject_name: str,
-        options: ScopeContextOptions,
-    ) -> ScopeBuildJobRead:
-        """Start a scope context build, or join the one already running."""
-        row: CatalogJobRow = self._start(
-            CatalogJobKind.SCOPE,
-            subject_id,
-            subject_name,
-            "",
-            options,
-        )
-        return _scope_read(row)
 
-    def get_scope(self, job_id: UUID) -> ScopeBuildJobRead | None:
-        """Return one scope build."""
-        return _scope_read_optional(self._typed(job_id, CatalogJobKind.SCOPE))
 
-    def latest_scope(self, subject_id: UUID) -> ScopeBuildJobRead | None:
-        """Return the newest scope build."""
-        return _scope_read_optional(self._store.latest(CatalogJobKind.SCOPE, subject_id, ""))
 
-    def start_space(
-        self,
-        subject_id: UUID,
-        subject_name: str,
-        options: SpaceContextOptions,
-    ) -> SpaceBuildJobRead:
-        """Start a space context build, or join the one already running."""
-        row: CatalogJobRow = self._start(
-            CatalogJobKind.SPACE,
-            subject_id,
-            subject_name,
-            "",
-            options,
-        )
-        return _space_read(row)
 
-    def get_space(self, job_id: UUID) -> SpaceBuildJobRead | None:
-        """Return one space build."""
-        return _space_read_optional(self._typed(job_id, CatalogJobKind.SPACE))
 
-    def latest_space(self, subject_id: UUID) -> SpaceBuildJobRead | None:
-        """Return the newest space build."""
-        return _space_read_optional(self._store.latest(CatalogJobKind.SPACE, subject_id, ""))
 
     def start_asset(
         self,
@@ -457,7 +411,7 @@ def _job_status(value: str) -> KnowledgeBuildState:
 
 def _subject_kind(lane: str) -> ContextSubjectKind:
     match lane:
-        case "space" | "scope" | "table" | "table_columns" | "column" | "airflow" | "asset":
+        case "table" | "table_columns" | "column" | "airflow" | "asset":
             return lane
         case _:
             raise ValidationAppError(f"unknown context lane: {lane}")
@@ -479,36 +433,12 @@ def _knowledge_read_optional(row: CatalogJobRow | None) -> KnowledgeBuildJobRead
     return _knowledge_read(row)
 
 
-def _scope_read(row: CatalogJobRow) -> ScopeBuildJobRead:
-    return ScopeBuildJobRead(
-        id=row.id,
-        scope_id=row.subject_id,
-        scope_name=row.subject_name,
-        status=_job_status(row.status),
-        error=row.error,
-    )
 
 
-def _scope_read_optional(row: CatalogJobRow | None) -> ScopeBuildJobRead | None:
-    if row is None:
-        return None
-    return _scope_read(row)
 
 
-def _space_read(row: CatalogJobRow) -> SpaceBuildJobRead:
-    return SpaceBuildJobRead(
-        id=row.id,
-        space_id=row.subject_id,
-        space_name=row.subject_name,
-        status=_job_status(row.status),
-        error=row.error,
-    )
 
 
-def _space_read_optional(row: CatalogJobRow | None) -> SpaceBuildJobRead | None:
-    if row is None:
-        return None
-    return _space_read(row)
 
 
 def _asset_read(row: CatalogJobRow) -> AssetBuildJobRead:

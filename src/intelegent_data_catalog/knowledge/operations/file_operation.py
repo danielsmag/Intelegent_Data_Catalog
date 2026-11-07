@@ -19,7 +19,6 @@ from intelegent_data_catalog.llm.agent import ProposalAgent
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind
 from intelegent_data_catalog.persistence.models import (
-    AssetMembershipRow,
     AssetRow,
     CatalogTableRow,
     WorkspaceNodeRow,
@@ -127,25 +126,8 @@ class FileAgent(AssetAgent):
     def _linked_tables(self, names: list[str]) -> list[str]:
         if len(names) == 0:
             return []
-        scope_ids: set[UUID] = set()
-        membership: AssetMembershipRow
-        for membership in self._session.scalars(
-            select(AssetMembershipRow).where(AssetMembershipRow.asset_id == self._asset.id),
-        ):
-            if membership.scope_id is not None:
-                scope_ids.add(membership.scope_id)
-        if len(scope_ids) == 0:
-            return []
         wanted: set[str] = {name.casefold() for name in names}
-        statement = (
-            select(CatalogTableRow.name)
-            .join(AssetRow, AssetRow.id == CatalogTableRow.asset_id)
-            .join(AssetMembershipRow, AssetMembershipRow.asset_id == AssetRow.id)
-            .where(
-                AssetMembershipRow.scope_id.in_(scope_ids),
-                AssetRow.kind == AssetKind.TABLE.value,
-            )
-        )
+        statement = select(CatalogTableRow.name)
         linked: list[str] = []
         table_name: str
         for table_name in self._session.scalars(statement):

@@ -9,6 +9,7 @@ import httpx
 import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
+from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
@@ -17,6 +18,7 @@ from intelegent_data_catalog.assets.models import AssetAnalysisContext
 from intelegent_data_catalog.assets.store import AssetKnowledgeStore
 from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.bootstrap import create_app
+from intelegent_data_catalog.core.settings import AppSettings, load_settings
 from intelegent_data_catalog.knowledge.context.catalog import PostgresCatalogContextProvider
 from intelegent_data_catalog.knowledge.models import TableAnalysisContext, TableCatalogContext
 from intelegent_data_catalog.knowledge.store import KnowledgeContextStore
@@ -61,10 +63,6 @@ def test_build_context_returns_catalog_graph_and_lineage(tmp_path: Path) -> None
         body: dict[str, object] = _object(saved)
         table: dict[str, object] = _nested(body, "table")
         assert table["name"] == "Orders"
-        space: dict[str, object] = _nested(table, "space")
-        scope: dict[str, object] = _nested(table, "scope")
-        assert space["name"] == "Commerce"
-        assert scope["name"] == "Ordering"
         assert body["data_profile"] is None
         assert body["graph_neighbors"] == []
         lineage: dict[str, object] = _nested(body, "lineage")
@@ -178,8 +176,8 @@ def test_asset_backed_table_stores_the_snapshot_on_the_asset(tmp_path: Path) -> 
         database.dispose()
 
 
-def test_build_context_refuses_physical_profile_without_a_profiler(tmp_path: Path) -> None:
-    """Asking for a data profile fails until a physical profiler exists."""
+def test_build_context_skips_physical_profile_without_a_profiler(tmp_path: Path) -> None:
+    """A missing profiler skips the data profile and still stores the context."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
@@ -192,53 +190,11 @@ def test_build_context_refuses_physical_profile_without_a_profiler(tmp_path: Pat
             {"include_data_profile": True},
         )
         assert started.status_code == 202
-        failed: dict[str, object] = _wait_for_build(app, _text(_object(started), "id"))
-        assert failed["status"] == "failed"
-        error: object = failed["error"]
-        assert isinstance(error, str)
-        assert "profiler" in error
-    finally:
-        database.dispose()
-
-
-def test_space_context_is_missing_until_started_and_a_patch_stores_user_text(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A space with no snapshot is 404. Starting a build returns 202. A patch is USER."""
-
-    def _skip(self: RequestPlatform, space_id: object, options: object) -> None:
-        del self, space_id, options
-
-    monkeypatch.setattr(RequestPlatform, "build_space_context", _skip)
-    app: FastAPI
-    database: CatalogDatabase
-    app, database = _app(tmp_path)
-    try:
-        space: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
-        assert space.status_code == 201
-        space_id: str = _text(_object(space), "id")
-        missing: httpx.Response = _send(app, "GET", f"/api/v1/spaces/{space_id}/knowledge-context")
-        assert missing.status_code == 404
-        started: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{space_id}/knowledge-context",
-            {},
-        )
-        assert started.status_code == 202
-        finished: dict[str, object] = _wait_for_space_build(app, _text(_object(started), "id"))
+        finished: dict[str, object] = _wait_for_build(app, _text(_object(started), "id"))
         assert finished["status"] == "succeeded"
-        patched: httpx.Response = _send(
-            app,
-            "PATCH",
-            f"/api/v1/spaces/{space_id}",
-            {"context": "Commerce covers sales."},
-        )
-        assert patched.status_code == 200
-        body: dict[str, object] = _object(patched)
-        assert body["context"] == "Commerce covers sales."
-        assert body["context_origin"] == "USER"
+        saved: httpx.Response = _send(app, "GET", f"/api/v1/tables/{table_id}/knowledge-context")
+        assert saved.status_code == 200
+        assert _object(saved)["data_profile"] is None
     finally:
         database.dispose()
 
@@ -347,17 +303,6 @@ def test_generate_table_context_returns_a_job(
 
 
 def _table(app: FastAPI) -> str:
-    space: httpx.Response = _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"})
-    assert space.status_code == 201
-    space_id: str = _text(_object(space), "id")
-    scope: httpx.Response = _send(
-        app,
-        "POST",
-        f"/api/v1/spaces/{space_id}/scopes",
-        {"name": "Ordering"},
-    )
-    assert scope.status_code == 201
-    scope_id: str = _text(_object(scope), "id")
     source: httpx.Response = _send(
         app,
         "POST",
@@ -369,7 +314,7 @@ def _table(app: FastAPI) -> str:
     table: httpx.Response = _send(
         app,
         "POST",
-        f"/api/v1/scopes/{scope_id}/tables",
+        "/api/v1/tables",
         {
             "data_source_id": source_id,
             "name": "Orders",
@@ -390,6 +335,14 @@ def _app(tmp_path: Path) -> tuple[FastAPI, CatalogDatabase]:
     database: CatalogDatabase = CatalogDatabase(url)
     container: AppContainer = AppContainer()
     container.database.override(providers.Object(database))
+    current: AppSettings = load_settings()
+    container.settings.override(
+        providers.Object(
+            current.model_copy(
+                update={"llm": current.llm.model_copy(update={"api_key": SecretStr("test-key")})},
+            ),
+        ),
+    )
     return create_app(container), database
 
 
@@ -494,20 +447,6 @@ def _catalog_snapshot(session: Session, table_id: str, description: str) -> Tabl
     )
     built.table.description = description
     return built
-
-
-def _wait_for_space_build(app: FastAPI, job_id: str) -> dict[str, object]:
-    """Poll until the background space build leaves the running state."""
-    attempt: int
-    for attempt in range(50):
-        del attempt
-        current: httpx.Response = _send(app, "GET", f"/api/v1/space-builds/{job_id}")
-        assert current.status_code == 200
-        body: dict[str, object] = _object(current)
-        if body["status"] != "running":
-            return body
-        time.sleep(0.05)
-    raise AssertionError("space build did not finish")
 
 
 def _wait_for_airflow_build(app: FastAPI, job_id: str) -> dict[str, object]:

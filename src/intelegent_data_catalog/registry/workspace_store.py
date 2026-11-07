@@ -1,9 +1,9 @@
-"""Persistence for workspaces, members, bindings, and file nodes."""
+"""Persistence for workspaces, members, and file nodes."""
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.persistence.clock import utc_now
@@ -12,7 +12,6 @@ from intelegent_data_catalog.persistence.models import (
     WorkspaceMemberRow,
     WorkspaceNodeRow,
     WorkspaceRow,
-    WorkspaceSpaceBindingRow,
 )
 from intelegent_data_catalog.registry.repository import RegistryRepository
 
@@ -56,49 +55,9 @@ class WorkspaceStore:
         """Return the workspace that owns a slug."""
         return self._session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
 
-    def count_bindings(self, workspace_id: uuid.UUID) -> int:
-        """Count spaces bound to a workspace."""
-        counted: int | None = self._session.scalar(
-            select(func.count())
-            .select_from(WorkspaceSpaceBindingRow)
-            .where(WorkspaceSpaceBindingRow.workspace_id == workspace_id)
-        )
-        if counted is None:
-            return 0
-        return counted
 
-    def list_bound_space_ids(self, workspace_id: uuid.UUID) -> list[uuid.UUID]:
-        """Return space ids bound to a workspace."""
-        return list(
-            self._session.scalars(
-                select(WorkspaceSpaceBindingRow.space_id).where(
-                    WorkspaceSpaceBindingRow.workspace_id == workspace_id
-                )
-            )
-        )
 
-    def find_binding(
-        self,
-        workspace_id: uuid.UUID,
-        space_id: uuid.UUID,
-    ) -> WorkspaceSpaceBindingRow | None:
-        """Return one workspace-space binding."""
-        return self._session.scalar(
-            select(WorkspaceSpaceBindingRow).where(
-                WorkspaceSpaceBindingRow.workspace_id == workspace_id,
-                WorkspaceSpaceBindingRow.space_id == space_id,
-            )
-        )
 
-    def add_binding(self, workspace_id: uuid.UUID, space_id: uuid.UUID) -> WorkspaceSpaceBindingRow:
-        """Insert a workspace-space binding."""
-        row: WorkspaceSpaceBindingRow = WorkspaceSpaceBindingRow(
-            id=uuid.uuid4(),
-            workspace_id=workspace_id,
-            space_id=space_id,
-            created_at=utc_now(),
-        )
-        return self._repo._add(row)
 
     def list_members(self, workspace_id: uuid.UUID) -> list[tuple[WorkspaceMemberRow, UserRow]]:
         """Return members with their user rows."""

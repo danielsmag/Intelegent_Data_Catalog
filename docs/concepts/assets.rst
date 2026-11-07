@@ -7,7 +7,6 @@ create that source. It names the source with an operator. The scanner links
 the name to the row. A later operator run builds the knowledge context and,
 unless a person already wrote it, the business context.
 
-The asset is not a member of a space or scope until something attaches it.
 See :doc:`model` for how those names differ, :doc:`operators` for each
 operator, and :doc:`execution` for when a run is queued.
 

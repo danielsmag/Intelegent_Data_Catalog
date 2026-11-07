@@ -16,7 +16,7 @@ from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.lease import LeaseHeartbeat
 from intelegent_data_catalog.jobs.models import CatalogJobCancelRead
-from intelegent_data_catalog.knowledge.models import SpaceContextOptions
+from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import CatalogJobKind
 from intelegent_data_catalog.persistence.migrate import upgrade_database
@@ -210,11 +210,11 @@ def _running_job(database: CatalogDatabase) -> UUID:
     row: CatalogJobRow
     created: bool
     row, created = CatalogJobStore(database).add_running(
-        CatalogJobKind.SPACE,
+        CatalogJobKind.KNOWLEDGE,
         uuid4(),
         "Sales",
         "",
-        SpaceContextOptions(),
+        TableContextOptions(),
     )
     assert created
     return row.id

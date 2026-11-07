@@ -50,7 +50,6 @@ from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
-    SpaceIsolationMode,
     SyncRunStatus,
     TableKind,
     TableStatus,
@@ -67,67 +66,6 @@ class Base(DeclarativeBase):
 def _enum_check(column: str, values: tuple[str, ...], name: str) -> CheckConstraint:
     listed: str = ", ".join(f"'{value}'" for value in values)
     return CheckConstraint(f"{column} IN ({listed})", name=name)
-
-
-class SpaceRow(Base):
-    """Business space. Not a Trino catalog."""
-
-    __tablename__: str = "spaces"
-    __table_args__: tuple[CheckConstraint, ...] = (
-        _enum_check(
-            "context_origin",
-            tuple(item.value for item in ContextOrigin),
-            "ck_spaces_context_origin",
-        ),
-        _enum_check(
-            "isolation_mode",
-            tuple(item.value for item in SpaceIsolationMode),
-            "ck_spaces_isolation_mode",
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    isolation_mode: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default=SpaceIsolationMode.OPEN.value,
-        server_default=text("'OPEN'"),
-    )
-    context: Mapped[str | None] = mapped_column(Text, nullable=True)
-    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class ScopeRow(Base):
-    """Business scope inside one space."""
-
-    __tablename__: str = "scopes"
-    __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
-        UniqueConstraint("space_id", "slug", name="uq_scopes_space_slug"),
-        _enum_check(
-            "context_origin",
-            tuple(item.value for item in ContextOrigin),
-            "ck_scopes_context_origin",
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    space_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    slug: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    context: Mapped[str | None] = mapped_column(Text, nullable=True)
-    context_origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class AssetRow(Base):
@@ -191,57 +129,6 @@ class AssetRow(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-_ONE_MEMBERSHIP: str = (
-    "(space_id IS NOT NULL AND scope_id IS NULL) OR (space_id IS NULL AND scope_id IS NOT NULL)"
-)
-
-
-class AssetMembershipRow(Base):
-    """Asset attached to one space or one scope. One asset may have many rows."""
-
-    __tablename__: str = "asset_memberships"
-    __table_args__: tuple[CheckConstraint | Index, ...] = (
-        CheckConstraint(_ONE_MEMBERSHIP, name="ck_asset_memberships_one_target"),
-        Index("ix_asset_memberships_asset", "asset_id"),
-        Index("ix_asset_memberships_scope", "scope_id"),
-        Index("ix_asset_memberships_space", "space_id"),
-        Index(
-            "uq_asset_memberships_scope",
-            "asset_id",
-            "scope_id",
-            unique=True,
-            sqlite_where=text("scope_id IS NOT NULL"),
-            postgresql_where=text("scope_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_asset_memberships_space",
-            "asset_id",
-            "space_id",
-            unique=True,
-            sqlite_where=text("space_id IS NOT NULL"),
-            postgresql_where=text("space_id IS NOT NULL"),
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    asset_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("assets.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    space_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class AssetKnowledgeContextRow(Base):
@@ -327,11 +214,6 @@ class CatalogTableRow(Base):
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("assets.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="RESTRICT"),
         nullable=True,
     )
     data_source_id: Mapped[uuid.UUID] = mapped_column(
@@ -544,11 +426,6 @@ class SourceEngineBindingRow(Base):
     binding_key: Mapped[str] = mapped_column(String(512), nullable=False)
     engine_type: Mapped[str] = mapped_column(String(32), nullable=False)
     configuration: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    default_scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="RESTRICT"),
-        nullable=True,
-    )
     capabilities: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -700,44 +577,6 @@ class TableKnowledgeContextRow(Base):
     table_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("catalog_tables.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class SpaceKnowledgeContextRow(Base):
-    """Latest built analysis context for one catalog space."""
-
-    __tablename__: str = "space_knowledge_contexts"
-    __table_args__: tuple[UniqueConstraint, ...] = (
-        UniqueConstraint("space_id", name="uq_space_knowledge_contexts_space"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    space_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class ScopeKnowledgeContextRow(Base):
-    """Latest built analysis context for one catalog scope."""
-
-    __tablename__: str = "scope_knowledge_contexts"
-    __table_args__: tuple[UniqueConstraint, ...] = (
-        UniqueConstraint("scope_id", name="uq_scope_knowledge_contexts_scope"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    scope_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="CASCADE"),
         nullable=False,
     )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -919,80 +758,6 @@ class AirflowDagTableRow(Base):
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-_ONE_AIRFLOW_SOURCE: str = (
-    "(airflow_instance_id IS NOT NULL AND dag_row_id IS NULL) OR "
-    "(airflow_instance_id IS NULL AND dag_row_id IS NOT NULL)"
-)
-_ONE_AIRFLOW_TARGET: str = (
-    "(space_id IS NOT NULL AND scope_id IS NULL) OR (space_id IS NULL AND scope_id IS NOT NULL)"
-)
-
-
-class AirflowAttachmentRow(Base):
-    """Airflow instance or one DAG attached to a space or a scope. Many targets allowed."""
-
-    __tablename__: str = "airflow_attachments"
-    __table_args__: tuple[CheckConstraint | Index, ...] = (
-        CheckConstraint(_ONE_AIRFLOW_SOURCE, name="ck_airflow_attachments_one_source"),
-        CheckConstraint(_ONE_AIRFLOW_TARGET, name="ck_airflow_attachments_one_target"),
-        Index(
-            "uq_airflow_attachments_instance_space",
-            "airflow_instance_id",
-            "space_id",
-            unique=True,
-            sqlite_where=text("airflow_instance_id IS NOT NULL AND space_id IS NOT NULL"),
-            postgresql_where=text("airflow_instance_id IS NOT NULL AND space_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_airflow_attachments_instance_scope",
-            "airflow_instance_id",
-            "scope_id",
-            unique=True,
-            sqlite_where=text("airflow_instance_id IS NOT NULL AND scope_id IS NOT NULL"),
-            postgresql_where=text("airflow_instance_id IS NOT NULL AND scope_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_airflow_attachments_dag_space",
-            "dag_row_id",
-            "space_id",
-            unique=True,
-            sqlite_where=text("dag_row_id IS NOT NULL AND space_id IS NOT NULL"),
-            postgresql_where=text("dag_row_id IS NOT NULL AND space_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_airflow_attachments_dag_scope",
-            "dag_row_id",
-            "scope_id",
-            unique=True,
-            sqlite_where=text("dag_row_id IS NOT NULL AND scope_id IS NOT NULL"),
-            postgresql_where=text("dag_row_id IS NOT NULL AND scope_id IS NOT NULL"),
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    airflow_instance_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("airflow_instances.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    dag_row_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("airflow_dags.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    space_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
 class AirflowInstanceKnowledgeContextRow(Base):
     """Latest built analysis context for one Airflow instance. Findings are keyed by DAG."""
 
@@ -1129,24 +894,16 @@ class CatalogJobRow(Base):
 
 
 _ONE_CONFIGURATION: str = (
-    "(space_id IS NOT NULL AND scope_id IS NULL AND catalog_table_id IS NULL "
-    "AND asset_id IS NULL) OR "
-    "(space_id IS NULL AND scope_id IS NOT NULL AND catalog_table_id IS NULL "
-    "AND asset_id IS NULL) OR "
-    "(space_id IS NULL AND scope_id IS NULL AND catalog_table_id IS NOT NULL "
-    "AND asset_id IS NULL) OR "
-    "(space_id IS NULL AND scope_id IS NULL AND catalog_table_id IS NULL "
-    "AND asset_id IS NOT NULL)"
+    "(catalog_table_id IS NOT NULL AND asset_id IS NULL) OR "
+    "(catalog_table_id IS NULL AND asset_id IS NOT NULL)"
 )
 
 
 class EntityConfigurationRow(Base):
-    """Saved refresh interval and build options for one space, scope, table, or asset."""
+    """Saved refresh interval and build options for one table or asset."""
 
     __tablename__: str = "entity_configurations"
     __table_args__: tuple[UniqueConstraint | CheckConstraint, ...] = (
-        UniqueConstraint("space_id", name="uq_entity_configurations_space"),
-        UniqueConstraint("scope_id", name="uq_entity_configurations_scope"),
         UniqueConstraint("catalog_table_id", name="uq_entity_configurations_table"),
         UniqueConstraint("asset_id", name="uq_entity_configurations_asset"),
         CheckConstraint(_ONE_CONFIGURATION, name="ck_entity_configurations_one_subject"),
@@ -1167,16 +924,6 @@ class EntityConfigurationRow(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    space_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="CASCADE"),
-        nullable=True,
-    )
     catalog_table_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("catalog_tables.id", ondelete="CASCADE"),
@@ -1213,7 +960,7 @@ class EntityConfigurationRow(Base):
 
 
 class WorkspaceRow(Base):
-    """Named workspace. Members and space bindings live in their own tables."""
+    """Named workspace. Members live in their own table."""
 
     __tablename__: str = "workspaces"
 
@@ -1265,28 +1012,6 @@ class WorkspaceMemberRow(Base):
         nullable=False,
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class WorkspaceSpaceBindingRow(Base):
-    """Space visible to one workspace. OPEN spaces do not need a row."""
-
-    __tablename__: str = "workspace_space_bindings"
-    __table_args__: tuple[UniqueConstraint, ...] = (
-        UniqueConstraint("workspace_id", "space_id", name="uq_workspace_space_bindings_pair"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    space_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="CASCADE"),
-        nullable=False,
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -1385,7 +1110,7 @@ class AssetDefinitionFileRow(Base):
 
 
 class AssetDefinitionItemRow(Base):
-    """One space, scope, or asset declared by a definition file."""
+    """One asset declared by a definition file."""
 
     __tablename__: str = "asset_definition_items"
     __table_args__: tuple[CheckConstraint | Index | UniqueConstraint, ...] = (
@@ -1426,16 +1151,6 @@ class AssetDefinitionItemRow(Base):
     item_key: Mapped[str] = mapped_column(String(512), nullable=False)
     declaration: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    space_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("spaces.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("scopes.id", ondelete="SET NULL"),
-        nullable=True,
-    )
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("assets.id", ondelete="SET NULL"),

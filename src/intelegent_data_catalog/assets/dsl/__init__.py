@@ -1,6 +1,6 @@
-"""Python declarations uploaded under spaces/, scopes/, and assets/."""
+"""Python declarations uploaded under assets/."""
 
-from intelegent_data_catalog.assets.dsl.nodes import Asset, Scope, Space
+from intelegent_data_catalog.assets.dsl.nodes import Asset
 from intelegent_data_catalog.assets.dsl.operators import (
     AirflowInstanceOperator,
     AirflowOperator,
@@ -24,8 +24,6 @@ __all__ = [
     "PageOperator",
     "PostgresTableOperator",
     "SchemaOperator",
-    "Scope",
-    "Space",
     "TableOperator",
     "operator_from_ref",
 ]

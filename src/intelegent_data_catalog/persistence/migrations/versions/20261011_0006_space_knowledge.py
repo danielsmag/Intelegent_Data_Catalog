@@ -81,7 +81,7 @@ def _drop_context(bind: Connection) -> None:
 def _create_space_contexts(bind: Connection) -> None:
     inspector = inspect(bind)
     tables: set[str] = set(inspector.get_table_names())
-    if "space_knowledge_contexts" in tables:
+    if "space_knowledge_contexts" in tables or "spaces" not in tables:
         return
     op.create_table(
         "space_knowledge_contexts",

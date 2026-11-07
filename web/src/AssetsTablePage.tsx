@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type MutableRefObject, type PointerEvent a
 import { useSearchParams } from "react-router-dom"
 import { isAbortError } from "./api"
 import {
-  bulkMembership,
   detailString,
   fetchAsset,
   searchAssets,
@@ -25,11 +24,9 @@ import {
   type AirflowInstanceInput,
   type AirflowInstanceStatus,
 } from "./airflowApi"
-import { AirflowIcon, IcebergIcon } from "./icons"
 import { useEditorStatus, useEditorTitle } from "./editorSlots"
 import { onAssetBuildFinished, onKnowledgeBuildFinished, requestAssetBuild } from "./knowledgeBuild"
 import { showPageAlert } from "./pageAlertStack"
-import { fetchHierarchy, type HierarchySpace } from "./registryApi"
 import { getActiveWorkspaceId } from "./workspaceStore"
 
 const SERVICES: readonly { id: ServiceId; label: string }[] = [
@@ -53,7 +50,6 @@ const RANKS: readonly { id: string; label: string; sort: AssetSort; order: "asc"
   { id: "freshness", label: "Freshness", sort: "freshness_score", order: "desc" },
   { id: "built", label: "Latest build", sort: "last_built_at", order: "desc" },
   { id: "updated", label: "Recently updated", sort: "updated_at", order: "desc" },
-  { id: "attached", label: "Most attached", sort: "membership_count", order: "desc" },
   { id: "name", label: "Name A-Z", sort: "name", order: "asc" },
   { id: "kind", label: "Kind", sort: "kind", order: "asc" },
 ]
@@ -64,11 +60,9 @@ export function AssetsTablePage(): ReactElement {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [hierarchy, setHierarchy] = useState<HierarchySpace[]>([])
   const queryText: string = params.get("q") ?? ""
   const owner: "me" | "shared" | "all" = ownerParam(params.get("owner"))
   const rank: string = params.get("rank") ?? "updated"
-  const scopeId: string | null = params.get("scope")
   const status: AssetStatus | null = statusParam(params.get("status"))
   const offset: number = Number(params.get("offset") ?? "0")
   const service: ServiceId = serviceParam(params.get("service"))
@@ -99,7 +93,6 @@ export function AssetsTablePage(): ReactElement {
           kinds: queryKinds,
           formats: queryFormats,
           owner,
-          scopeId,
           status,
           sort: chosenRank?.sort,
           order: chosenRank?.order,
@@ -146,7 +139,7 @@ export function AssetsTablePage(): ReactElement {
       inflight?.abort()
       window.clearInterval(timer)
     }
-  }, [queryText, owner, rank, scopeId, status, offset, params])
+  }, [queryText, owner, rank, status, offset, params])
   useEffect(() => {
     const refresh = (): void => {
       reloadRef.current()
@@ -159,19 +152,6 @@ export function AssetsTablePage(): ReactElement {
     return () => {
       stopAsset()
       stopKnowledge()
-    }
-  }, [])
-  useEffect(() => {
-    const controller: AbortController = new AbortController()
-    void fetchHierarchy(controller.signal)
-      .then((spaces: HierarchySpace[]) => {
-        setHierarchy(spaces)
-      })
-      .catch(() => {
-        setHierarchy([])
-      })
-    return () => {
-      controller.abort()
     }
   }, [])
   const rows: AssetListItem[] = page?.items ?? []
@@ -278,16 +258,6 @@ export function AssetsTablePage(): ReactElement {
     }
     setParams(updated)
   }
-  async function addTo(targetKind: "scope" | "space", targetId: string): Promise<void> {
-    const ids: string[] = [...selected]
-    const result = await bulkMembership(ids, targetKind, targetId, "attach")
-    showPageAlert(
-      result.unchanged > 0 && result.changed === 0 ? "Already attached" : `Attached ${result.changed}`,
-      "success",
-      "Assets",
-    )
-    patch({ tick: String(Date.now()) })
-  }
   return (
     <section className="catalog-page asset-board">
       <header className="catalog-hero">
@@ -311,7 +281,7 @@ export function AssetsTablePage(): ReactElement {
             <span className="catalog-count">{loading && page === null ? "Loading…" : assetCount(total)}</span>
           </div>
         </div>
-        <p className="catalog-lead">Tables, DAGs, Airflow instances, notebooks, and files in this workspace.</p>
+        <p className="catalog-lead">Anything tracked in this workspace.</p>
       </header>
       {creatingInstance ? (
         <div className="catalog-panel">
@@ -378,22 +348,6 @@ export function AssetsTablePage(): ReactElement {
           <option value="me">Mine</option>
           <option value="shared">Shared</option>
         </select>
-        <select
-          aria-label="Scope"
-          value={scopeId ?? ""}
-          onChange={(event) => {
-            patch({ scope: event.target.value || null, offset: null })
-          }}
-        >
-          <option value="">Any scope</option>
-          {hierarchy.flatMap((space: HierarchySpace) =>
-            space.scopes.map((scope) => (
-              <option key={scope.id} value={scope.id}>
-                {space.name} / {scope.name}
-              </option>
-            )),
-          )}
-        </select>
         <button
           type="button"
           className="button secondary"
@@ -427,26 +381,6 @@ export function AssetsTablePage(): ReactElement {
       {selected.size > 0 ? (
         <div className="assets-bulk">
           <span>{selected.size} selected</span>
-          <select
-            aria-label="Add selected assets to a scope"
-            defaultValue=""
-            onChange={(event) => {
-              const value: string = event.target.value
-              if (value.startsWith("scope:")) {
-                void addTo("scope", value.slice(6))
-              }
-              event.currentTarget.value = ""
-            }}
-          >
-            <option value="">Add to scope...</option>
-            {hierarchy.flatMap((space: HierarchySpace) =>
-              space.scopes.map((scope) => (
-                <option key={scope.id} value={`scope:${scope.id}`}>
-                  {space.name} / {scope.name}
-                </option>
-              )),
-            )}
-          </select>
           <button
             type="button"
             className="button secondary"
@@ -456,19 +390,6 @@ export function AssetsTablePage(): ReactElement {
           >
             Build context
           </button>
-          {scopeId !== null ? (
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => {
-                void bulkMembership([...selected], "scope", scopeId, "detach").then(() => {
-                  patch({ tick: String(Date.now()) })
-                })
-              }}
-            >
-              Remove from scope
-            </button>
-          ) : null}
         </div>
       ) : null}
       {loading && page === null ? <p className="note">Loading assets…</p> : null}
@@ -574,7 +495,6 @@ function assetListQuery(input: {
   kinds: AssetKind[]
   formats: string[]
   owner: "me" | "shared" | "all"
-  scopeId: string | null
   status: AssetStatus | null
   sort: AssetSort | undefined
   order: "asc" | "desc" | undefined
@@ -587,7 +507,6 @@ function assetListQuery(input: {
     formats: input.formats,
     owner: input.owner,
     workspaceId: getActiveWorkspaceId(),
-    scopeId: input.scopeId ?? undefined,
     status: input.status ?? undefined,
     sort: input.sort,
     order: input.order,
@@ -660,7 +579,6 @@ function AssetRow(props: {
 }): ReactElement {
   const row: AssetListItem = props.row
   const score: number = liveFreshness(row, props.now)
-  const tags: string = row.scopes.map((scope) => scope.name).join(", ")
   return (
     <div className={props.selected ? "asset-row is-selected" : "asset-row"} role="row">
       <span className="asset-row__check" role="cell">
@@ -674,16 +592,6 @@ function AssetRow(props: {
         />
       </span>
       <span className="asset-row__identity" role="cell">
-        {isAirflowKind(row.kind) ? (
-          <span className="asset-row__mark" title="Airflow">
-            <AirflowIcon />
-          </span>
-        ) : null}
-        {row.kind === "TABLE" && isIceberg(row.table_format) ? (
-          <span className="asset-row__mark" title="Iceberg">
-            <IcebergIcon />
-          </span>
-        ) : null}
         {row.kind === "TABLE" || row.kind === "AIRFLOW_INSTANCE" ? (
           <Availability status={row.status} disabled={props.switching} onToggle={props.onToggle} />
         ) : null}
@@ -695,9 +603,6 @@ function AssetRow(props: {
         >
           {row.name}
         </button>
-        <span className="asset-row__kind">{kindLabel(row.kind)}</span>
-        {tags !== "" ? <span className="asset-row__tags">{tags}</span> : null}
-        {row.subtitle !== null ? <small className="assets-subtitle">{row.subtitle}</small> : null}
       </span>
       <span className="asset-row__refresh" role="cell">
         {typeof row.schedule === "string" && row.schedule !== "" ? (
@@ -918,30 +823,6 @@ function serviceKinds(service: ServiceId): AssetKind[] {
   return []
 }
 
-function isIceberg(format: string | null): boolean {
-  return format !== null && format.toUpperCase() === "ICEBERG"
-}
-
-function isAirflowKind(kind: AssetKind): boolean {
-  return kind === "AIRFLOW_DAG" || kind === "AIRFLOW_INSTANCE"
-}
-
-function kindLabel(kind: AssetKind): string {
-  if (kind === "AIRFLOW_DAG") {
-    return "Airflow DAG"
-  }
-  if (kind === "AIRFLOW_INSTANCE") {
-    return "Airflow instance"
-  }
-  if (kind === "NOTEBOOK") {
-    return "Notebook"
-  }
-  if (kind === "FILE") {
-    return "File"
-  }
-  return "Table"
-}
-
 function statusParam(value: string | null): AssetStatus | null {
   if (value === "ACTIVE" || value === "MISSING" || value === "DEPRECATED") {
     return value
@@ -969,7 +850,6 @@ async function exportCsv(params: URLSearchParams): Promise<void> {
       formats,
       owner: ownerParam(params.get("owner")),
       workspaceId: getActiveWorkspaceId(),
-      scopeId: params.get("scope") ?? undefined,
       status: status ?? undefined,
       limit: 200,
       offset,
@@ -980,7 +860,7 @@ async function exportCsv(params: URLSearchParams): Promise<void> {
       break
     }
   }
-  const lines: string[] = ["kind,name,status,context,freshness,scopes"]
+  const lines: string[] = ["kind,name,status,context,freshness"]
   for (const row of collected) {
     lines.push(
       [
@@ -989,7 +869,6 @@ async function exportCsv(params: URLSearchParams): Promise<void> {
         row.status,
         row.context_state,
         String(row.freshness_score),
-        csv(row.scopes.map((scope) => scope.name).join(" ")),
       ].join(","),
     )
   }

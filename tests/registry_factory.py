@@ -9,8 +9,6 @@ from intelegent_data_catalog.services.bindings import BindingService
 from intelegent_data_catalog.services.data_sources import DataSourceService
 from intelegent_data_catalog.services.engines import EngineService
 from intelegent_data_catalog.services.relationships import RelationshipService
-from intelegent_data_catalog.services.scopes import ScopeService
-from intelegent_data_catalog.services.spaces import SpaceService
 from intelegent_data_catalog.services.sync_runs import SyncRunService
 from intelegent_data_catalog.services.tables import TableService
 
@@ -19,8 +17,6 @@ from intelegent_data_catalog.services.tables import TableService
 class OpenRegistry:
     """Services that share one repository and one session."""
 
-    spaces: SpaceService
-    scopes: ScopeService
     sources: DataSourceService
     tables: TableService
     relationships: RelationshipService
@@ -33,8 +29,6 @@ def open_registry(session: Session) -> OpenRegistry:
     """Build every catalog service on the caller's session."""
     repo: RegistryRepository = RegistryRepository(session)
     return OpenRegistry(
-        spaces=SpaceService(repo),
-        scopes=ScopeService(repo),
         sources=DataSourceService(repo),
         tables=TableService(repo),
         relationships=RelationshipService(repo),

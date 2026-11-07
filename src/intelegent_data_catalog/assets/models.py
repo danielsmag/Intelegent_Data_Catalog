@@ -19,14 +19,11 @@ AssetSort = Literal[
     "kind",
     "updated_at",
     "last_built_at",
-    "membership_count",
     "freshness_score",
     "context_state",
 ]
 AssetOwnerFilter = Literal["me", "shared", "all"]
 ContextState = Literal["none", "user", "llm"]
-MembershipTarget = Literal["scope", "space"]
-MembershipAction = Literal["attach", "detach"]
 
 
 class AssetContextOptions(BaseModel):
@@ -51,27 +48,6 @@ class AssetAnalysisContext(BaseModel):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-class AssetMembershipRead(BaseModel):
-    """One space or scope that holds an asset."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    asset_id: UUID
-    space_id: UUID | None
-    scope_id: UUID | None
-    created_at: datetime
-
-
-class AssetTargetRef(BaseModel):
-    """A space or scope name shown on an asset row."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    name: str
-
-
 class AssetUpdate(BaseModel):
     """User edits stored on the asset row."""
 
@@ -84,7 +60,7 @@ class AssetUpdate(BaseModel):
 
 
 class AssetRead(BaseModel):
-    """One asset plus the memberships and a kind-specific detail payload."""
+    """One asset plus a kind-specific detail payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -100,7 +76,6 @@ class AssetRead(BaseModel):
     status: AssetStatus
     properties: dict[str, JsonValue]
     tags: list[str] = Field(default_factory=list)
-    memberships: list[AssetMembershipRead]
     detail: dict[str, JsonValue]
     created_at: datetime
     updated_at: datetime
@@ -122,9 +97,6 @@ class AssetListItem(BaseModel):
     status: AssetStatus
     subtitle: str | None
     table_format: str | None = None
-    membership_count: int
-    scopes: list[AssetTargetRef]
-    spaces: list[AssetTargetRef]
     last_built_at: datetime | None
     context_state: ContextState
     freshness_score: int
@@ -155,8 +127,6 @@ class AssetQuery(BaseModel):
     formats: list[str] = Field(default_factory=list)
     owner: AssetOwnerFilter = "all"
     workspace_id: UUID | None = None
-    scope_id: UUID | None = None
-    space_id: UUID | None = None
     status: AssetStatus | None = None
     has_context: bool | None = None
     refresh_mode: AssetRefreshMode | None = None
@@ -164,34 +134,6 @@ class AssetQuery(BaseModel):
     order: Literal["asc", "desc"] = "desc"
     limit: int = Field(default=100, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
-
-
-class BulkMembershipWrite(BaseModel):
-    """Attach or detach many assets at one space or scope."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    asset_ids: list[UUID] = Field(min_length=1, max_length=200)
-    target_kind: MembershipTarget
-    target_id: UUID
-    action: MembershipAction
-
-
-class BulkMembershipResult(BaseModel):
-    """How many memberships changed. Already-applied rows are unchanged."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    changed: int
-    unchanged: int
-
-
-class AssetIdsWrite(BaseModel):
-    """Asset ids to attach to one scope or space."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    asset_ids: list[UUID] = Field(min_length=1, max_length=200)
 
 
 class FileCatalogContext(BaseModel):

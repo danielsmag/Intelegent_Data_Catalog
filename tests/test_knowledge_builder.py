@@ -49,8 +49,6 @@ from intelegent_data_catalog.knowledge.models import (
     LineageContext,
     NeighborDirection,
     ProfileOverrides,
-    ScopeSummary,
-    SpaceSummary,
     TableAnalysisContext,
     TableCatalogContext,
     TableContextOptions,
@@ -86,9 +84,7 @@ from intelegent_data_catalog.registry.schemas import (
     ColumnMappingWrite,
     DataSourceCreate,
     RelationshipCreate,
-    ScopeCreate,
     SourceRef,
-    SpaceCreate,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 
@@ -282,15 +278,13 @@ def test_missing_table_raises() -> None:
         agent.get_metadata()
 
 
-def test_metadata_exposes_keys_scope_space_and_tags() -> None:
-    """The catalog context carries columns, keys, relationships, and hierarchy."""
+def test_metadata_exposes_keys_and_tags() -> None:
+    """The catalog context carries columns, keys, relationships, and tags."""
     table_id: UUID = uuid4()
     column_id: UUID = uuid4()
     context: TableCatalogContext = _context(table_id, column_id=column_id, foreign_key=True)
     agent: TableAgent = _factory(context).create(table_id)
     loaded: TableCatalogContext = agent.get_metadata()
-    assert loaded.table.space.name == "Commerce"
-    assert loaded.table.scope.name == "Ordering"
     assert loaded.table.tags[0].name == "finance"
     assert loaded.columns[0].id == column_id
     assert loaded.columns[0].is_primary_key is True
@@ -639,17 +633,11 @@ def test_session_factory_loads_postgres_graph_and_lineage(tmp_path: Path) -> Non
     try:
         service: OpenRegistry = open_registry(session)
         annotations: CatalogAnnotations = CatalogAnnotations(session)
-        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-        ordering_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        customer_scope_id: UUID = service.scopes.create_scope(
-            space_id,
-            ScopeCreate(name="Customer"),
-        ).id
         source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
-        orders_id: UUID = _table(service, ordering_id, source_id, "orders")
-        customers_id: UUID = _table(service, customer_scope_id, source_id, "customers")
+        orders_id: UUID = _table(service, source_id, "orders")
+        customers_id: UUID = _table(service, source_id, "customers")
         order_key: UUID = service.tables.create_column(
             orders_id,
             ColumnCreate(name="id", data_type="bigint", ordinal_position=0, is_primary_key=True),
@@ -722,8 +710,6 @@ def test_session_factory_loads_postgres_graph_and_lineage(tmp_path: Path) -> Non
         )
         agent: TableAgent = factory.create(orders_id)
         loaded: TableCatalogContext = agent.get_metadata()
-        assert loaded.table.space.slug == "commerce"
-        assert loaded.table.scope.slug == "ordering"
         assert loaded.table.tags[0].name == "finance"
         by_name: dict[str, ColumnMetadata] = {column.name: column for column in loaded.columns}
         assert by_name["id"].id == order_key
@@ -973,8 +959,6 @@ def _context(
     column_id: UUID | None = None,
     foreign_key: bool = False,
 ) -> TableCatalogContext:
-    space_id: UUID = uuid4()
-    scope_id: UUID = uuid4()
     selected_column: UUID = column_id or uuid4()
     target_column: UUID = uuid4()
     target_table: UUID = uuid4()
@@ -988,26 +972,11 @@ def _context(
             table_type=TableKind.TABLE,
             status=TableStatus.ACTIVE,
             data_source_id=uuid4(),
-            scope_id=scope_id,
-            space_id=space_id,
             physical_catalog="polaris",
             physical_namespace="sales",
             physical_table=name,
             source_key=f"polaris.sales.{name}",
             row_count=10,
-            scope=ScopeSummary(
-                id=scope_id,
-                space_id=space_id,
-                name="Ordering",
-                slug="ordering",
-                description=None,
-            ),
-            space=SpaceSummary(
-                id=space_id,
-                name="Commerce",
-                slug="commerce",
-                description=None,
-            ),
             tags=[TagSummary(id=uuid4(), name="finance")],
         ),
         columns=[
@@ -1085,12 +1054,10 @@ def _database(tmp_path: Path) -> CatalogDatabase:
 
 def _table(
     service: OpenRegistry,
-    scope_id: UUID,
     data_source_id: UUID,
     name: str,
 ) -> UUID:
     return service.tables.create_table(
-        scope_id,
         CatalogTableCreate(
             data_source_id=data_source_id,
             name=name,

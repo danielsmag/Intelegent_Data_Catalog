@@ -12,8 +12,6 @@ from intelegent_data_catalog.persistence.models import (
     CatalogTableRow,
     ColumnRow,
     MarquezMappingRow,
-    ScopeRow,
-    SpaceRow,
     TableTagRow,
     TagRow,
 )
@@ -33,7 +31,7 @@ class SearchHit(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    """Search hits across spaces, scopes, tables, columns, and tags."""
+    """Search hits across tables, columns, and tags."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -87,44 +85,16 @@ class CatalogAnnotations:
     def __init__(self, session: Session) -> None:
         self._repo: RegistryRepository = RegistryRepository(session)
 
-    def search(
-        self,
-        text: str,
-        limit: int = 50,
-        space_ids: frozenset[UUID] | None = None,
-    ) -> SearchResponse:
+    def search(self, text: str, limit: int = 50) -> SearchResponse:
         """Search catalog text. The query is escaped before LIKE."""
         if text.strip() == "":
             from intelegent_data_catalog.exceptions import ValidationAppError
 
             raise ValidationAppError("q must not be blank", field="q")
         pattern: str = _like_pattern(text.strip())
-        allowed: set[UUID] | None = None if space_ids is None else set(space_ids)
         hits: list[SearchHit] = []
-        space: SpaceRow
-        for space in self._repo.search_spaces(pattern, limit, allowed):
-            hits.append(
-                SearchHit(
-                    kind="space",
-                    id=space.id,
-                    name=space.name,
-                    qualified_name=space.slug,
-                    description=space.description,
-                )
-            )
-        scope: ScopeRow
-        for scope in self._repo.search_scopes(pattern, limit, allowed):
-            hits.append(
-                SearchHit(
-                    kind="scope",
-                    id=scope.id,
-                    name=scope.name,
-                    qualified_name=scope.slug,
-                    description=scope.description,
-                )
-            )
         table: CatalogTableRow
-        for table in self._repo.search_tables(pattern, limit, allowed):
+        for table in self._repo.search_tables(pattern, limit):
             hits.append(
                 SearchHit(
                     kind="table",
@@ -135,7 +105,7 @@ class CatalogAnnotations:
                 )
             )
         column: ColumnRow
-        for column in self._repo.search_columns(pattern, limit, allowed):
+        for column in self._repo.search_columns(pattern, limit):
             parent: CatalogTableRow | None = self._repo.get_table(column.table_id)
             qualified: str = column.name if parent is None else f"{parent.source_key}.{column.name}"
             hits.append(

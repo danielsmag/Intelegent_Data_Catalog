@@ -66,7 +66,7 @@ def remove_workspace(
     service: WorkspaceServiceDep,
     access: AccessDep,
 ) -> Response:
-    """Delete a workspace that has no space bindings."""
+    """Delete a workspace."""
     service.delete_workspace(workspace_id, access)
     return Response(status_code=204)
 
@@ -108,35 +108,7 @@ def remove_member(
     return Response(status_code=204)
 
 
-@router.get("/workspaces/{workspace_id}/spaces", response_model=list[UUID])
-def list_bound_spaces(
-    workspace_id: UUID,
-    service: WorkspaceServiceDep,
-    access: AccessDep,
-) -> list[UUID]:
-    """List spaces bound to a workspace."""
-    return service.list_bound_spaces(workspace_id, access)
 
 
-@router.put("/workspaces/{workspace_id}/spaces/{space_id}", status_code=204)
-def bind_space(
-    workspace_id: UUID,
-    space_id: UUID,
-    service: WorkspaceServiceDep,
-    access: AccessDep,
-) -> Response:
-    """Bind a space to a workspace."""
-    service.bind_space(workspace_id, space_id, access)
-    return Response(status_code=204)
 
 
-@router.delete("/workspaces/{workspace_id}/spaces/{space_id}", status_code=204)
-def unbind_space(
-    workspace_id: UUID,
-    space_id: UUID,
-    service: WorkspaceServiceDep,
-    access: AccessDep,
-) -> Response:
-    """Remove a space binding."""
-    service.unbind_space(workspace_id, space_id, access)
-    return Response(status_code=204)

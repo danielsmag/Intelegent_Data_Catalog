@@ -31,9 +31,9 @@ from intelegent_data_catalog.graph.knowledge_subgraph import (
 )
 from intelegent_data_catalog.knowledge.context import column_graph as column_graph_module
 from intelegent_data_catalog.knowledge.context.column_graph import (
+    ColumnCatalog,
     ColumnProposalContext,
     ColumnSubgraphBuilder,
-    ScopeColumnCatalog,
     accept_column_relations,
     assemble_column_subgraph,
 )
@@ -59,9 +59,7 @@ from intelegent_data_catalog.registry.schemas import (
     CatalogTableCreate,
     ColumnCreate,
     DataSourceCreate,
-    ScopeCreate,
     SourceRef,
-    SpaceCreate,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_knowledge_builder import _context, _factory
@@ -240,13 +238,11 @@ def test_builder_writes_model_relations_for_focus_columns(
     written: list[KnowledgeSubgraphWrite] = []
 
     class _Source:
-        def list_for_scope(
+        def list_candidates(
             self,
-            scope_id: UUID,
             focus_table_id: UUID,
             extra_column_ids: set[UUID],
         ) -> list[ColumnCandidate]:
-            assert scope_id == context.table.scope_id
             assert focus_table_id == focus_table
             assert source in extra_column_ids
             return columns
@@ -283,13 +279,12 @@ def test_builder_rejects_invented_columns_before_write() -> None:
     writes: list[KnowledgeSubgraphWrite] = []
 
     class _Source:
-        def list_for_scope(
+        def list_candidates(
             self,
-            scope_id: UUID,
             focus_table_id: UUID,
             extra_column_ids: set[UUID],
         ) -> list[ColumnCandidate]:
-            del scope_id, focus_table_id, extra_column_ids
+            del focus_table_id, extra_column_ids
             return [_candidate(source, focus_table, "orders", "customer_id", on_focus=True)]
 
     class _Proposer:
@@ -404,7 +399,7 @@ def test_model_retries_an_invented_column_then_returns_the_link() -> None:
     assert "Customer who placed the order." in prompts[0]
 
 
-def test_scope_catalog_prefers_focus_and_relationship_columns(
+def test_column_catalog_prefers_focus_and_relationship_columns(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -414,15 +409,12 @@ def test_scope_catalog_prefers_focus_and_relationship_columns(
     session: Session = database.session()
     try:
         service: OpenRegistry = open_registry(session)
-        space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-        ordering_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
-        people_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="People")).id
         source_id: UUID = service.sources.create_data_source(
             DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
         ).id
-        orders_id: UUID = _table(service, ordering_id, source_id, "orders")
-        payments_id: UUID = _table(service, ordering_id, source_id, "payments")
-        customers_id: UUID = _table(service, people_id, source_id, "customers")
+        orders_id: UUID = _table(service, source_id, "orders")
+        payments_id: UUID = _table(service, source_id, "payments")
+        customers_id: UUID = _table(service, source_id, "customers")
         order_customer: UUID = service.tables.create_column(
             orders_id,
             ColumnCreate(name="customer_id", data_type="bigint", ordinal_position=0),
@@ -435,12 +427,8 @@ def test_scope_catalog_prefers_focus_and_relationship_columns(
             customers_id,
             ColumnCreate(name="id", data_type="bigint", ordinal_position=0, is_primary_key=True),
         ).id
-        catalog: ScopeColumnCatalog = ScopeColumnCatalog(RegistryRepository(session))
-        chosen: list[ColumnCandidate] = catalog.list_for_scope(
-            ordering_id,
-            orders_id,
-            {customer_key},
-        )
+        catalog: ColumnCatalog = ColumnCatalog(RegistryRepository(session))
+        chosen: list[ColumnCandidate] = catalog.list_candidates(orders_id, {customer_key})
         assert [item.name for item in chosen] == ["customer_id", "id"]
         assert chosen[0].column_id == order_customer
         assert chosen[0].on_focus_table is True
@@ -451,13 +439,13 @@ def test_scope_catalog_prefers_focus_and_relationship_columns(
         database.dispose()
 
 
-def test_scope_catalog_missing_table_is_not_found(tmp_path: Path) -> None:
+def test_column_catalog_missing_table_is_not_found(tmp_path: Path) -> None:
     """A missing focus table does not invent columns."""
     database: CatalogDatabase = _database(tmp_path)
     session: Session = database.session()
     try:
         with pytest.raises(EntityNotFoundError):
-            ScopeColumnCatalog(RegistryRepository(session)).list_for_scope(uuid4(), uuid4(), set())
+            ColumnCatalog(RegistryRepository(session)).list_candidates(uuid4(), set())
     finally:
         session.close()
         database.dispose()
@@ -544,9 +532,8 @@ def _database(tmp_path: Path) -> CatalogDatabase:
     return CatalogDatabase(url)
 
 
-def _table(service: OpenRegistry, scope_id: UUID, source_id: UUID, name: str) -> UUID:
+def _table(service: OpenRegistry, source_id: UUID, name: str) -> UUID:
     return service.tables.create_table(
-        scope_id,
         CatalogTableCreate(
             data_source_id=source_id,
             name=name,

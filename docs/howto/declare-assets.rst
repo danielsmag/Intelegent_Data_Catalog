@@ -1,7 +1,7 @@
 Declare assets
 ==============
 
-Put one Python file in each definition folder. The scanner executes the file
+Put one Python file under ``assets/``. The scanner executes the file
 and applies what it constructs. Upload the object under the configured
 prefix (default ``asset-definitions/``) in the definition bucket.
 
@@ -9,26 +9,6 @@ The commerce team's declarations are the ``lumen-sales`` project next to this
 repository. Those files belong under the prefix in the definition bucket. The
 catalog reads that prefix from object storage. The snippets below are copies
 shipped with this manual, so the HTML build does not need that checkout.
-
-Space
------
-
-.. literalinclude:: ../examples/lumen-sales/spaces/space_sales.py
-   :language: python
-   :caption: lumen-sales/spaces/space_sales.py
-
-Object key: ``asset-definitions/spaces/space_sales.py``.
-
-Scope
------
-
-.. literalinclude:: ../examples/lumen-sales/scopes/sales/scope_sales.py
-   :language: python
-   :caption: lumen-sales/scopes/sales/scope_sales.py
-
-Object key: ``asset-definitions/scopes/sales/scope_sales.py``. The
-parent space slug is ``sales``. Create the space file first. A scope
-whose space is still missing stays unresolved and is retried on a later scan.
 
 Asset
 -----

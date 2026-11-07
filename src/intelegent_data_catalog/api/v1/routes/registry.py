@@ -6,19 +6,13 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response
 
 from intelegent_data_catalog.api.dependencies import (
-    AccessDep,
     BindingServiceDep,
     DataSourceServiceDep,
     EngineServiceDep,
     RelationshipServiceDep,
-    ScopeAttachmentDep,
-    ScopeServiceDep,
-    SpaceServiceDep,
     SyncRunServiceDep,
     TableServiceDep,
 )
-from intelegent_data_catalog.auth.access import AccessContext
-from intelegent_data_catalog.exceptions import EntityNotFoundError
 from intelegent_data_catalog.registry.schemas import (
     AssetBindingCreate,
     AssetBindingRead,
@@ -38,17 +32,9 @@ from intelegent_data_catalog.registry.schemas import (
     RelationshipCreate,
     RelationshipRead,
     RelationshipUpdate,
-    ScopeAttachmentCreate,
-    ScopeAttachmentResult,
-    ScopeCreate,
-    ScopeRead,
-    ScopeUpdate,
     SourceBindingCreate,
     SourceBindingRead,
     SourceBindingUpdate,
-    SpaceCreate,
-    SpaceRead,
-    SpaceUpdate,
     SyncRunCreate,
     SyncRunRead,
     SyncRunUpdate,
@@ -58,79 +44,14 @@ from intelegent_data_catalog.registry.schemas import (
 router: APIRouter = APIRouter()
 
 
-@router.get("/spaces", response_model=list[SpaceRead])
-def list_spaces(service: SpaceServiceDep, access: AccessDep) -> list[SpaceRead]:
-    """List business spaces visible to the active workspace."""
-    return service.list_spaces(access.visible_space_ids)
 
 
-@router.post("/spaces", response_model=SpaceRead, status_code=201)
-def create_space(body: SpaceCreate, service: SpaceServiceDep, access: AccessDep) -> SpaceRead:
-    """Create a business space. Isolated spaces bind to the active workspace."""
-    return service.create_space(body, workspace_id=access.workspace_id)
 
 
-@router.get("/spaces/{space_id}", response_model=SpaceRead)
-def read_space(space_id: UUID, service: SpaceServiceDep) -> SpaceRead:
-    """Return one space."""
-    return service.get_space(space_id)
 
 
-@router.patch("/spaces/{space_id}", response_model=SpaceRead)
-def patch_space(
-    space_id: UUID,
-    body: SpaceUpdate,
-    service: SpaceServiceDep,
-    access: AccessDep,
-) -> SpaceRead:
-    """Patch a space."""
-    return service.update_space(space_id, body, workspace_id=access.workspace_id)
 
 
-@router.delete("/spaces/{space_id}", status_code=204)
-def remove_space(space_id: UUID, service: SpaceServiceDep) -> Response:
-    """Delete a space that has no scopes."""
-    service.delete_space(space_id)
-    return Response(status_code=204)
-
-
-@router.get("/spaces/{space_id}/scopes", response_model=list[ScopeRead])
-def list_scopes(space_id: UUID, service: ScopeServiceDep) -> list[ScopeRead]:
-    """List scopes in a space."""
-    return service.list_scopes(space_id)
-
-
-@router.post("/spaces/{space_id}/scopes", response_model=ScopeRead, status_code=201)
-def create_scope(
-    space_id: UUID,
-    body: ScopeCreate,
-    service: ScopeServiceDep,
-) -> ScopeRead:
-    """Create a scope in a space."""
-    return service.create_scope(space_id, body)
-
-
-@router.get("/scopes/{scope_id}", response_model=ScopeRead)
-def read_scope(scope_id: UUID, service: ScopeServiceDep) -> ScopeRead:
-    """Return one scope."""
-    return service.get_scope(scope_id)
-
-
-@router.patch("/scopes/{scope_id}", response_model=ScopeRead)
-def patch_scope(
-    scope_id: UUID,
-    body: ScopeUpdate,
-    service: ScopeServiceDep,
-) -> ScopeRead:
-    """Patch a scope."""
-    return service.update_scope(scope_id, body)
-
-
-@router.delete("/scopes/{scope_id}", status_code=204)
-def remove_scope(scope_id: UUID, service: ScopeServiceDep) -> Response:
-    """Delete a scope that has no tables."""
-    service.delete_scope(scope_id)
-    return Response(status_code=204)
 
 
 @router.get("/data-sources", response_model=list[DataSourceRead])
@@ -168,30 +89,22 @@ def remove_data_source(data_source_id: UUID, service: DataSourceServiceDep) -> R
     return Response(status_code=204)
 
 
-@router.get("/scopes/{scope_id}/tables", response_model=list[CatalogTableRead])
-def list_scope_tables(scope_id: UUID, service: TableServiceDep) -> list[CatalogTableRead]:
-    """List catalog tables in a scope."""
-    return service.list_tables(scope_id)
 
 
-@router.post("/scopes/{scope_id}/attachments", response_model=ScopeAttachmentResult)
-def attach_scope_assets(
-    scope_id: UUID,
-    body: ScopeAttachmentCreate,
-    service: ScopeAttachmentDep,
-) -> ScopeAttachmentResult:
-    """Copy tables, or a whole schema, from Polaris or Trino into this scope."""
-    return service.attach(scope_id, body)
+
+@router.get("/tables", response_model=list[CatalogTableRead])
+def list_catalog_tables(service: TableServiceDep) -> list[CatalogTableRead]:
+    """List catalog tables."""
+    return service.list_tables()
 
 
-@router.post("/scopes/{scope_id}/tables", response_model=CatalogTableRead, status_code=201)
-def create_scope_table(
-    scope_id: UUID,
+@router.post("/tables", response_model=CatalogTableRead, status_code=201)
+def create_catalog_table(
     body: CatalogTableCreate,
     service: TableServiceDep,
 ) -> CatalogTableRead:
-    """Create a catalog table in a scope."""
-    return service.create_table(scope_id, body)
+    """Create a catalog table."""
+    return service.create_table(body)
 
 
 @router.get("/tables/{table_id}", response_model=CatalogTableRead)
@@ -206,7 +119,7 @@ def patch_catalog_table(
     body: CatalogTableUpdate,
     service: TableServiceDep,
 ) -> CatalogTableRead:
-    """Patch user-facing table fields and the manual scope assignment."""
+    """Patch user-facing table fields."""
     return service.update_table(table_id, body)
 
 
@@ -253,17 +166,9 @@ def remove_column(column_id: UUID, service: TableServiceDep) -> Response:
 @router.post("/relationships", response_model=RelationshipRead, status_code=201)
 def create_relationship(
     body: RelationshipCreate,
-    spaces: SpaceServiceDep,
     relationships: RelationshipServiceDep,
-    access: AccessDep,
 ) -> RelationshipRead:
     """Create a relationship and its column mappings."""
-    access_context: AccessContext = access
-    table_id: UUID
-    for table_id in (body.source_table_id, body.target_table_id):
-        space_id: UUID = spaces.space_id_for_table(table_id)
-        if not access_context.allows_space(space_id):
-            raise EntityNotFoundError("table", str(table_id))
     return relationships.create_relationship(body)
 
 

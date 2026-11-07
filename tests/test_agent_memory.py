@@ -327,7 +327,6 @@ def _service(
         workspace_id=None,
         member_workspace_ids=chosen,
         admin_workspace_ids=frozenset(),
-        visible_space_ids=None,
     )
     return AgentPackService(
         session,

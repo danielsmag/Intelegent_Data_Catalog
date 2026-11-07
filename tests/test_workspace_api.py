@@ -1,4 +1,4 @@
-"""Workspace membership, the shared workspace, and space visibility."""
+"""Workspace membership and the shared workspace."""
 
 import asyncio
 from pathlib import Path
@@ -49,8 +49,8 @@ def test_shared_workspace_cannot_be_deleted(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_isolated_space_is_visible_only_to_members(tmp_path: Path) -> None:
-    """OPEN spaces are global. ISOLATED spaces follow the active workspace."""
+def test_workspace_membership_gates_access(tmp_path: Path) -> None:
+    """A member can open the workspace. A non-member cannot create one."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _auth_app(tmp_path)
@@ -64,39 +64,15 @@ def test_isolated_space_is_visible_only_to_members(tmp_path: Path) -> None:
         )
         assert created.status_code == 201
         workspace_id: str = _text(_object(created), "id")
-        private: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/spaces",
-            {"name": "Ledger", "isolation_mode": "ISOLATED"},
-            token=_ADMIN,
-            workspace_id=workspace_id,
-        )
-        assert private.status_code == 201
-        space_id: str = _text(_object(private), "id")
-        opened: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/spaces",
-            {"name": "Public"},
-            token=_ADMIN,
-        )
-        assert opened.status_code == 201
         signed_in: httpx.Response = _send(app, "GET", "/api/v1/me", token=_ANALYST)
         assert signed_in.status_code == 200
-        hidden: httpx.Response = _send(app, "GET", "/api/v1/spaces", token=_ANALYST)
-        assert hidden.status_code == 200
-        assert _names(_list(hidden.json())) == ["Public"]
-        missing: httpx.Response = _send(app, "GET", f"/api/v1/spaces/{space_id}", token=_ANALYST)
-        assert missing.status_code == 404
         refused: httpx.Response = _send(
             app,
             "GET",
-            "/api/v1/spaces",
+            f"/api/v1/workspaces/{workspace_id}",
             token=_ANALYST,
-            workspace_id=workspace_id,
         )
-        assert refused.status_code == 403
+        assert refused.status_code == 404
         added: httpx.Response = _send(
             app,
             "POST",
@@ -108,30 +84,11 @@ def test_isolated_space_is_visible_only_to_members(tmp_path: Path) -> None:
         visible: httpx.Response = _send(
             app,
             "GET",
-            "/api/v1/spaces",
+            f"/api/v1/workspaces/{workspace_id}",
             token=_ANALYST,
-            workspace_id=workspace_id,
         )
         assert visible.status_code == 200
-        assert "Ledger" in _names(_list(visible.json()))
-        assert "Public" in _names(_list(visible.json()))
-        scope: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{space_id}/scopes",
-            {"name": "Books"},
-            token=_ANALYST,
-            workspace_id=workspace_id,
-        )
-        assert scope.status_code == 201
-        scope_id: str = _text(_object(scope), "id")
-        blocked_scope: httpx.Response = _send(
-            app,
-            "GET",
-            f"/api/v1/scopes/{scope_id}",
-            token=_ANALYST,
-        )
-        assert blocked_scope.status_code == 404
+        assert _text(_object(visible), "name") == "Finance"
         blocked_create: httpx.Response = _send(
             app,
             "POST",
@@ -142,91 +99,6 @@ def test_isolated_space_is_visible_only_to_members(tmp_path: Path) -> None:
         assert blocked_create.status_code == 403
         rebuild: httpx.Response = _send(app, "POST", "/api/v1/graph/rebuild", token=_ANALYST)
         assert rebuild.status_code == 403
-    finally:
-        database.dispose()
-
-
-def test_search_hides_isolated_tables(tmp_path: Path) -> None:
-    """Search drops tables that sit in a space the caller cannot see."""
-    app: FastAPI
-    database: CatalogDatabase
-    app, database = _auth_app(tmp_path)
-    try:
-        workspace: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/workspaces",
-            {"name": "Finance"},
-            token=_ADMIN,
-        )
-        workspace_id: str = _text(_object(workspace), "id")
-        space: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/spaces",
-            {"name": "Ledger", "isolation_mode": "ISOLATED"},
-            token=_ADMIN,
-            workspace_id=workspace_id,
-        )
-        space_id: str = _text(_object(space), "id")
-        scope: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{space_id}/scopes",
-            {"name": "Books"},
-            token=_ADMIN,
-            workspace_id=workspace_id,
-        )
-        scope_id: str = _text(_object(scope), "id")
-        source: httpx.Response = _send(
-            app,
-            "POST",
-            "/api/v1/data-sources",
-            {"name": "Lake", "type": "ICEBERG_REST", "configuration": {}},
-            token=_ADMIN,
-        )
-        source_id: str = _text(_object(source), "id")
-        table: httpx.Response = _send(
-            app,
-            "POST",
-            f"/api/v1/scopes/{scope_id}/tables",
-            {
-                "data_source_id": source_id,
-                "name": "secret_ledger",
-                "table_type": "TABLE",
-                "physical_catalog": "catalog",
-                "physical_namespace": "sales",
-                "physical_table": "secret_ledger",
-                "source_ref": {
-                    "catalog": "catalog",
-                    "namespace": "sales",
-                    "table": "secret_ledger",
-                },
-            },
-            token=_ADMIN,
-            workspace_id=workspace_id,
-        )
-        assert table.status_code == 201
-        _send(app, "GET", "/api/v1/me", token=_ANALYST)
-        hidden: httpx.Response = _send(
-            app,
-            "GET",
-            "/api/v1/search?q=secret_ledger",
-            token=_ANALYST,
-        )
-        assert hidden.status_code == 200
-        assert hidden.json()["hits"] == []
-        shown: httpx.Response = _send(
-            app,
-            "GET",
-            "/api/v1/search?q=secret_ledger",
-            token=_ADMIN,
-            workspace_id=workspace_id,
-        )
-        assert shown.status_code == 200
-        hits: object = _object(shown)["hits"]
-        assert isinstance(hits, list)
-        assert len(hits) == 1
     finally:
         database.dispose()
 
@@ -302,17 +174,6 @@ def _shared_id(rows: list[object]) -> str:
             UUID(value)
             return value
     raise AssertionError("shared workspace missing")
-
-
-def _names(rows: list[object]) -> list[str]:
-    found: list[str] = []
-    item: object
-    for item in rows:
-        assert isinstance(item, dict)
-        name: object = item["name"]
-        assert isinstance(name, str)
-        found.append(name)
-    return found
 
 
 def _list(value: object) -> list[object]:

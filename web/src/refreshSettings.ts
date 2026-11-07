@@ -331,12 +331,6 @@ async function saveEntityConfiguration(
 }
 
 function configurationPath(kind: string, id: string): string {
-  if (kind === "space") {
-    return `/api/v1/spaces/${id}/configuration`
-  }
-  if (kind === "scope") {
-    return `/api/v1/scopes/${id}/configuration`
-  }
   if (kind === "asset") {
     return `/api/v1/assets/${id}/configuration`
   }

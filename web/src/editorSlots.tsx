@@ -17,7 +17,7 @@ type StatusText = {
   detail: string
 }
 
-let statusText: StatusText = { area: "Spaces", detail: "Spaces" }
+let statusText: StatusText = { area: "Assets", detail: "Assets" }
 const statusListeners: Set<() => void> = new Set()
 
 function subscribeStatus(listener: () => void): () => void {

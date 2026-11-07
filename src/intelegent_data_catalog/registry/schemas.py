@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
@@ -21,7 +19,6 @@ from intelegent_data_catalog.persistence.enums import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
-    SpaceIsolationMode,
     SyncRunStatus,
     TableKind,
     TableStatus,
@@ -136,125 +133,10 @@ class SyncCounts(BaseModel):
     errors: int = Field(default=0, ge=0)
 
 
-class SpaceCreate(BaseModel):
-    """Create a space. Slug is derived from the name when omitted."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=255)
-    slug: str | None = Field(default=None, max_length=255)
-    description: str | None = Field(default=None, max_length=16000)
-    isolation_mode: SpaceIsolationMode = SpaceIsolationMode.OPEN
-
-    @field_validator("slug")
-    @classmethod
-    def _slug(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return require_slug(value)
 
 
-class SpaceUpdate(BaseModel):
-    """Patch user-facing space fields.
-
-    A new name refreshes the slug unless this patch also sends one.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    slug: str | None = Field(default=None, max_length=255)
-    description: str | None = Field(default=None, max_length=16000)
-    context: str | None = Field(default=None, max_length=4000)
-    isolation_mode: SpaceIsolationMode | None = None
-
-    @field_validator("name")
-    @classmethod
-    def _name(cls, value: str | None) -> str | None:
-        return _optional_display_name(value)
-
-    @field_validator("slug")
-    @classmethod
-    def _slug(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return require_slug(value)
 
 
-class SpaceRead(BaseModel):
-    """Space returned by the API."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    name: str
-    slug: str
-    description: str | None
-    isolation_mode: SpaceIsolationMode
-    bound_workspace_ids: list[UUID]
-    context: str | None
-    context_origin: ContextOrigin | None
-    created_at: datetime
-    updated_at: datetime
-
-
-class ScopeCreate(BaseModel):
-    """Create a scope inside a space from the URL."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=255)
-    slug: str | None = Field(default=None, max_length=255)
-    description: str | None = Field(default=None, max_length=16000)
-
-    @field_validator("slug")
-    @classmethod
-    def _slug(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return require_slug(value)
-
-
-class ScopeUpdate(BaseModel):
-    """Patch a scope.
-
-    A new name refreshes the slug unless this patch also sends one.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    slug: str | None = Field(default=None, max_length=255)
-    description: str | None = Field(default=None, max_length=16000)
-    context: str | None = Field(default=None, max_length=4000)
-
-    @field_validator("name")
-    @classmethod
-    def _name(cls, value: str | None) -> str | None:
-        return _optional_display_name(value)
-
-    @field_validator("slug")
-    @classmethod
-    def _slug(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return require_slug(value)
-
-
-class ScopeRead(BaseModel):
-    """Scope returned by the API."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    space_id: UUID
-    name: str
-    slug: str
-    description: str | None
-    context: str | None
-    context_origin: ContextOrigin | None
-    created_at: datetime
-    updated_at: datetime
 
 
 class DataSourceCreate(BaseModel):
@@ -318,7 +200,7 @@ class DataSourceRead(BaseModel):
 
 
 class CatalogTableCreate(BaseModel):
-    """Create a catalog table under the scope in the URL."""
+    """Create a catalog table."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -377,7 +259,6 @@ class CatalogTableUpdate(BaseModel):
     context: str | None = Field(default=None, max_length=4000)
     status: TableStatus | None = None
     table_format: str | None = Field(default=None, max_length=64)
-    scope_id: UUID | None = None
 
     @field_validator("name", "table_format")
     @classmethod
@@ -394,7 +275,6 @@ class CatalogTableRead(BaseModel):
 
     id: UUID
     asset_id: UUID | None = None
-    scope_id: UUID | None
     data_source_id: UUID
     name: str
     display_name: str | None
@@ -675,7 +555,6 @@ class SourceBindingCreate(BaseModel):
     engine_connection_id: UUID
     binding_key: str = Field(min_length=1, max_length=512)
     configuration: SourceBindingConfig = Field(default_factory=SourceBindingConfig)
-    default_scope_id: UUID | None = None
     capabilities: SourceCapabilities = Field(default_factory=SourceCapabilities)
 
     @field_validator("binding_key")
@@ -685,13 +564,12 @@ class SourceBindingCreate(BaseModel):
 
 
 class SourceBindingUpdate(BaseModel):
-    """Patch allowlists, capabilities, or the default scope."""
+    """Patch allowlists or capabilities."""
 
     model_config = ConfigDict(extra="forbid")
 
     binding_key: str | None = Field(default=None, max_length=512)
     configuration: SourceBindingConfig | None = None
-    default_scope_id: UUID | None = None
     capabilities: SourceCapabilities | None = None
 
     @field_validator("binding_key")
@@ -713,7 +591,6 @@ class SourceBindingRead(BaseModel):
     binding_key: str
     engine_type: EngineType
     configuration: SourceBindingConfig
-    default_scope_id: UUID | None
     capabilities: SourceCapabilities
     created_at: datetime
     updated_at: datetime
@@ -827,61 +704,8 @@ class SyncRunUpdate(BaseModel):
         return value
 
 
-class AttachmentOutcome(StrEnum):
-    """What happened when a source table was attached to a scope."""
-
-    CREATED = "created"
-    ALREADY_IN_SCOPE = "already_in_scope"
-    ALREADY_ELSEWHERE = "already_elsewhere"
 
 
-class ScopeAttachmentCreate(BaseModel):
-    """Attach tables from a catalog source. Omit tables to attach the whole schema."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_id: Literal["polaris", "trino"]
-    catalog: str = Field(min_length=1, max_length=512)
-    namespace: str = Field(min_length=1, max_length=512)
-    tables: list[str] | None = None
-
-    @field_validator("catalog", "namespace")
-    @classmethod
-    def _exact(cls, value: str) -> str:
-        return exact_identifier(value)
-
-    @field_validator("tables")
-    @classmethod
-    def _tables(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return None
-        if len(value) == 0:
-            raise ValueError("tables must name at least one table, or be omitted")
-        cleaned: list[str] = []
-        name: str
-        for name in value:
-            cleaned.append(exact_identifier(name))
-        return cleaned
-
-
-class AttachmentItem(BaseModel):
-    """One table considered during an attach."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    source_key: str
-    outcome: AttachmentOutcome
-    table_id: UUID | None
-    scope_id: UUID | None
-
-
-class ScopeAttachmentResult(BaseModel):
-    """Tables created or already registered."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[AttachmentItem]
 
 
 class SyncRunRead(BaseModel):

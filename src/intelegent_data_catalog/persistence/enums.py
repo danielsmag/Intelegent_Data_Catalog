@@ -167,8 +167,6 @@ class CatalogJobKind(StrEnum):
     """Which background build a catalog job row runs."""
 
     KNOWLEDGE = "knowledge"
-    SCOPE = "scope"
-    SPACE = "space"
     CONTEXT = "context"
     AIRFLOW = "airflow"
     ASSET = "asset"
@@ -185,17 +183,8 @@ class CatalogJobStatus(StrEnum):
 class RefreshSubjectKind(StrEnum):
     """Which catalog entity a saved configuration row belongs to."""
 
-    SPACE = "space"
-    SCOPE = "scope"
     TABLE = "table"
     ASSET = "asset"
-
-
-class SpaceIsolationMode(StrEnum):
-    """Who can see a space. ``OPEN`` is every workspace. ``ISOLATED`` is bound workspaces."""
-
-    OPEN = "OPEN"
-    ISOLATED = "ISOLATED"
 
 
 class WorkspaceRole(StrEnum):
@@ -215,8 +204,6 @@ class WorkspaceNodeKind(StrEnum):
 class DefinitionKind(StrEnum):
     """Object a definition file is allowed to declare."""
 
-    SPACE = "SPACE"
-    SCOPE = "SCOPE"
     ASSET = "ASSET"
 
 

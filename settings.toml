@@ -77,11 +77,6 @@ airflow_max_dags = 20
 airflow_max_tasks = 60
 airflow_max_candidate_tables = 300
 max_pipelines = 30
-scope_max_tables = 40
-scope_max_columns = 400
-space_max_scopes = 20
-space_max_tables = 60
-space_max_columns = 600
 trace_detail_chars = 2000
 
 # How often Beat looks for due rows. The saved configuration interval is the
@@ -129,7 +124,7 @@ bucket = "workspace"
 region = "us-west-2"
 max_upload_bytes = 52428800
 
-# Python files under spaces/, scopes/, and assets/. Beat polls only when enabled.
+# Python files under assets/. Beat polls only when enabled.
 # Host clients use localhost. Compose overrides the endpoint to http://minio:9000.
 [asset_definitions]
 enabled = true
@@ -139,8 +134,6 @@ secret_key = "polaris_pass"
 bucket = "workspace"
 region = "us-west-2"
 prefix = "asset-definitions/"
-spaces_folder = "spaces"
-scopes_folder = "scopes"
 assets_folder = "assets"
 poll_interval_seconds = 10
 exec_timeout_seconds = 30

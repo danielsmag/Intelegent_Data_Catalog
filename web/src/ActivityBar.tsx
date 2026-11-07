@@ -7,13 +7,11 @@ import {
   GearIcon,
   QueryIcon,
   SignOutIcon,
-  SpaceIcon,
   TableIcon,
 } from "./icons"
 import { openInFocusedGroup } from "./editorLayout"
 import { setSidebarView, useSidebarView, type SidebarView } from "./sidebarView"
 import { setAssetsSidebarOpen } from "./assetsSidebarStore"
-import { setSpacesSidebarOpen } from "./spacesSidebar"
 import { setWorkspaceSidebarOpen } from "./workspaceSidebar"
 import { useMe } from "./workspaceApi"
 
@@ -37,7 +35,6 @@ export function ActivityBar(): ReactElement {
   const items: Item[] = [
     { view: "workspace", label: "Workspace", icon: <TableIcon /> },
     { view: "assets", label: "Assets", icon: <AssetIcon /> },
-    { view: "spaces", label: "Spaces", icon: <SpaceIcon /> },
     { view: "catalog", label: "Catalog", icon: <CatalogIcon /> },
     { view: "search", label: "Search", icon: <QueryIcon />, gap: true },
     { view: "query", label: "Query", icon: <TableIcon /> },
@@ -58,9 +55,6 @@ export function ActivityBar(): ReactElement {
             title={item.label}
             onClick={() => {
               setSidebarView(item.view)
-              if (item.view === "spaces") {
-                setSpacesSidebarOpen(true)
-              }
               if (item.view === "workspace") {
                 setWorkspaceSidebarOpen(true)
               }

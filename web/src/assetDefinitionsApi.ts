@@ -15,8 +15,6 @@ export type AssetDefinitionItem = {
   item_key: string
   status: string
   error: string | null
-  space_id: string | null
-  scope_id: string | null
   asset_id: string | null
 }
 
@@ -52,7 +50,7 @@ export function fetchAssetDefinitionText(key: string, signal?: AbortSignal): Pro
 }
 
 export function fetchAssetDefinitionObjects(
-  folder: "spaces" | "scopes" | "assets",
+  folder: "assets",
   signal?: AbortSignal,
 ): Promise<AssetDefinitionObject[]> {
   return requestJson<AssetDefinitionObject[]>(

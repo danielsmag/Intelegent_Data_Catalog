@@ -110,26 +110,3 @@ export async function addMember(workspaceId: string, email: string): Promise<Wor
 export async function removeMember(workspaceId: string, userId: string): Promise<void> {
   await requestJson<void>(`/api/v1/workspaces/${workspaceId}/members/${userId}`, { method: "DELETE" })
 }
-
-export async function fetchBoundSpaces(workspaceId: string): Promise<string[]> {
-  return requestJson<string[]>(`/api/v1/workspaces/${workspaceId}/spaces`)
-}
-
-export async function bindSpace(workspaceId: string, spaceId: string): Promise<void> {
-  await requestJson<void>(`/api/v1/workspaces/${workspaceId}/spaces/${spaceId}`, { method: "PUT" })
-}
-
-export async function unbindSpace(workspaceId: string, spaceId: string): Promise<void> {
-  await requestJson<void>(`/api/v1/workspaces/${workspaceId}/spaces/${spaceId}`, { method: "DELETE" })
-}
-
-export async function patchSpaceIsolation(
-  spaceId: string,
-  isolationMode: "OPEN" | "ISOLATED",
-): Promise<void> {
-  await requestJson<unknown>(`/api/v1/spaces/${spaceId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isolation_mode: isolationMode }),
-  })
-}

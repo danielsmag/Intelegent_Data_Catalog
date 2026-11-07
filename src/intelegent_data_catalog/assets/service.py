@@ -13,13 +13,10 @@ from intelegent_data_catalog.assets.execution.runs import AssetRunReader
 from intelegent_data_catalog.assets.models import (
     AssetContextOptions,
     AssetListItem,
-    AssetMembershipRead,
     AssetPage,
     AssetQuery,
     AssetRead,
     AssetUpdate,
-    BulkMembershipResult,
-    BulkMembershipWrite,
 )
 from intelegent_data_catalog.assets.registry import AssetRegistry
 from intelegent_data_catalog.assets.repository import AssetRepository
@@ -31,11 +28,8 @@ from intelegent_data_catalog.exceptions import (
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import AssetKind, AssetStatus, ContextOrigin
 from intelegent_data_catalog.persistence.models import (
-    AssetMembershipRow,
     AssetRow,
     CatalogTableRow,
-    ScopeRow,
-    SpaceRow,
 )
 from intelegent_data_catalog.registry.reads import dump_model
 
@@ -117,56 +111,10 @@ class AssetService:
         self._repository.delete(row)
         self._session.commit()
 
-    def list_scope(self, scope_id: UUID) -> list[AssetRead]:
-        """Assets attached to one scope."""
-        self._require_scope(scope_id)
-        visible: list[AssetRead] = []
-        row: AssetRow
-        for row in self._repository.list_for_scope(scope_id):
-            if self._can_see(row):
-                visible.append(self._read(row))
-        return visible
 
-    def list_space(self, space_id: UUID) -> list[AssetRead]:
-        """Assets attached to one space or its scopes."""
-        self._require_space(space_id)
-        visible: list[AssetRead] = []
-        row: AssetRow
-        for row in self._repository.list_for_space(space_id):
-            if self._can_see(row):
-                visible.append(self._read(row))
-        return visible
 
-    def attach_many(
-        self,
-        target_kind: str,
-        target_id: UUID,
-        asset_ids: list[UUID],
-    ) -> BulkMembershipResult:
-        """Attach assets to a scope or space."""
-        return self._bulk(
-            BulkMembershipWrite(
-                asset_ids=asset_ids,
-                target_kind="scope" if target_kind == "scope" else "space",
-                target_id=target_id,
-                action="attach",
-            ),
-        )
 
-    def detach_one(self, target_kind: str, target_id: UUID, asset_id: UUID) -> None:
-        """Remove one membership."""
-        self._bulk(
-            BulkMembershipWrite(
-                asset_ids=[asset_id],
-                target_kind="scope" if target_kind == "scope" else "space",
-                target_id=target_id,
-                action="detach",
-            ),
-        )
 
-    def bulk(self, body: BulkMembershipWrite) -> BulkMembershipResult:
-        """Attach or detach many assets."""
-        return self._bulk(body)
 
     def build(self, asset_id: UUID, options: AssetContextOptions) -> Asset:
         """Run the asset agent and store the snapshot. Used by the job worker."""
@@ -175,50 +123,12 @@ class AssetService:
         asset.build_context(options)
         return asset
 
-    def _bulk(self, body: BulkMembershipWrite) -> BulkMembershipResult:
-        if body.target_kind == "scope":
-            self._require_scope(body.target_id)
-            scope_id: UUID | None = body.target_id
-            space_id: UUID | None = None
-        else:
-            self._require_space(body.target_id)
-            scope_id = None
-            space_id = body.target_id
-        changed: int = 0
-        unchanged: int = 0
-        asset_id: UUID
-        for asset_id in body.asset_ids:
-            row: AssetRow = self._require(asset_id)
-            if body.action == "attach":
-                _membership, created = self._repository.attach(
-                    row.id,
-                    scope_id=scope_id,
-                    space_id=space_id,
-                )
-                if created:
-                    changed += 1
-                else:
-                    unchanged += 1
-            else:
-                existing: AssetMembershipRow | None = self._repository.membership_for(
-                    row.id,
-                    scope_id=scope_id,
-                    space_id=space_id,
-                )
-                if existing is None:
-                    unchanged += 1
-                else:
-                    self._repository.detach(existing)
-                    changed += 1
-        self._session.commit()
-        return BulkMembershipResult(changed=changed, unchanged=unchanged)
 
     def _read(self, row: AssetRow) -> AssetRead:
         asset: Asset = self._registry.load(row.id)
         detail: BaseModel = asset.detail()
         dumped: object = dump_model(detail)
         payload: dict[str, JsonValue] = dumped if isinstance(dumped, dict) else {}
-        memberships: list[AssetMembershipRead] = asset.memberships()
         origin: ContextOrigin | None = None
         if row.context_origin is not None:
             origin = ContextOrigin(row.context_origin)
@@ -235,7 +145,6 @@ class AssetService:
             status=asset.status,
             properties=_properties(row.properties),
             tags=_tags(row.properties),
-            memberships=memberships,
             detail=payload,
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),
@@ -260,17 +169,7 @@ class AssetService:
         if not self._access.is_member(workspace_id):
             raise EntityNotFoundError("workspace", str(workspace_id))
 
-    def _require_scope(self, scope_id: UUID) -> ScopeRow:
-        row: ScopeRow | None = self._session.get(ScopeRow, scope_id)
-        if row is None or not self._access.allows_space(row.space_id):
-            raise EntityNotFoundError("scope", str(scope_id))
-        return row
 
-    def _require_space(self, space_id: UUID) -> SpaceRow:
-        row: SpaceRow | None = self._session.get(SpaceRow, space_id)
-        if row is None or not self._access.allows_space(space_id):
-            raise EntityNotFoundError("space", str(space_id))
-        return row
 
 class _UnavailableAgents(AssetAgentProvider):
     """Placeholder used when a request only reads assets."""

@@ -25,7 +25,7 @@ Auth
    * - ``GET /api/v1/health``
      - No access dependency.
    * - Platform, Airflow, schedules, configuration, registry, assets, asset definitions
-     - Resolve the caller, then return 404 for a path id in a space the active workspace cannot see.
+     - Resolve the caller. Workspace membership gates workspace files and assets. The physical catalog is visible to a signed-in caller.
    * - Workspaces and workspace files
      - Resolve the caller.
    * - Notebook HTTP routes

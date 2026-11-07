@@ -125,7 +125,7 @@ export function AssetPage(): ReactElement {
       <header className="catalog-hero asset-hero">
         <div className="catalog-hero-top">
           <div className="catalog-hero-copy">
-            <p className="catalog-kicker">{kindLabel(asset?.kind)}</p>
+            <p className="catalog-kicker">Asset</p>
             <div className="catalog-title-line">
               <h1>{asset?.name ?? "Asset"}</h1>
               <span className="asset-chip">{visibility}</span>
@@ -293,25 +293,6 @@ function optionFieldsForKind(kind: AssetKind | undefined): readonly OptionField[
 function isTableViewTab(tab: AssetTab): tab is TableAssetTab {
   const names: readonly string[] = TABLE_VIEW_TABS
   return names.includes(tab)
-}
-
-function kindLabel(kind: AssetKind | undefined): string {
-  if (kind === "TABLE") {
-    return "Table"
-  }
-  if (kind === "AIRFLOW_DAG") {
-    return "Airflow DAG"
-  }
-  if (kind === "AIRFLOW_INSTANCE") {
-    return "Airflow instance"
-  }
-  if (kind === "NOTEBOOK") {
-    return "Notebook"
-  }
-  if (kind === "FILE") {
-    return "File"
-  }
-  return "Asset"
 }
 
 function declaredTags(asset: AssetRecord): string[] {

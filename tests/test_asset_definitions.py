@@ -32,7 +32,6 @@ from intelegent_data_catalog.assets.dsl import (
     PageOperator,
     PostgresTableOperator,
     SchemaOperator,
-    Space,
     TableOperator,
 )
 from intelegent_data_catalog.assets.dsl.collect import collect_definitions
@@ -64,7 +63,6 @@ from intelegent_data_catalog.persistence.enums import (
     AirflowInstanceStatus,
     AssetKind,
     AssetStatus,
-    ContextOrigin,
     DataSourceType,
     DefinitionFileStatus,
     DefinitionItemStatus,
@@ -80,12 +78,9 @@ from intelegent_data_catalog.persistence.models import (
     AirflowInstanceRow,
     AssetDefinitionFileRow,
     AssetDefinitionItemRow,
-    AssetMembershipRow,
     AssetRow,
     CatalogTableRow,
     DataSourceRow,
-    ScopeRow,
-    SpaceRow,
     UserRow,
     WorkspaceNodeRow,
 )
@@ -94,15 +89,6 @@ from intelegent_data_catalog.schedual.operators import AssetOperatorSchedule
 from intelegent_data_catalog.storage.object_store import MemoryObjectStore
 
 _PREFIX: str = "asset-definitions/"
-_SPACE: str = (
-    "from intelegent_data_catalog.assets.dsl import Space\n"
-    'Space("analytics", name="Analytics", description="Analytics domain", '
-    'context="Sales analytics.")\n'
-)
-_SCOPE: str = (
-    "from intelegent_data_catalog.assets.dsl import Scope\n"
-    'Scope("finance", space="analytics", description="Finance data")\n'
-)
 _ORDERS: str = (
     "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
     "Asset(\n"
@@ -131,22 +117,7 @@ class _RecordingExecutor:
 
 
 def test_collect_each_kind() -> None:
-    """A spaces file, a scopes file, and an assets file each yield their own spec."""
-    spaces: DefinitionSpec = collect_definitions(
-        _SPACE,
-        "space_analytics.py",
-        DefinitionKind.SPACE,
-        timeout_seconds=5,
-    )
-    assert spaces.spaces[0].slug == "analytics"
-    assert spaces.spaces[0].set_fields == ["name", "description", "context"]
-    scopes: DefinitionSpec = collect_definitions(
-        _SCOPE,
-        "scope_finance.py",
-        DefinitionKind.SCOPE,
-        timeout_seconds=5,
-    )
-    assert scopes.scopes[0].space_slug == "analytics"
+    """An assets file yields the declared asset."""
     assets: DefinitionSpec = collect_definitions(
         _ORDERS,
         "asset_orders.py",
@@ -272,12 +243,15 @@ def test_page_operator_defaults_workspace_to_shared() -> None:
 
 
 def test_wrong_kind_duplicate_target_and_syntax_fail_the_file() -> None:
-    """Folder kind, duplicate keys, missing target, and syntax errors are import errors."""
-    with pytest.raises(AssetDefinitionImportError, match="cannot declare"):
-        collect_definitions(_SPACE, "asset_bad.py", DefinitionKind.ASSET, timeout_seconds=5)
-    duplicated: str = _SPACE + 'Space("analytics")\n'
+    """Duplicate keys and syntax errors are import errors."""
+    duplicated: str = _ORDERS + (
+        "Asset(\n"
+        '    "orders",\n'
+        '    IcebergTableOperator(source_key="iceberg.sales.orders"),\n'
+        ")\n"
+    )
     with pytest.raises(AssetDefinitionImportError, match="duplicate key"):
-        collect_definitions(duplicated, "space_dup.py", DefinitionKind.SPACE, timeout_seconds=5)
+        collect_definitions(duplicated, "asset_dup.py", DefinitionKind.ASSET, timeout_seconds=5)
     bad_cron: str = (
         "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator\n"
         'Asset("orders", IcebergTableOperator(source_key="a.b.c"), schedule="daily")\n'
@@ -291,9 +265,7 @@ def test_wrong_kind_duplicate_target_and_syntax_fail_the_file() -> None:
 
 
 def test_definition_outside_a_file_raises() -> None:
-    """Space and Asset register only while a file is being collected."""
-    with pytest.raises(AssetDefinitionError, match="collected"):
-        Space("analytics")
+    """Asset registers only while a file is being collected."""
     with pytest.raises(AssetDefinitionError, match="collected"):
         Asset("orders", _table_operator())
 
@@ -305,8 +277,8 @@ def test_collect_times_out() -> None:
         collect_definitions(source, "asset_slow.py", DefinitionKind.ASSET, timeout_seconds=0.05)
 
 
-def test_scan_creates_space_scope_and_asset_in_one_tick(tmp_path: Path) -> None:
-    """Nested asset keys are found, and spaces are applied before scopes and assets."""
+def test_scan_creates_an_asset_in_one_tick(tmp_path: Path) -> None:
+    """Nested asset keys are found. Unknown folders and non-Python files are ignored."""
     database: CatalogDatabase
     session: Session
     store: MemoryObjectStore
@@ -315,28 +287,14 @@ def test_scan_creates_space_scope_and_asset_in_one_tick(tmp_path: Path) -> None:
     try:
         _table(session, "iceberg.sales.orders")
         _put(store, "assets/a/b/asset_orders.py", _ORDERS)
-        _put(store, "scopes/analytics/scope_finance.py", _SCOPE)
-        _put(store, "spaces/space_analytics.py", _SPACE)
         _put(store, "assets/readme.txt", "ignore")
         _put(store, "notes/asset_other.py", _ORDERS)
         scanner.scan(datetime.now(UTC))
-        space: SpaceRow | None = session.scalar(
-            select(SpaceRow).where(SpaceRow.slug == "analytics"),
-        )
-        assert space is not None
-        assert space.description == "Analytics domain"
-        assert space.context == "Sales analytics."
-        assert space.context_origin == ContextOrigin.USER.value
-        scope: ScopeRow | None = session.scalar(
-            select(ScopeRow).where(ScopeRow.space_id == space.id, ScopeRow.slug == "finance"),
-        )
-        assert scope is not None
         asset: AssetRow | None = session.scalar(select(AssetRow).where(AssetRow.name == "orders"))
         assert asset is not None
         assert asset.kind == AssetKind.TABLE.value
         assert asset.name == "orders"
         assert asset.context is None
-        assert session.scalar(select(AssetMembershipRow)) is None
         item: AssetDefinitionItemRow | None = session.scalar(
             select(AssetDefinitionItemRow).where(AssetDefinitionItemRow.item_key == "orders"),
         )
@@ -344,7 +302,6 @@ def test_scan_creates_space_scope_and_asset_in_one_tick(tmp_path: Path) -> None:
         assert item.run_status == DefinitionRunStatus.QUEUED.value
         assert item.schedule == "0 2 * * *"
         assert len(executor.workloads) == 1
-        assert scope.id is not None
         keys: set[str] = set(session.scalars(select(AssetDefinitionFileRow.key)))
         assert f"{_PREFIX}notes/asset_other.py" not in keys
         assert f"{_PREFIX}assets/readme.txt" not in keys
@@ -354,7 +311,7 @@ def test_scan_creates_space_scope_and_asset_in_one_tick(tmp_path: Path) -> None:
 
 
 def test_same_etag_is_a_no_op_and_a_change_updates_and_detaches(tmp_path: Path) -> None:
-    """Unchanged bytes leave catalog edits in place. A new file drops removed memberships."""
+    """Unchanged bytes leave catalog edits in place. A smaller file drops the extra asset."""
     database: CatalogDatabase
     session: Session
     store: MemoryObjectStore
@@ -363,36 +320,34 @@ def test_same_etag_is_a_no_op_and_a_change_updates_and_detaches(tmp_path: Path) 
     try:
         _table(session, "iceberg.sales.orders")
         _table(session, "iceberg.sales.returns")
-        _put(store, "spaces/space_analytics.py", _SPACE)
-        _put(store, "scopes/analytics/scope_finance.py", _SCOPE)
         _put(store, "assets/sales/asset_orders.py", _TWO_TABLES)
         scanner.scan(datetime.now(UTC))
         assert len(executor.workloads) == 2
         executor.workloads.clear()
-        space: SpaceRow = _space(session)
-        space.description = "hacked"
+        orders: AssetRow | None = session.scalar(
+            select(AssetRow).where(AssetRow.name == "orders"),
+        )
+        assert orders is not None
+        orders.description = "hacked"
         session.commit()
         scanner.scan(datetime.now(UTC))
-        session.refresh(space)
+        session.refresh(orders)
         assert executor.workloads == []
-        assert space.description == "hacked"
-        updated: str = _SPACE.replace("Analytics domain", "Updated domain")
-        _put(store, "spaces/space_analytics.py", updated)
+        assert orders.description == "hacked"
         _put(store, "assets/sales/asset_orders.py", _ORDERS)
         scanner.scan(datetime.now(UTC))
-        session.refresh(space)
-        assert space.description == "Updated domain"
+        session.refresh(orders)
+        assert orders.description == "hacked"
         names: set[str] = set(session.scalars(select(AssetRow.name)))
         assert names == {"orders"}
-        assert session.scalar(select(AssetMembershipRow)) is None
         assert executor.workloads == []
     finally:
         session.close()
         database.dispose()
 
 
-def test_deleted_script_removes_the_asset_and_keeps_the_space(tmp_path: Path) -> None:
-    """A key missing from the listing deletes its asset. The space row stays."""
+def test_deleted_script_removes_the_asset(tmp_path: Path) -> None:
+    """A key missing from the listing deletes its asset."""
     database: CatalogDatabase
     session: Session
     store: MemoryObjectStore
@@ -400,8 +355,6 @@ def test_deleted_script_removes_the_asset_and_keeps_the_space(tmp_path: Path) ->
     database, session, store, scanner, executor = _open(tmp_path)
     try:
         _table(session, "iceberg.sales.orders")
-        _put(store, "spaces/space_analytics.py", _SPACE)
-        _put(store, "scopes/analytics/scope_finance.py", _SCOPE)
         asset_key: str = f"{_PREFIX}assets/sales/asset_orders.py"
         _put(store, "assets/sales/asset_orders.py", _ORDERS)
         scanner.scan(datetime.now(UTC))
@@ -413,8 +366,6 @@ def test_deleted_script_removes_the_asset_and_keeps_the_space(tmp_path: Path) ->
         )
         assert removed is not None
         assert removed.status == DefinitionFileStatus.REMOVED.value
-        assert session.scalar(select(AssetMembershipRow)) is None
-        assert _space(session).slug == "analytics"
         assert session.scalar(select(AssetRow).where(AssetRow.name == "orders")) is None
     finally:
         session.close()
@@ -425,9 +376,8 @@ def test_scan_drops_assets_no_script_declares(tmp_path: Path) -> None:
     """An asset that no asset script names is deleted on the next scan."""
     database: CatalogDatabase
     session: Session
-    store: MemoryObjectStore
     scanner: AssetDefinitionScanner
-    database, session, store, scanner, _executor = _open(tmp_path)
+    database, session, _store, scanner, _executor = _open(tmp_path)
     try:
         now: datetime = datetime.now(UTC)
         session.add(
@@ -444,10 +394,8 @@ def test_scan_drops_assets_no_script_declares(tmp_path: Path) -> None:
             ),
         )
         session.commit()
-        _put(store, "spaces/space_analytics.py", _SPACE)
         scanner.scan(now)
         assert session.scalar(select(AssetRow).where(AssetRow.name == "stray")) is None
-        assert _space(session).slug == "analytics"
     finally:
         session.close()
         database.dispose()
@@ -461,8 +409,6 @@ def test_unresolved_table_applies_on_the_next_scan(tmp_path: Path) -> None:
     scanner: AssetDefinitionScanner
     database, session, store, scanner, executor = _open(tmp_path)
     try:
-        _put(store, "spaces/space_analytics.py", _SPACE)
-        _put(store, "scopes/analytics/scope_finance.py", _SCOPE)
         _put(store, "assets/sales/asset_orders.py", _ORDERS)
         scanner.scan(datetime.now(UTC))
         pending: AssetDefinitionItemRow | None = session.scalar(
@@ -483,30 +429,6 @@ def test_unresolved_table_applies_on_the_next_scan(tmp_path: Path) -> None:
         database.dispose()
 
 
-def test_scope_before_its_space_resolves_on_retry(tmp_path: Path) -> None:
-    """A scope uploaded before its space is applied on the scan that first sees the space."""
-    database: CatalogDatabase
-    session: Session
-    store: MemoryObjectStore
-    scanner: AssetDefinitionScanner
-    database, session, store, scanner, executor = _open(tmp_path)
-    try:
-        _put(store, "scopes/analytics/scope_finance.py", _SCOPE)
-        scanner.scan(datetime.now(UTC))
-        item: AssetDefinitionItemRow | None = session.scalar(select(AssetDefinitionItemRow))
-        assert item is not None
-        assert item.status == DefinitionItemStatus.UNRESOLVED.value
-        _put(store, "spaces/space_analytics.py", _SPACE)
-        scanner.scan(datetime.now(UTC))
-        session.refresh(item)
-        assert item.status == DefinitionItemStatus.APPLIED.value
-        assert session.scalar(select(ScopeRow).where(ScopeRow.slug == "finance")) is not None
-        assert executor.workloads == []
-    finally:
-        session.close()
-        database.dispose()
-
-
 def test_bad_name_and_bad_file_do_not_block_a_good_file(tmp_path: Path) -> None:
     """A misnamed Python file is an error row and is not executed. A syntax error stays local."""
     database: CatalogDatabase
@@ -517,9 +439,11 @@ def test_bad_name_and_bad_file_do_not_block_a_good_file(tmp_path: Path) -> None:
     try:
         _put(store, "assets/orders.py", _ORDERS)
         _put(store, "assets/asset_bad.py", "def (\n")
-        _put(store, "spaces/space_analytics.py", _SPACE)
+        _put(store, "assets/asset_orders.py", _ORDERS)
+        _table(session, "iceberg.sales.orders")
         scanner.scan(datetime.now(UTC))
-        assert _space(session).slug == "analytics"
+        applied: AssetRow | None = session.scalar(select(AssetRow).where(AssetRow.name == "orders"))
+        assert applied is not None
         misnamed: AssetDefinitionFileRow | None = session.scalar(
             select(AssetDefinitionFileRow).where(
                 AssetDefinitionFileRow.key == f"{_PREFIX}assets/orders.py",
@@ -544,7 +468,7 @@ def test_bad_name_and_bad_file_do_not_block_a_good_file(tmp_path: Path) -> None:
         )
         assert broken is not None
         assert broken.status == DefinitionFileStatus.ERROR.value
-        assert executor.workloads == []
+        assert len(executor.workloads) == 1
     finally:
         session.close()
         database.dispose()
@@ -560,7 +484,6 @@ def test_airflow_and_page_operators_link_existing_rows(tmp_path: Path) -> None:
     try:
         _dag(session)
         _node(session, "/docs/sales.md")
-        _put(store, "spaces/space_analytics.py", _SPACE)
         source: str = (
             "from intelegent_data_catalog.assets.dsl import Asset, AirflowOperator, PageOperator\n"
             'Asset("etl", AirflowOperator(instance="prod-airflow", dag_id="etl_orders"))\n'
@@ -570,7 +493,6 @@ def test_airflow_and_page_operators_link_existing_rows(tmp_path: Path) -> None:
         scanner.scan(datetime.now(UTC))
         kinds: set[str] = set(session.scalars(select(AssetRow.kind)))
         assert kinds == {AssetKind.AIRFLOW_DAG.value, AssetKind.FILE.value}
-        assert session.scalar(select(AssetMembershipRow)) is None
         assert len(executor.workloads) == 2
     finally:
         session.close()
@@ -650,13 +572,13 @@ def test_held_lock_skips_scan() -> None:
     assert run_locked_scan(_HeldLock(), 30) == 0
 
 
-def test_locked_scan_applies_space_and_releases(tmp_path: Path) -> None:
+def test_locked_scan_applies_asset_and_releases(tmp_path: Path) -> None:
     """The locked runner scans the configured store and releases the lock."""
     url: str = f"sqlite:///{tmp_path / 'catalog.db'}"
     upgrade_database(url)
     database: CatalogDatabase = CatalogDatabase(url)
     store: MemoryObjectStore = MemoryObjectStore()
-    _put(store, "spaces/space_analytics.py", _SPACE)
+    _put(store, "assets/asset_orders.py", _ORDERS)
     container: AppContainer = AppContainer()
     container.database.override(providers.Object(database))
     container.asset_definition_store.override(providers.Object(store))
@@ -681,7 +603,9 @@ def test_locked_scan_applies_space_and_releases(tmp_path: Path) -> None:
         assert lock.released
         session: Session = database.session()
         try:
-            assert session.scalar(select(SpaceRow).where(SpaceRow.slug == "analytics")) is not None
+            found: AssetDefinitionFileRow | None = session.scalar(select(AssetDefinitionFileRow))
+            assert found is not None
+            assert found.key.endswith("assets/asset_orders.py")
         finally:
             session.close()
     finally:
@@ -704,7 +628,7 @@ def test_api_lists_files_and_queues_a_scan(tmp_path: Path) -> None:
         _RecordingExecutor(),
     )
     try:
-        _put(store, "spaces/space_analytics.py", _SPACE)
+        _put(store, "assets/asset_orders.py", _ORDERS)
         scanner.scan(datetime.now(UTC))
     finally:
         session.close()
@@ -713,7 +637,7 @@ def test_api_lists_files_and_queues_a_scan(tmp_path: Path) -> None:
     container.asset_definition_store.override(providers.Object(store))
     app: FastAPI = create_app(container)
     try:
-        listed: httpx.Response = _send(app, "GET", "/api/v1/asset-definitions/files?folder=spaces")
+        listed: httpx.Response = _send(app, "GET", "/api/v1/asset-definitions/files?folder=assets")
         assert listed.status_code == 200
         rows: list[object] = listed.json()
         assert len(rows) == 1
@@ -726,9 +650,7 @@ def test_api_lists_files_and_queues_a_scan(tmp_path: Path) -> None:
         items: object = body["items"]
         assert isinstance(items, list)
         assert len(items) == 1
-        assert "Space(" in str(body["source"])
-        empty: httpx.Response = _send(app, "GET", "/api/v1/asset-definitions/files?folder=assets")
-        assert empty.json() == []
+        assert "Asset(" in str(body["source"])
         queued: httpx.Response = _send(app, "POST", "/api/v1/asset-definitions/scan")
         assert queued.status_code == 202
         assert queued.json()["queued"] is True
@@ -745,7 +667,6 @@ def test_api_lists_objects_under_the_assets_folder(tmp_path: Path) -> None:
     _put(store, "assets/sales/asset_orders.py", "asset = 1\n")
     _put(store, "assets/sales/notes.txt", "hello\n")
     _put(store, "assets/sales/", "")
-    _put(store, "spaces/space_analytics.py", _SPACE)
     container: AppContainer = AppContainer()
     container.database.override(providers.Object(database))
     container.asset_definition_store.override(providers.Object(store))
@@ -781,8 +702,6 @@ def test_api_lists_catalog_assets_included_by_each_file(tmp_path: Path) -> None:
     file_id: str = ""
     try:
         _table(session, "iceberg.sales.orders")
-        _put(store, "spaces/space_analytics.py", _SPACE)
-        _put(store, "scopes/analytics/scope_finance.py", _SCOPE)
         _put(store, "assets/sales/asset_orders.py", _ORDERS)
         _put(store, "assets/sales/notes.txt", "hello\n")
         scanner.scan(datetime.now(UTC))
@@ -1390,12 +1309,6 @@ def _open(
 
 def _put(store: MemoryObjectStore, key: str, source: str) -> None:
     store.put(f"{_PREFIX}{key}", source.encode(), "text/x-python")
-
-
-def _space(session: Session) -> SpaceRow:
-    found: SpaceRow | None = session.scalar(select(SpaceRow).where(SpaceRow.slug == "analytics"))
-    assert found is not None
-    return found
 
 
 def _table(session: Session, source_key: str) -> None:

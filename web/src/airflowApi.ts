@@ -307,37 +307,6 @@ export async function removeDagTable(instanceId: string, dagId: string, tableId:
   await sendEmpty(`${dagPath(instanceId, dagId)}/tables/${tableId}`, "DELETE")
 }
 
-export type AirflowAttachmentTarget = "space" | "scope"
-
-export type AirflowAttachment = {
-  id: string
-  target_kind: AirflowAttachmentTarget
-  target_id: string
-  instance_id: string
-  instance_name: string
-  instance_slug: string
-  dag_row_id: string | null
-  dag_id: string | null
-  dag_display_name: string | null
-  created_at: string
-}
-
-export type AirflowAttachedDag = {
-  attachment_id: string
-  dag_row_id: string
-  instance_id: string
-  instance_name: string
-  dag_id: string
-  display_name: string | null
-  description: string | null
-  timetable_summary: string | null
-  is_paused: boolean
-  last_run: AirflowLastRun | null
-  table_count: number
-  via: "instance" | "dag"
-  summary: string | null
-}
-
 export type AirflowDagLink = {
   dag_row_id: string
   table_id: string
@@ -373,38 +342,6 @@ export type AirflowBuildOptions = {
   include_source: boolean
   include_previous: boolean
   include_summary: boolean
-}
-
-export async function fetchAirflowAttachments(
-  kind: AirflowAttachmentTarget,
-  targetId: string,
-  signal: AbortSignal,
-): Promise<AirflowAttachment[]> {
-  return readJson<AirflowAttachment[]>(`/api/v1/${kind}s/${targetId}/airflow`, signal)
-}
-
-export async function attachAirflow(
-  kind: AirflowAttachmentTarget,
-  targetId: string,
-  body: { instance_id: string; dag_id: string | null },
-): Promise<AirflowAttachment> {
-  return sendJson<AirflowAttachment>(`/api/v1/${kind}s/${targetId}/airflow`, "POST", body)
-}
-
-export async function detachAirflow(
-  kind: AirflowAttachmentTarget,
-  targetId: string,
-  attachmentId: string,
-): Promise<void> {
-  await sendEmpty(`/api/v1/${kind}s/${targetId}/airflow/${attachmentId}`, "DELETE")
-}
-
-export async function fetchAttachedDags(
-  kind: AirflowAttachmentTarget,
-  targetId: string,
-  signal: AbortSignal,
-): Promise<AirflowAttachedDag[]> {
-  return readJson<AirflowAttachedDag[]>(`/api/v1/${kind}s/${targetId}/airflow/dags`, signal)
 }
 
 export async function fetchAirflowKnowledgeContext(

@@ -39,7 +39,6 @@ import {
 } from "./editorLayout"
 import { AppSideDock } from "./ConfigRail"
 import { EditorScopeContext, RailTargetContext, useEditorStatusText, type EditorScope } from "./editorSlots"
-import { HierarchyTree } from "./HierarchyTree"
 import { AssetDefinitionPage } from "./AssetDefinitionPage"
 import { AssetPage } from "./AssetPage"
 import { AssetsSidebar } from "./AssetsSidebar"
@@ -51,9 +50,8 @@ import { fetchCatalogTable } from "./registryApi"
 import { WorkspacesPage } from "./WorkspacesPage"
 import { ResizeHandle } from "./ResizeHandle"
 import { QueryPage } from "./QueryPage"
-import { RegistryTablePage, ScopePage, SearchPage, SpacePage, SpacesPage } from "./RegistryPages"
+import { RegistryTablePage, SearchPage } from "./RegistryPages"
 import { setPendingQuerySql, setSidebarView, sidebarViewForPath, useSidebarView, type SidebarView } from "./sidebarView"
-import { setSpacesSidebarOpen, useSpacesSidebarOpen } from "./spacesSidebar"
 import { setWorkspaceSidebarOpen, useWorkspaceSidebarOpen } from "./workspaceSidebar"
 
 export function EditorWorkbench(): ReactElement {
@@ -111,20 +109,8 @@ export function EditorWorkbench(): ReactElement {
 
 function SecondSidebar(): ReactElement {
   const view: SidebarView = useSidebarView()
-  const spacesOpen: boolean = useSpacesSidebarOpen()
   const workspaceOpen: boolean = useWorkspaceSidebarOpen()
   const assetsOpen: boolean = useAssetsSidebarOpen()
-  if (view === "spaces") {
-    return (
-      <HierarchyTree
-        title="Spaces"
-        collapsed={!spacesOpen}
-        onToggleCollapsed={() => {
-          setSpacesSidebarOpen(!spacesOpen)
-        }}
-      />
-    )
-  }
   if (view === "catalog") {
     return <CatalogSidebar />
   }
@@ -437,19 +423,19 @@ function WorkspaceFileRoute(): ReactElement {
 function EditorRoutes(): ReactElement {
   return (
     <Routes>
-      <Route path="/" element={<SpacesPage />} />
+      <Route path="/" element={<Navigate to="/assets" replace />} />
       <Route path="/airflow" element={<AirflowListRedirect />} />
       <Route path="/airflow/:instanceId" element={<AirflowInstanceRedirect />} />
       <Route path="/airflow/:instanceId/dags/:dagId" element={<AirflowInstanceRedirect />} />
       <Route path="/catalog" element={<CatalogPage />} />
       <Route path="/catalog/:source/:catalog/:namespace/:table" element={<CatalogPage />} />
-      <Route path="/spaces" element={<SpacesPage />} />
-      <Route path="/spaces/:spaceId" element={<SpacePage />} />
+      <Route path="/spaces" element={<Navigate to="/assets" replace />} />
+      <Route path="/spaces/:spaceId" element={<Navigate to="/assets" replace />} />
       <Route path="/workspaces" element={<WorkspacesPage />} />
       <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
       <Route path="/workspace/nodes/:nodeId" element={<WorkspaceFileRoute />} />
       <Route path="/workspace/assets" element={<Navigate to="/assets" replace />} />
-      <Route path="/scopes/:scopeId" element={<ScopePage />} />
+      <Route path="/scopes/:scopeId" element={<Navigate to="/assets" replace />} />
       <Route path="/asset-definitions/text/:objectKey" element={<AssetDefinitionPage />} />
       <Route path="/asset-definitions/:fileId/:fileName?" element={<AssetDefinitionPage />} />
       <Route path="/assets" element={<AssetsTablePage />} />

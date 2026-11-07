@@ -31,9 +31,7 @@ from intelegent_data_catalog.registry.schemas import (
     EngineRef,
     RelationshipCreate,
     RelationshipRead,
-    ScopeCreate,
     SourceBindingCreate,
-    SpaceCreate,
 )
 from intelegent_data_catalog.sources.discovery import (
     DiscoveryBatch,
@@ -94,7 +92,6 @@ def test_sync_is_idempotent_and_keeps_user_text(tmp_path: Path) -> None:
         from intelegent_data_catalog.registry.schemas import CatalogTableCreate, SourceRef
 
         service.tables.create_table(
-            kept.scope_id,
             CatalogTableCreate(
                 data_source_id=other,
                 name="orders",
@@ -330,8 +327,6 @@ def _session(tmp_path: Path) -> tuple[CatalogDatabase, Session]:
 
 
 def _binding(service: OpenRegistry) -> tuple[UUID, UUID]:
-    space_id: UUID = service.spaces.create_space(SpaceCreate(name="Commerce")).id
-    scope_id: UUID = service.scopes.create_scope(space_id, ScopeCreate(name="Ordering")).id
     source_id: UUID = service.sources.create_data_source(
         DataSourceCreate(name="Lake", type=DataSourceType.ICEBERG_REST)
     ).id
@@ -347,7 +342,6 @@ def _binding(service: OpenRegistry) -> tuple[UUID, UUID]:
             data_source_id=source_id,
             engine_connection_id=engine_id,
             binding_key="lakehouse",
-            default_scope_id=scope_id,
         )
     ).id
     return binding_id, source_id
@@ -387,6 +381,4 @@ def _batch(
 
 
 def _tables(service: OpenRegistry) -> list[CatalogTableRead]:
-    space_id: UUID = service.spaces.list_spaces()[0].id
-    scope_id: UUID = service.scopes.list_scopes(space_id)[0].id
-    return service.tables.list_tables(scope_id)
+    return service.tables.list_tables()

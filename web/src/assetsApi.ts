@@ -9,22 +9,8 @@ export type AssetSort =
   | "kind"
   | "updated_at"
   | "last_built_at"
-  | "membership_count"
   | "freshness_score"
   | "context_state"
-
-export type AssetTargetRef = {
-  id: string
-  name: string
-}
-
-export type AssetMembership = {
-  id: string
-  asset_id: string
-  space_id: string | null
-  scope_id: string | null
-  created_at: string
-}
 
 export type AssetRecord = {
   id: string
@@ -39,7 +25,6 @@ export type AssetRecord = {
   status: AssetStatus
   properties: Record<string, unknown>
   tags: string[]
-  memberships: AssetMembership[]
   detail: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -57,9 +42,6 @@ export type AssetListItem = {
   status: AssetStatus
   subtitle: string | null
   table_format: string | null
-  membership_count: number
-  scopes: AssetTargetRef[]
-  spaces: AssetTargetRef[]
   last_built_at: string | null
   context_state: ContextState
   freshness_score: number
@@ -82,8 +64,6 @@ export type AssetQuery = {
   formats?: string[]
   owner?: "me" | "shared" | "all"
   workspaceId?: string | null
-  scopeId?: string
-  spaceId?: string
   status?: AssetStatus
   hasContext?: boolean
   refreshMode?: RefreshMode
@@ -180,12 +160,6 @@ export async function searchAssets(query: AssetQuery, signal?: AbortSignal): Pro
   if (query.workspaceId !== undefined && query.workspaceId !== null) {
     params.set("workspace_id", query.workspaceId)
   }
-  if (query.scopeId !== undefined) {
-    params.set("scope_id", query.scopeId)
-  }
-  if (query.spaceId !== undefined) {
-    params.set("space_id", query.spaceId)
-  }
   if (query.status !== undefined) {
     params.set("status", query.status)
   }
@@ -228,60 +202,6 @@ export async function fetchAsset(assetId: string, signal?: AbortSignal): Promise
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as AssetRecord
-}
-
-export async function fetchScopeAssets(scopeId: string, signal?: AbortSignal): Promise<AssetRecord[]> {
-  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/assets`, { signal })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as AssetRecord[]
-}
-
-export async function fetchSpaceAssets(spaceId: string, signal?: AbortSignal): Promise<AssetRecord[]> {
-  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/assets`, { signal })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as AssetRecord[]
-}
-
-export async function attachAssets(
-  targetKind: "scope" | "space",
-  targetId: string,
-  assetIds: string[],
-): Promise<{ changed: number; unchanged: number }> {
-  const response: Response = await apiFetch(`/api/v1/${targetKind}s/${targetId}/assets`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ asset_ids: assetIds }),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as { changed: number; unchanged: number }
-}
-
-export async function bulkMembership(
-  assetIds: string[],
-  targetKind: "scope" | "space",
-  targetId: string,
-  action: "attach" | "detach",
-): Promise<{ changed: number; unchanged: number }> {
-  const response: Response = await apiFetch("/api/v1/assets/bulk-membership", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      asset_ids: assetIds,
-      target_kind: targetKind,
-      target_id: targetId,
-      action,
-    }),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as { changed: number; unchanged: number }
 }
 
 export async function startAssetBuild(assetId: string): Promise<AssetBuildJob> {

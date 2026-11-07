@@ -8,8 +8,6 @@ from intelegent_data_catalog.persistence.models import (
     AssetRow,
     CatalogTableRow,
     ColumnRow,
-    ScopeRow,
-    SpaceRow,
 )
 from intelegent_data_catalog.registry.identifiers import slugify
 
@@ -21,7 +19,7 @@ def required[T](value: T | None, field: str) -> T:
 
 
 def apply_user_context(
-    row: SpaceRow | ScopeRow | CatalogTableRow | ColumnRow | AssetRow,
+    row: CatalogTableRow | ColumnRow | AssetRow,
     value: str | None,
 ) -> None:
     """Store a manual context edit. Blank text clears both the text and the origin."""

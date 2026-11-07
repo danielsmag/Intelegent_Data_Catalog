@@ -1,4 +1,4 @@
-"""Asset search, membership, context builds, and configuration."""
+"""Asset search, context builds, and configuration."""
 
 from typing import Annotated
 from uuid import UUID
@@ -29,13 +29,10 @@ from intelegent_data_catalog.assets.execution.models import AssetRunRead, AssetR
 from intelegent_data_catalog.assets.models import (
     AssetAnalysisContext,
     AssetContextOptions,
-    AssetIdsWrite,
     AssetPage,
     AssetQuery,
     AssetRead,
     AssetUpdate,
-    BulkMembershipResult,
-    BulkMembershipWrite,
 )
 from intelegent_data_catalog.entity_configuration import (
     EntityConfigurationRead,
@@ -62,8 +59,6 @@ def search_assets(
     formats: Annotated[list[str] | None, Query()] = None,
     owner: Annotated[str, Query()] = "all",
     workspace_id: Annotated[UUID | None, Query()] = None,
-    scope_id: Annotated[UUID | None, Query()] = None,
-    space_id: Annotated[UUID | None, Query()] = None,
     status: Annotated[AssetStatus | None, Query()] = None,
     has_context: Annotated[bool | None, Query()] = None,
     refresh_mode: Annotated[AssetRefreshMode | None, Query()] = None,
@@ -81,7 +76,6 @@ def search_assets(
         "kind",
         "updated_at",
         "last_built_at",
-        "membership_count",
         "freshness_score",
         "context_state",
     } else "updated_at"
@@ -93,8 +87,6 @@ def search_assets(
             formats=selected_formats,
             owner=owner_filter,  # type: ignore[arg-type]
             workspace_id=workspace_id,
-            scope_id=scope_id,
-            space_id=space_id,
             status=status,
             has_context=has_context,
             refresh_mode=refresh_mode,
@@ -106,10 +98,6 @@ def search_assets(
     )
 
 
-@router.post("/assets/bulk-membership", response_model=BulkMembershipResult)
-def bulk_membership(body: BulkMembershipWrite, service: AssetServiceDep) -> BulkMembershipResult:
-    """Attach or detach many assets."""
-    return service.bulk(body)
 
 
 @router.get("/assets/{asset_id}/runs", response_model=list[AssetRunRead])
@@ -387,45 +375,13 @@ def read_asset_generation(asset_id: UUID, builds: CatalogJobsDep) -> ContextGene
     return job
 
 
-@router.get("/scopes/{scope_id}/assets", response_model=list[AssetRead])
-def list_scope_assets(scope_id: UUID, service: AssetServiceDep) -> list[AssetRead]:
-    """Assets attached to a scope."""
-    return service.list_scope(scope_id)
 
 
-@router.post("/scopes/{scope_id}/assets", response_model=BulkMembershipResult)
-def attach_scope_assets(
-    scope_id: UUID,
-    body: AssetIdsWrite,
-    service: AssetServiceDep,
-) -> BulkMembershipResult:
-    """Attach assets to a scope."""
-    return service.attach_many("scope", scope_id, body.asset_ids)
 
 
-@router.delete("/scopes/{scope_id}/assets/{asset_id}", status_code=204)
-def detach_scope_asset(scope_id: UUID, asset_id: UUID, service: AssetServiceDep) -> None:
-    """Remove an asset from a scope."""
-    service.detach_one("scope", scope_id, asset_id)
 
 
-@router.get("/spaces/{space_id}/assets", response_model=list[AssetRead])
-def list_space_assets(space_id: UUID, service: AssetServiceDep) -> list[AssetRead]:
-    """Assets attached to a space."""
-    return service.list_space(space_id)
 
 
-@router.post("/spaces/{space_id}/assets", response_model=BulkMembershipResult)
-def attach_space_assets(
-    space_id: UUID,
-    body: AssetIdsWrite,
-    service: AssetServiceDep,
-) -> BulkMembershipResult:
-    """Attach assets to a space."""
-    return service.attach_many("space", space_id, body.asset_ids)
 
 
-@router.delete("/spaces/{space_id}/assets/{asset_id}", status_code=204)
-def detach_space_asset(space_id: UUID, asset_id: UUID, service: AssetServiceDep) -> None:
-    """Remove an asset from a space."""
-    service.detach_one("space", space_id, asset_id)

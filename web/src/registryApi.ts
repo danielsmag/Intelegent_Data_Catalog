@@ -1,31 +1,10 @@
 import { apiFetch } from "./http"
 import { isAbortError } from "./api"
 
-export type SpaceRecord = {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  isolation_mode: "OPEN" | "ISOLATED"
-  bound_workspace_ids: string[]
-  context: string | null
-  context_origin: "USER" | "LLM" | null
-}
-
-export type ScopeRecord = {
-  id: string
-  space_id: string
-  name: string
-  slug: string
-  description: string | null
-  context: string | null
-  context_origin: "USER" | "LLM" | null
-}
 
 export type CatalogTableRecord = {
   id: string
   asset_id?: string | null
-  scope_id: string | null
   data_source_id: string
   name: string
   display_name: string | null
@@ -128,108 +107,6 @@ export type TagRecord = {
   origin: string | null
 }
 
-export type NamedCreate = {
-  name: string
-  description: string | null
-  isolation_mode?: "OPEN" | "ISOLATED"
-}
-
-export type AttachmentOutcome = "created" | "already_in_scope" | "already_elsewhere"
-
-export type AttachmentItem = {
-  name: string
-  source_key: string
-  outcome: AttachmentOutcome
-  table_id: string | null
-  scope_id: string | null
-}
-
-export type ScopeAttachment = {
-  source_id: string
-  catalog: string
-  namespace: string
-  tables: string[] | null
-}
-
-export async function fetchSpaces(signal: AbortSignal): Promise<SpaceRecord[]> {
-  return readJson<SpaceRecord[]>("/api/v1/spaces", signal)
-}
-
-export async function createSpace(body: NamedCreate): Promise<SpaceRecord> {
-  const payload: { name: string; description?: string; isolation_mode?: "OPEN" | "ISOLATED" } = {
-    name: body.name,
-  }
-  if (body.description !== null) {
-    payload.description = body.description
-  }
-  if (body.isolation_mode !== undefined) {
-    payload.isolation_mode = body.isolation_mode
-  }
-  const response: Response = await apiFetch("/api/v1/spaces", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as SpaceRecord
-}
-
-export async function createScope(spaceId: string, body: NamedCreate): Promise<ScopeRecord> {
-  return writeJson<ScopeRecord>(`/api/v1/spaces/${spaceId}/scopes`, body)
-}
-
-export async function deleteSpace(spaceId: string): Promise<void> {
-  await removeRecord(`/api/v1/spaces/${spaceId}`)
-}
-
-export async function deleteScope(scopeId: string): Promise<void> {
-  await removeRecord(`/api/v1/scopes/${scopeId}`)
-}
-
-export async function renameSpace(spaceId: string, name: string): Promise<SpaceRecord> {
-  return patchName<SpaceRecord>(`/api/v1/spaces/${spaceId}`, name)
-}
-
-export async function renameScope(scopeId: string, name: string): Promise<ScopeRecord> {
-  return patchName<ScopeRecord>(`/api/v1/scopes/${scopeId}`, name)
-}
-
-export async function fetchScopes(spaceId: string, signal: AbortSignal): Promise<ScopeRecord[]> {
-  return readJson<ScopeRecord[]>(`/api/v1/spaces/${spaceId}/scopes`, signal)
-}
-
-export async function fetchSpace(spaceId: string, signal: AbortSignal): Promise<SpaceRecord> {
-  return readJson<SpaceRecord>(`/api/v1/spaces/${spaceId}`, signal)
-}
-
-export async function fetchScope(scopeId: string, signal: AbortSignal): Promise<ScopeRecord> {
-  return readJson<ScopeRecord>(`/api/v1/scopes/${scopeId}`, signal)
-}
-
-export async function attachScopeCatalog(
-  scopeId: string,
-  body: ScopeAttachment,
-): Promise<AttachmentItem[]> {
-  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/attachments`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  const payload: { items: AttachmentItem[] } = (await response.json()) as { items: AttachmentItem[] }
-  return payload.items
-}
-
-export async function fetchScopeTables(
-  scopeId: string,
-  signal: AbortSignal,
-): Promise<CatalogTableRecord[]> {
-  return readJson<CatalogTableRecord[]>(`/api/v1/scopes/${scopeId}/tables`, signal)
-}
 
 export async function fetchCatalogTable(
   tableId: string,
@@ -419,209 +296,6 @@ export async function fetchLatestKnowledgeBuild(
   return (await response.json()) as KnowledgeBuildJob
 }
 
-export type ScopeTableColumn = {
-  id: string
-  name: string
-}
-
-export type ScopeTableSummary = {
-  id: string
-  name: string
-  display_name: string | null
-  description: string | null
-  status: string
-  columns: ScopeTableColumn[]
-}
-
-export type ScopeTableLink = {
-  source_table_id: string
-  target_table_id: string
-  source_column_id: string
-  target_column_id: string
-  kind: string
-  reason: string
-}
-
-export type PipelineTask = {
-  task_id: string
-  operator_name: string | null
-}
-
-export type PipelineTableRef = {
-  table_id: string
-  name: string
-  direction: "READS" | "WRITES" | "MENTIONS"
-}
-
-export type PipelineSummary = {
-  dag_id: string
-  instance_name: string
-  instance_summary?: string | null
-  description?: string | null
-  schedule?: string | null
-  summary?: string | null
-  tasks?: PipelineTask[]
-  tables?: PipelineTableRef[]
-}
-
-export type ScopeKnowledgeContext = {
-  scope: { id: string; name: string; description: string | null }
-  space: { id: string; name: string }
-  tables: ScopeTableSummary[]
-  existing_relationships: { id: string; relationship_type: string; origin: string }[]
-  table_links: ScopeTableLink[]
-  summary: string | null
-  tables_without_context: string[]
-  previous_links_kept: number
-  pipelines: PipelineSummary[]
-}
-
-export async function fetchScopeGraph(scopeId: string, signal: AbortSignal): Promise<GraphViewRecord> {
-  return readJson<GraphViewRecord>(`/api/v1/scopes/${scopeId}/knowledge-graph`, signal)
-}
-
-export async function fetchSpaceGraph(spaceId: string, signal: AbortSignal): Promise<GraphViewRecord> {
-  return readJson<GraphViewRecord>(`/api/v1/spaces/${spaceId}/knowledge-graph`, signal)
-}
-
-export async function fetchScopeKnowledgeContext(
-  scopeId: string,
-  signal: AbortSignal,
-): Promise<ScopeKnowledgeContext | null> {
-  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/knowledge-context`, { signal })
-  if (response.status === 404) {
-    return null
-  }
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as ScopeKnowledgeContext
-}
-
-export type ScopeBuildJob = {
-  id: string
-  scope_id: string
-  scope_name: string
-  status: "running" | "succeeded" | "failed"
-  error: string | null
-}
-
-export type ScopeBuildOptions = {
-  include_table_knowledge: boolean
-  include_previous: boolean
-  include_summary: boolean
-  include_airflow: boolean
-}
-
-export async function startScopeBuild(scopeId: string, options: ScopeBuildOptions): Promise<ScopeBuildJob> {
-  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/knowledge-context`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(options),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as ScopeBuildJob
-}
-
-export async function fetchScopeBuild(jobId: string): Promise<ScopeBuildJob> {
-  const response: Response = await apiFetch(`/api/v1/scope-builds/${jobId}`)
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as ScopeBuildJob
-}
-
-export async function fetchLatestScopeBuild(
-  scopeId: string,
-  signal: AbortSignal,
-): Promise<ScopeBuildJob | null> {
-  const response: Response = await apiFetch(`/api/v1/scopes/${scopeId}/knowledge-context/build`, {
-    signal,
-  })
-  if (response.status === 404) {
-    return null
-  }
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as ScopeBuildJob
-}
-
-export type SpaceScopeTable = {
-  id: string
-  name: string
-  display_name: string | null
-  columns: { id: string; name: string }[]
-}
-
-export type SpaceScopeSummary = {
-  id: string
-  name: string
-  tables: SpaceScopeTable[]
-}
-
-export type SpaceTableLink = {
-  source_table_id: string
-  target_table_id: string
-  source_column_id: string
-  target_column_id: string
-  kind: string
-  reason: string
-}
-
-export type SpaceKnowledgeContext = {
-  space: { id: string; name: string; description: string | null }
-  scopes: SpaceScopeSummary[]
-  existing_relationships: { id: string; relationship_type: string; origin: string }[]
-  table_links: SpaceTableLink[]
-  summary: string | null
-  scopes_without_context: string[]
-  previous_links_kept: number
-  pipelines: PipelineSummary[]
-}
-
-export async function fetchSpaceKnowledgeContext(
-  spaceId: string,
-  signal: AbortSignal,
-): Promise<SpaceKnowledgeContext | null> {
-  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/knowledge-context`, { signal })
-  if (response.status === 404) {
-    return null
-  }
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as SpaceKnowledgeContext
-}
-
-export type SpaceBuildJob = {
-  id: string
-  space_id: string
-  space_name: string
-  status: "running" | "succeeded" | "failed"
-  error: string | null
-}
-
-export type SpaceBuildOptions = {
-  include_scope_knowledge: boolean
-  include_previous: boolean
-  include_summary: boolean
-  include_airflow: boolean
-}
-
-export async function startSpaceBuild(spaceId: string, options: SpaceBuildOptions): Promise<SpaceBuildJob> {
-  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/knowledge-context`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(options),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as SpaceBuildJob
-}
 
 export type CatalogJobCancel = {
   id: string
@@ -630,40 +304,18 @@ export type CatalogJobCancel = {
 }
 
 export async function cancelCatalogJob(jobId: string): Promise<CatalogJobCancel> {
-  const response: Response = await apiFetch(`/api/v1/catalog-jobs/${jobId}/cancel`, { method: "POST" })
+  const response: Response = await apiFetch(`/api/v1/catalog-jobs/${jobId}/cancel`, {
+    method: "POST",
+  })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as CatalogJobCancel
 }
 
-export async function fetchSpaceBuild(jobId: string): Promise<SpaceBuildJob> {
-  const response: Response = await apiFetch(`/api/v1/space-builds/${jobId}`)
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as SpaceBuildJob
-}
+export type ContextSubjectKind = "table" | "table_columns" | "column" | "airflow" | "asset"
 
-export async function fetchLatestSpaceBuild(
-  spaceId: string,
-  signal: AbortSignal,
-): Promise<SpaceBuildJob | null> {
-  const response: Response = await apiFetch(`/api/v1/spaces/${spaceId}/knowledge-context/build`, {
-    signal,
-  })
-  if (response.status === 404) {
-    return null
-  }
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as SpaceBuildJob
-}
-
-export type ContextSubjectKind = "space" | "scope" | "table" | "table_columns" | "column" | "airflow" | "asset"
-
-export type ContextEntityKind = "space" | "scope" | "table" | "column" | "airflow" | "asset"
+export type ContextEntityKind = "table" | "column" | "airflow" | "asset"
 
 export type ContextGenerationJob = {
   id: string
@@ -725,10 +377,6 @@ export async function updateEntityContext(
 
 function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
   switch (kind) {
-    case "space":
-      return `/api/v1/spaces/${id}/context/generate`
-    case "scope":
-      return `/api/v1/scopes/${id}/context/generate`
     case "table":
       return `/api/v1/tables/${id}/context/generate`
     case "table_columns":
@@ -744,10 +392,6 @@ function contextGeneratePath(kind: ContextSubjectKind, id: string): string {
 
 function contextLatestPath(kind: ContextSubjectKind, id: string): string {
   switch (kind) {
-    case "space":
-      return `/api/v1/spaces/${id}/context/generation`
-    case "scope":
-      return `/api/v1/scopes/${id}/context/generation`
     case "table":
       return `/api/v1/tables/${id}/context/generation?lane=table`
     case "table_columns":
@@ -763,10 +407,6 @@ function contextLatestPath(kind: ContextSubjectKind, id: string): string {
 
 function contextPatchPath(kind: ContextEntityKind, id: string): string {
   switch (kind) {
-    case "space":
-      return `/api/v1/spaces/${id}`
-    case "scope":
-      return `/api/v1/scopes/${id}`
     case "table":
       return `/api/v1/tables/${id}`
     case "column":
@@ -776,72 +416,6 @@ function contextPatchPath(kind: ContextEntityKind, id: string): string {
     case "asset":
       return `/api/v1/assets/${id}`
   }
-}
-
-export type HierarchyTable = {
-  id: string
-  assetId: string | null
-  name: string
-  status: string
-}
-
-export type HierarchyDag = {
-  dagRowId: string
-  dagId: string
-}
-
-export type HierarchyAirflow = {
-  instanceId: string
-  name: string
-  dags: HierarchyDag[]
-}
-
-export type HierarchyScope = {
-  id: string
-  name: string
-  tables: HierarchyTable[]
-  airflow: HierarchyAirflow[]
-}
-
-export type HierarchySpace = {
-  id: string
-  name: string
-  isolation_mode: "OPEN" | "ISOLATED"
-  scopes: HierarchyScope[]
-  airflow: HierarchyAirflow[]
-}
-
-export async function fetchHierarchy(signal: AbortSignal): Promise<HierarchySpace[]> {
-  const spaces: SpaceRecord[] = await fetchSpaces(signal)
-  const trees: HierarchySpace[] = await Promise.all(
-    spaces.map(async (space: SpaceRecord): Promise<HierarchySpace> => {
-      const scopes: ScopeRecord[] = await fetchScopes(space.id, signal)
-      const nested: HierarchyScope[] = await Promise.all(
-        scopes.map(async (scope: ScopeRecord): Promise<HierarchyScope> => {
-          const tables: CatalogTableRecord[] = await fetchScopeTables(scope.id, signal)
-          return {
-            id: scope.id,
-            name: scope.name,
-            tables: tables.map((table: CatalogTableRecord) => ({
-              id: table.id,
-              assetId: table.asset_id ?? null,
-              name: table.name,
-              status: table.status,
-            })),
-            airflow: [],
-          }
-        }),
-      )
-      return {
-        id: space.id,
-        name: space.name,
-        isolation_mode: space.isolation_mode,
-        scopes: nested,
-        airflow: [],
-      }
-    }),
-  )
-  return trees
 }
 
 export async function searchCatalog(query: string, signal: AbortSignal): Promise<SearchHitRecord[]> {
@@ -907,41 +481,6 @@ export { isAbortError }
 
 async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
   const response: Response = await apiFetch(path, { signal })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as T
-}
-
-async function writeJson<T>(path: string, body: NamedCreate): Promise<T> {
-  const payload: { name: string; description?: string } = { name: body.name }
-  if (body.description !== null) {
-    payload.description = body.description
-  }
-  const response: Response = await apiFetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-  return (await response.json()) as T
-}
-
-async function removeRecord(path: string): Promise<void> {
-  const response: Response = await apiFetch(path, { method: "DELETE" })
-  if (!response.ok) {
-    throw new Error(await readDetail(response))
-  }
-}
-
-async function patchName<T>(path: string, name: string): Promise<T> {
-  const response: Response = await apiFetch(path, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  })
   if (!response.ok) {
     throw new Error(await readDetail(response))
   }

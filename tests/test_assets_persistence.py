@@ -104,7 +104,7 @@ def test_upgrade_from_workspace_files_backfills_assets(tmp_path: Path) -> None:
             ),
             {"id": node, "ws": workspace, "user": user, "t": now},
         )
-    command.upgrade(config, "head")
+    command.upgrade(config, "20261027_0023")
     with engine.connect() as connection:
         kind_rows = connection.execute(text("SELECT kind FROM assets"))
         kinds: set[str] = {str(row[0]) for row in kind_rows}

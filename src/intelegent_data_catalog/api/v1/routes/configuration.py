@@ -1,4 +1,4 @@
-"""Saved refresh settings for spaces, scopes, and tables."""
+"""Saved refresh settings for tables and assets."""
 
 from uuid import UUID
 
@@ -14,42 +14,12 @@ from intelegent_data_catalog.persistence.enums import RefreshSubjectKind
 router: APIRouter = APIRouter()
 
 
-@router.get("/spaces/{space_id}/configuration", response_model=EntityConfigurationRead)
-def read_space_configuration(
-    space_id: UUID,
-    service: EntityConfigurationDep,
-) -> EntityConfigurationRead:
-    """Return the refresh settings for one space."""
-    return service.get(RefreshSubjectKind.SPACE, space_id)
 
 
-@router.put("/spaces/{space_id}/configuration", response_model=EntityConfigurationRead)
-def put_space_configuration(
-    space_id: UUID,
-    body: EntityConfigurationWrite,
-    service: EntityConfigurationDep,
-) -> EntityConfigurationRead:
-    """Save the refresh settings for one space."""
-    return service.put(RefreshSubjectKind.SPACE, space_id, body)
 
 
-@router.get("/scopes/{scope_id}/configuration", response_model=EntityConfigurationRead)
-def read_scope_configuration(
-    scope_id: UUID,
-    service: EntityConfigurationDep,
-) -> EntityConfigurationRead:
-    """Return the refresh settings for one scope."""
-    return service.get(RefreshSubjectKind.SCOPE, scope_id)
 
 
-@router.put("/scopes/{scope_id}/configuration", response_model=EntityConfigurationRead)
-def put_scope_configuration(
-    scope_id: UUID,
-    body: EntityConfigurationWrite,
-    service: EntityConfigurationDep,
-) -> EntityConfigurationRead:
-    """Save the refresh settings for one scope."""
-    return service.put(RefreshSubjectKind.SCOPE, scope_id, body)
 
 
 @router.get("/tables/{table_id}/configuration", response_model=EntityConfigurationRead)

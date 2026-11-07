@@ -216,19 +216,16 @@ def test_second_build_start_returns_the_running_job(tmp_path: Path) -> None:
 
 
 def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
-    """A space configuration defaults, then Save replaces the stored row."""
+    """A table configuration defaults, then Save replaces the stored row."""
     app: FastAPI
     database: CatalogDatabase
     app, database = _app(tmp_path)
     try:
-        space: dict[str, object] = _object(
-            _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"}),
-        )
-        space_id: str = _text(space, "id")
+        table_id: str = _catalog_table(app)
         loaded: httpx.Response = _send(
             app,
             "GET",
-            f"/api/v1/spaces/{space_id}/configuration",
+            f"/api/v1/tables/{table_id}/configuration",
         )
         assert loaded.status_code == 200
         defaults: dict[str, object] = _object(loaded)
@@ -240,16 +237,16 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
         saved: httpx.Response = _send(
             app,
             "PUT",
-            f"/api/v1/spaces/{space_id}/configuration",
+            f"/api/v1/tables/{table_id}/configuration",
             {
                 "interval_seconds": 12,
                 "enabled": True,
                 "model": "qwen3:4b",
                 "effort": "high",
                 "options": {
-                    "include_scope_knowledge": True,
-                    "include_previous": False,
-                    "include_summary": True,
+                    "include_graph": True,
+                    "include_lineage": False,
+                    "include_data_profile": False,
                 },
             },
         )
@@ -260,28 +257,28 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
         assert stored["effort"] == "high"
         options: object = stored["options"]
         assert isinstance(options, dict)
-        assert options["include_previous"] is False
+        assert options["include_lineage"] is False
         again: dict[str, object] = _object(
-            _send(app, "GET", f"/api/v1/spaces/{space_id}/configuration"),
+            _send(app, "GET", f"/api/v1/tables/{table_id}/configuration"),
         )
         assert again["interval_seconds"] == 12
         assert again["model"] == "qwen3:4b"
         rejected_model: httpx.Response = _send(
             app,
             "PUT",
-            f"/api/v1/spaces/{space_id}/configuration",
+            f"/api/v1/tables/{table_id}/configuration",
             {
                 "interval_seconds": 12,
                 "enabled": True,
                 "model": "claude",
-                "options": {"include_previous": False},
+                "options": {"include_lineage": False},
             },
         )
         assert rejected_model.status_code == 422
         rejected: httpx.Response = _send(
             app,
             "PUT",
-            f"/api/v1/spaces/{space_id}/configuration",
+            f"/api/v1/tables/{table_id}/configuration",
             {
                 "interval_seconds": 12,
                 "enabled": True,
@@ -292,7 +289,7 @@ def test_entity_configuration_is_stored_in_the_database(tmp_path: Path) -> None:
         missing: httpx.Response = _send(
             app,
             "GET",
-            f"/api/v1/spaces/{uuid4()}/configuration",
+            f"/api/v1/tables/{uuid4()}/configuration",
         )
         assert missing.status_code == 404
     finally:
@@ -346,11 +343,9 @@ def test_due_table_configuration_queues_one_context_rebuild(tmp_path: Path) -> N
         _finish_job(database, publisher.job_ids[1])
         _age_job(database, publisher.job_ids[1])
         stored: CatalogJobRow = _job(database, publisher.job_ids[0])
-        assert stored.kind == "asset"
-        flags: object = stored.options["flags"]
-        assert isinstance(flags, dict)
-        assert flags["include_lineage"] is False
-        assert flags["include_data_profile"] is False
+        assert stored.kind == "knowledge"
+        assert stored.options["include_lineage"] is False
+        assert stored.options["include_data_profile"] is False
         assert stored.options["model"] == "gpt-4.1"
         assert stored.options["effort"] == "xhigh"
         disabled: httpx.Response = _send(
@@ -544,17 +539,6 @@ def _job(database: CatalogDatabase, job_id: UUID) -> CatalogJobRow:
 
 
 def _catalog_table(app: FastAPI) -> str:
-    space: dict[str, object] = _object(
-        _send(app, "POST", "/api/v1/spaces", {"name": "Commerce"}),
-    )
-    scope: dict[str, object] = _object(
-        _send(
-            app,
-            "POST",
-            f"/api/v1/spaces/{_text(space, 'id')}/scopes",
-            {"name": "Ordering"},
-        ),
-    )
     source: dict[str, object] = _object(
         _send(
             app,
@@ -567,7 +551,7 @@ def _catalog_table(app: FastAPI) -> str:
         _send(
             app,
             "POST",
-            f"/api/v1/scopes/{_text(scope, 'id')}/tables",
+            "/api/v1/tables",
             {
                 "data_source_id": _text(source, "id"),
                 "name": "Orders",

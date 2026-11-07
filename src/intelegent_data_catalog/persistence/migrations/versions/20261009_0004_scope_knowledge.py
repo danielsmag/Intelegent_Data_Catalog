@@ -46,7 +46,7 @@ def downgrade() -> None:
 def _create_scope_contexts(bind: Connection) -> None:
     inspector = inspect(bind)
     tables: set[str] = set(inspector.get_table_names())
-    if "scope_knowledge_contexts" in tables:
+    if "scope_knowledge_contexts" in tables or "scopes" not in tables:
         return
     op.create_table(
         "scope_knowledge_contexts",

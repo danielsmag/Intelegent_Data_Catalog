@@ -38,7 +38,7 @@ export type RouteIds = {
   explorerTable: string | null
 }
 
-export type SidebarKind = "spaces" | "catalog" | "none"
+export type SidebarKind = "assets" | "catalog" | "none"
 
 type HistoryMode = "push" | "replace" | "none"
 
@@ -90,14 +90,8 @@ export function titleFromPath(path: string): string {
   const pathname: string = pathnameOf(normalizePath(path))
   const parts: string[] = pathname.split("/").filter((part: string) => part.length > 0)
   const head: string | undefined = parts[0]
-  if (head === undefined || (head === "spaces" && parts.length === 1)) {
-    return "Spaces"
-  }
-  if (head === "spaces") {
-    return "Space"
-  }
-  if (head === "scopes") {
-    return "Scope"
+  if (head === undefined || head === "assets" || head === "spaces" || head === "scopes") {
+    return "Assets"
   }
   if (head === "registry") {
     return "Table"
@@ -152,7 +146,7 @@ export function sidebarKind(pathname: string): SidebarKind {
   if (pathname.startsWith("/catalog")) {
     return "catalog"
   }
-  return "spaces"
+  return "assets"
 }
 
 export function parseRouteIds(pathname: string): RouteIds {
@@ -171,12 +165,6 @@ export function parseRouteIds(pathname: string): RouteIds {
   }
   const head: string | undefined = parts[0]
   const second: string | undefined = parts[1]
-  if (head === "spaces" && second !== undefined) {
-    ids.spaceId = decodeURIComponent(second)
-  }
-  if (head === "scopes" && second !== undefined) {
-    ids.scopeId = decodeURIComponent(second)
-  }
   if (head === "registry" && second === "tables" && parts[2] !== undefined) {
     ids.tableId = decodeURIComponent(parts[2])
   }

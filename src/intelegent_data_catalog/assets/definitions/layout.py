@@ -4,13 +4,9 @@ from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
 from intelegent_data_catalog.persistence.enums import DefinitionKind
 
 KIND_RANK: dict[str, int] = {
-    DefinitionKind.SPACE.value: 0,
-    DefinitionKind.SCOPE.value: 1,
-    DefinitionKind.ASSET.value: 2,
+    DefinitionKind.ASSET.value: 0,
 }
 NAME_PREFIX: dict[DefinitionKind, str] = {
-    DefinitionKind.SPACE: "space_",
-    DefinitionKind.SCOPE: "scope_",
     DefinitionKind.ASSET: "asset_",
 }
 
@@ -39,8 +35,6 @@ class DefinitionLayout:
         prefix: str = settings.prefix
         self._prefix: str = prefix if prefix.endswith("/") or prefix == "" else f"{prefix}/"
         self._folders: dict[str, DefinitionKind] = {
-            settings.spaces_folder: DefinitionKind.SPACE,
-            settings.scopes_folder: DefinitionKind.SCOPE,
             settings.assets_folder: DefinitionKind.ASSET,
         }
 

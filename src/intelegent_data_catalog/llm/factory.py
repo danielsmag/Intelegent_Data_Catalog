@@ -17,10 +17,6 @@ from intelegent_data_catalog.llm.catalog import TableOperationAgent
 from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
 from intelegent_data_catalog.llm.dag_context import DagContextAgent
 from intelegent_data_catalog.llm.file_context import FileContextAgent
-from intelegent_data_catalog.llm.scope_context import ScopeContextAgent
-from intelegent_data_catalog.llm.scope_graph import ScopeSubgraphAgent
-from intelegent_data_catalog.llm.space_context import SpaceContextAgent
-from intelegent_data_catalog.llm.space_graph import SpaceSubgraphAgent
 
 
 def thinking_level(effort: ReasoningEffort) -> ThinkingLevel:
@@ -124,40 +120,6 @@ class CatalogModels:
                 timeout_seconds=timeout,
                 thinking=thinking,
             )
-        self.scope_proposer: ScopeSubgraphAgent = ScopeSubgraphAgent(
-            build_model(settings),
-            max_requests=settings.max_tool_steps,
-            temperature=settings.temperature,
-            max_tokens=settings.max_tokens,
-            timeout_seconds=timeout,
-            thinking=thinking,
-        )
-        self.scope_describer: ScopeContextAgent = ScopeContextAgent(
-            build_model(settings),
-            max_requests=settings.max_tool_steps,
-            temperature=settings.temperature,
-            max_tokens=settings.max_tokens,
-            timeout_seconds=timeout,
-            text_chars=text_chars,
-            thinking=thinking,
-        )
-        self.space_proposer: SpaceSubgraphAgent = SpaceSubgraphAgent(
-            build_model(settings),
-            max_requests=settings.max_tool_steps,
-            temperature=settings.temperature,
-            max_tokens=settings.max_tokens,
-            timeout_seconds=timeout,
-            thinking=thinking,
-        )
-        self.space_describer: SpaceContextAgent = SpaceContextAgent(
-            build_model(settings),
-            max_requests=settings.max_tool_steps,
-            temperature=settings.temperature,
-            max_tokens=settings.max_tokens,
-            timeout_seconds=timeout,
-            text_chars=text_chars,
-            thinking=thinking,
-        )
         self.airflow_proposer: AirflowAnalysisAgent = AirflowAnalysisAgent(
             build_model(settings),
             max_requests=settings.max_tool_steps,

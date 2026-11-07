@@ -5,7 +5,6 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import SplitResult, urlsplit
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,7 +20,6 @@ from intelegent_data_catalog.persistence.enums import (
 from intelegent_data_catalog.persistence.models import (
     DataSourceRow,
     EngineConnectionRow,
-    ScopeRow,
     SourceEngineBindingRow,
 )
 
@@ -217,13 +215,8 @@ class KernelEnvBuilder:
         )
 
     def _visible(self, binding: SourceEngineBindingRow, access: AccessContext) -> bool:
-        if binding.default_scope_id is None or access.visible_space_ids is None:
-            return True
-        scope: ScopeRow | None = self._session.get(ScopeRow, binding.default_scope_id)
-        if scope is None:
-            return False
-        visible: frozenset[UUID] = access.visible_space_ids
-        return scope.space_id in visible
+        del binding, access
+        return True
 
     def _mark_default_engine(self, collected: _Collected) -> None:
         if len(collected.engines) == 0:
