@@ -6,7 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.assets.definitions.layout import KIND_RANK
-from intelegent_data_catalog.persistence.enums import DefinitionItemStatus, DefinitionKind
+from intelegent_data_catalog.persistence.enums import (
+    DefinitionFileStatus,
+    DefinitionItemStatus,
+    DefinitionKind,
+)
 from intelegent_data_catalog.persistence.models import (
     AssetDefinitionFileRow,
     AssetDefinitionItemRow,
@@ -92,6 +96,30 @@ class AssetDefinitionRepository:
             .order_by(AssetDefinitionItemRow.item_key)
         )
         return list(self._session.scalars(statement))
+
+    def schema_parents(self) -> list[AssetDefinitionItemRow]:
+        """Applied schema declarations. Children and removed files are left out."""
+        statement = (
+            select(AssetDefinitionItemRow)
+            .join(
+                AssetDefinitionFileRow,
+                AssetDefinitionFileRow.id == AssetDefinitionItemRow.file_id,
+            )
+            .where(
+                AssetDefinitionItemRow.kind == DefinitionKind.ASSET.value,
+                AssetDefinitionItemRow.status == DefinitionItemStatus.APPLIED.value,
+                AssetDefinitionItemRow.asset_id.is_(None),
+                AssetDefinitionFileRow.status != DefinitionFileStatus.REMOVED.value,
+            )
+            .order_by(AssetDefinitionItemRow.item_key)
+        )
+        found: list[AssetDefinitionItemRow] = []
+        row: AssetDefinitionItemRow
+        for row in self._session.scalars(statement):
+            source: object = row.declaration.get("source")
+            if isinstance(source, dict) and source.get("kind") == "schema":
+                found.append(row)
+        return found
 
     def unresolved(self) -> list[AssetDefinitionItemRow]:
         """Return unresolved items, spaces first, then scopes, then assets."""

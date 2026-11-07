@@ -10,6 +10,7 @@ from intelegent_data_catalog.assets.dsl.operators.registry import operator_from_
 from intelegent_data_catalog.assets.dsl.operators.tables import (
     IcebergTableOperator,
     PostgresTableOperator,
+    SchemaOperator,
     TableOperator,
 )
 
@@ -21,6 +22,7 @@ __all__ = [
     "OperatorContext",
     "PageOperator",
     "PostgresTableOperator",
+    "SchemaOperator",
     "TableOperator",
     "operator_from_ref",
 ]

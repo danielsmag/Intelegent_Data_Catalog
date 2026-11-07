@@ -68,6 +68,11 @@ class PlatformOperatorContext(OperatorContext):
             AssetContextOptions(model=model, effort=effort, flags=merged),
         )
 
+    def has_context(self) -> bool:
+        """True when the asset already stores a non-blank context."""
+        text: str | None = self._asset.context
+        return text is not None and text.strip() != ""
+
     def describe(self) -> None:
         """Ask the model for business context unless a user already wrote it."""
         if self._asset.context_origin == ContextOrigin.USER.value:

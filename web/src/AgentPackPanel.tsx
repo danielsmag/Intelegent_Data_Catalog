@@ -194,14 +194,14 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
             return {
               ...current,
               rules: current.rules.map((row: RuleFile) =>
-                row.slug === saved.slug ? { ...row, enabled: saved.enabled } : row,
+                row.slug === saved.slug ? { ...row, enabled: saved.enabled, layer: saved.layer } : row,
               ),
             }
           }
           return {
             ...current,
             skills: current.skills.map((row: SkillFile) =>
-              row.slug === saved.slug ? { ...row, enabled: saved.enabled } : row,
+              row.slug === saved.slug ? { ...row, enabled: saved.enabled, layer: saved.layer } : row,
             ),
           }
         })
@@ -221,7 +221,17 @@ export function AgentPackPanel(props: { assetId: string; assetKind: string }): R
       {pack !== null ? (
         <div className="agent-pack">
           <p className="agent-note">
-            {pack.prefix !== null ? <span className="agent-path">{pack.prefix}</span> : <span />}
+            <span className="agent-paths">
+              {pack.layers.length > 0
+                ? pack.layers.map((layer) => (
+                    <span key={layer.prefix} className="agent-path">
+                      {layer.prefix}
+                    </span>
+                  ))
+                : pack.prefix !== null
+                  ? <span className="agent-path">{pack.prefix}</span>
+                  : null}
+            </span>
             <span>
               {pack.writable
                 ? "Rule and skill switches save. Prompts stay display-only."
@@ -356,6 +366,7 @@ type Entry = {
   description: string
   meta: string
   enabled: boolean | null
+  layer: string
 }
 
 type Preview = {
@@ -408,7 +419,16 @@ function sectionEntries(section: Tone, pack: AgentPack, memoryFiles: MemoryFile[
     if (!pack.writable || !pack.agent.present) {
       return []
     }
-    return [{ key: "agent", name: "AGENTS.md", description: "Agent card", meta: "", enabled: null }]
+    return [
+      {
+        key: "agent",
+        name: "AGENTS.md",
+        description: "Agent card",
+        meta: "",
+        enabled: null,
+        layer: pack.agent.layer,
+      },
+    ]
   }
   if (section === "prompts") {
     return pack.prompts.map((row: PromptFile) => ({
@@ -417,6 +437,7 @@ function sectionEntries(section: Tone, pack: AgentPack, memoryFiles: MemoryFile[
       description: row.description,
       meta: promptMeta(row),
       enabled: null,
+      layer: row.layer,
     }))
   }
   if (section === "rules") {
@@ -426,6 +447,7 @@ function sectionEntries(section: Tone, pack: AgentPack, memoryFiles: MemoryFile[
       description: row.description,
       meta: String(row.order),
       enabled: row.enabled,
+      layer: row.layer,
     }))
   }
   if (section === "skills") {
@@ -435,6 +457,7 @@ function sectionEntries(section: Tone, pack: AgentPack, memoryFiles: MemoryFile[
       description: row.description,
       meta: row.tools.join(" "),
       enabled: row.enabled,
+      layer: row.layer,
     }))
   }
   if (memoryFiles === null) {
@@ -446,6 +469,7 @@ function sectionEntries(section: Tone, pack: AgentPack, memoryFiles: MemoryFile[
     description: file.updated_by === "agent" ? "Written by the agent" : "",
     meta: "",
     enabled: null,
+    layer: "",
   }))
 }
 
@@ -538,7 +562,10 @@ function FileRow(props: {
   return (
     <div className={`agent-tree-row${props.indent ? " agent-tree-file" : ""}${props.selected ? " is-active" : ""}`}>
       <button type="button" className="agent-tree-hit" onClick={props.onOpen}>
-        <span className="agent-tree-name">{props.entry.name}</span>
+        <span className="agent-tree-name">
+          {props.entry.name}
+          {props.entry.layer !== "" ? <span className="agent-layer">{props.entry.layer}</span> : null}
+        </span>
       </button>
       {props.onEnabled !== undefined && props.entry.enabled !== null ? (
         <FlagSwitch

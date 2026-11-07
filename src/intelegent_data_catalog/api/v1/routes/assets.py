@@ -183,15 +183,24 @@ def read_agent_card(asset_id: UUID, service: AgentPackDep) -> AgentDetail:
 
 
 @router.put("/assets/{asset_id}/agent-pack/agent", response_model=AgentDetail)
-def put_agent_card(asset_id: UUID, body: AgentWrite, service: AgentPackDep) -> AgentDetail:
-    """Replace ``AGENTS.md``."""
-    return service.put_agent(asset_id, body)
+def put_agent_card(
+    asset_id: UUID,
+    body: AgentWrite,
+    service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
+) -> AgentDetail:
+    """Replace ``AGENTS.md``. ``layer`` defaults to the most specific directory."""
+    return service.put_agent(asset_id, body, layer)
 
 
 @router.delete("/assets/{asset_id}/agent-pack/agent", status_code=204)
-def delete_agent_card(asset_id: UUID, service: AgentPackDep) -> None:
-    """Remove ``AGENTS.md``."""
-    service.delete(asset_id, "agent", None)
+def delete_agent_card(
+    asset_id: UUID,
+    service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
+) -> None:
+    """Remove ``AGENTS.md`` from ``layer``."""
+    service.delete(asset_id, "agent", None, layer)
 
 
 @router.get("/assets/{asset_id}/agent-pack/prompts/{slug}", response_model=PromptDetail)
@@ -206,15 +215,21 @@ def put_agent_prompt(
     slug: str,
     body: PromptWrite,
     service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
 ) -> PromptDetail:
-    """Write one prompt."""
-    return service.put_prompt(asset_id, slug, body)
+    """Write one prompt. ``layer`` defaults to the most specific directory."""
+    return service.put_prompt(asset_id, slug, body, layer)
 
 
 @router.delete("/assets/{asset_id}/agent-pack/prompts/{slug}", status_code=204)
-def delete_agent_prompt(asset_id: UUID, slug: str, service: AgentPackDep) -> None:
-    """Remove one prompt."""
-    service.delete(asset_id, "prompts", slug)
+def delete_agent_prompt(
+    asset_id: UUID,
+    slug: str,
+    service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
+) -> None:
+    """Remove one prompt from ``layer``."""
+    service.delete(asset_id, "prompts", slug, layer)
 
 
 @router.get("/assets/{asset_id}/agent-pack/rules/{slug}", response_model=RuleDetail)
@@ -229,15 +244,21 @@ def put_agent_rule(
     slug: str,
     body: RuleWrite,
     service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
 ) -> RuleDetail:
-    """Write one rule."""
-    return service.put_rule(asset_id, slug, body)
+    """Write one rule. ``layer`` defaults to the most specific directory."""
+    return service.put_rule(asset_id, slug, body, layer)
 
 
 @router.delete("/assets/{asset_id}/agent-pack/rules/{slug}", status_code=204)
-def delete_agent_rule(asset_id: UUID, slug: str, service: AgentPackDep) -> None:
-    """Remove one rule."""
-    service.delete(asset_id, "rules", slug)
+def delete_agent_rule(
+    asset_id: UUID,
+    slug: str,
+    service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
+) -> None:
+    """Remove one rule from ``layer``."""
+    service.delete(asset_id, "rules", slug, layer)
 
 
 @router.get("/assets/{asset_id}/agent-pack/skills/{slug}", response_model=SkillDetail)
@@ -252,15 +273,21 @@ def put_agent_skill(
     slug: str,
     body: SkillWrite,
     service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
 ) -> SkillDetail:
-    """Write one skill."""
-    return service.put_skill(asset_id, slug, body)
+    """Write one skill. ``layer`` defaults to the most specific directory."""
+    return service.put_skill(asset_id, slug, body, layer)
 
 
 @router.delete("/assets/{asset_id}/agent-pack/skills/{slug}", status_code=204)
-def delete_agent_skill(asset_id: UUID, slug: str, service: AgentPackDep) -> None:
-    """Remove one skill directory."""
-    service.delete(asset_id, "skills", slug)
+def delete_agent_skill(
+    asset_id: UUID,
+    slug: str,
+    service: AgentPackDep,
+    layer: Annotated[str | None, Query()] = None,
+) -> None:
+    """Remove one skill directory from ``layer``."""
+    service.delete(asset_id, "skills", slug, layer)
 
 
 @router.get("/assets/{asset_id}/configuration", response_model=EntityConfigurationRead)

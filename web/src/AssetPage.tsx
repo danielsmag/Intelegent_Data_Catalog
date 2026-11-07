@@ -112,7 +112,7 @@ export function AssetPage(): ReactElement {
         instanceId={instanceId}
         assetId={asset.id}
         onDeleted={() => {
-          openInFocusedGroup("/assets?kind=AIRFLOW_INSTANCE")
+          openInFocusedGroup("/assets?service=airflow")
         }}
       />
     )

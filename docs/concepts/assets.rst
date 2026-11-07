@@ -66,6 +66,9 @@ The operator class picks the lookup. The source row picks the asset kind.
    * - ``PostgresTableOperator``
      - ``TABLE``
      - Catalog table
+   * - ``SchemaOperator``
+     - ``TABLE`` (one asset per table)
+     - Catalog tables in one catalog and namespace
    * - ``AirflowOperator``
      - ``AIRFLOW_DAG``
      - Synced DAG

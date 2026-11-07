@@ -56,8 +56,25 @@ class PageSourceRef(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
 
 
+class SchemaSourceRef(BaseModel):
+    """Every catalog table in one physical catalog and namespace.
+
+    ``include`` limits the names. ``None`` and an empty list mean the whole schema.
+    ``exclude`` drops names after ``include``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["schema"] = "schema"
+    catalog: str = Field(min_length=1, max_length=512)
+    namespace: str = Field(min_length=1, max_length=512)
+    data_source: str | None = None
+    include: list[str] | None = None
+    exclude: list[str] = Field(default_factory=list)
+
+
 SourceRef = Annotated[
-    TableSourceRef | AirflowSourceRef | AirflowInstanceSourceRef | PageSourceRef,
+    TableSourceRef | AirflowSourceRef | AirflowInstanceSourceRef | PageSourceRef | SchemaSourceRef,
     Field(discriminator="kind"),
 ]
 
@@ -108,6 +125,7 @@ class AssetSpec(BaseModel):
     on stored items from older files and is ignored.
     ``tags`` lists labels the file passed. An empty list with ``tags`` absent from
     ``set_fields`` means the file did not mention tags.
+    ``parent_key`` is set on a table generated from a schema declaration.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -115,6 +133,7 @@ class AssetSpec(BaseModel):
     key: str
     source: SourceRef
     operator: OperatorRef | None = None
+    parent_key: str | None = None
     schedule: str | None = None
     name: str | None = None
     description: str | None = None

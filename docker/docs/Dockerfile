@@ -17,10 +17,6 @@ RUN uv python install 3.15 \
 COPY src ./src
 COPY settings.toml ./
 COPY docs ./docs
-# declare-assets.rst includes the sibling checkout at ../../../lumen-sales.
-COPY --from=lumen-sales spaces /lumen-sales/spaces
-COPY --from=lumen-sales scopes /lumen-sales/scopes
-COPY --from=lumen-sales assets /lumen-sales/assets
 RUN uv sync --frozen --no-dev --group docs \
     && uv run --no-sync sphinx-build -W -b html docs docs/_build/html
 

@@ -15,6 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
+from intelegent_data_catalog.assets.base import Asset as CatalogAsset
+from intelegent_data_catalog.assets.base import AssetAgent, AssetAgentProvider
 from intelegent_data_catalog.assets.definitions.models import (
     DefinitionSpec,
     OperatorRef,
@@ -29,6 +31,7 @@ from intelegent_data_catalog.assets.dsl import (
     IcebergTableOperator,
     PageOperator,
     PostgresTableOperator,
+    SchemaOperator,
     Space,
     TableOperator,
 )
@@ -46,10 +49,12 @@ from intelegent_data_catalog.assets.execution.executor import (
 )
 from intelegent_data_catalog.assets.execution.runtime import OperatorRunner
 from intelegent_data_catalog.assets.execution.schedule import AssetOperatorSchedule
+from intelegent_data_catalog.assets.execution.tasks import BUILD_CONTEXT, DESCRIBE
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.assets.registry import AssetRegistry
 from intelegent_data_catalog.assets.service import _UnavailableAgents
 from intelegent_data_catalog.assets.strategies.instance import InstanceAssetDetail
+from intelegent_data_catalog.assets.strategies.table import TableStrategy
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
 from intelegent_data_catalog.exceptions import CatalogError
@@ -837,12 +842,16 @@ class _Context(OperatorContext):
         super().__init__(uuid4(), "orders", logging.getLogger("test.operator"))
         self.flags: dict[str, bool] = {}
         self.described: bool = False
+        self.context_present: bool = False
 
     def build_context(self, flags: dict[str, bool]) -> None:
         self.flags = dict(flags)
 
     def describe(self) -> None:
         self.described = True
+
+    def has_context(self) -> bool:
+        return self.context_present
 
 
 class _Quiet:
@@ -1070,6 +1079,285 @@ def test_migration_adds_run_columns(tmp_path: Path) -> None:
             "next_run_at",
         } <= names
         session.execute(select(AssetDefinitionItemRow.run_status))
+    finally:
+        session.close()
+        database.dispose()
+
+
+_SCHEMA: str = (
+    "from intelegent_data_catalog.assets.dsl import Asset, SchemaOperator\n"
+    "Asset(\n"
+    '    "sales",\n'
+    '    SchemaOperator(catalog="iceberg", namespace="sales", data_source="lakehouse"),\n'
+    ")\n"
+)
+
+
+class _Steps:
+    """Records begin and end for each operator step."""
+
+    def __init__(self) -> None:
+        self.steps: list[tuple[str, str | None]] = []
+
+    def begin(self, task_id: str) -> None:
+        self.steps.append((task_id, "begin"))
+
+    def end(self, task_id: str, error: str | None) -> None:
+        self.steps.append((task_id, error))
+
+
+class _AliasAgent(AssetAgent):
+    """Describe stand-in that does not touch the catalog table."""
+
+    def get_metadata(self) -> BaseModel:
+        return BaseModel()
+
+    def build_context(self, options: object) -> BaseModel:
+        del options
+        raise AssertionError("build")
+
+    def describe(self) -> str:
+        return "alias context"
+
+
+class _AliasAgents(AssetAgentProvider):
+    """Records whether the table asset is the primary."""
+
+    def __init__(self) -> None:
+        self.primary: bool | None = None
+
+    def for_table(self, table_id: object, asset_id: object, *, primary: bool) -> AssetAgent:
+        del table_id, asset_id
+        self.primary = primary
+        return _AliasAgent()
+
+    def for_dag(self, dag_row_id: object, instance_id: object) -> AssetAgent:
+        del dag_row_id, instance_id
+        raise AssertionError("dag")
+
+    def for_instance(self, instance_id: object) -> AssetAgent:
+        del instance_id
+        raise AssertionError("instance")
+
+    def for_file(self, asset_id: object, notebook: bool) -> AssetAgent:
+        del asset_id, notebook
+        raise AssertionError("file")
+
+
+def test_schema_operator_round_trip_and_describe_throttle() -> None:
+    """A schema operator stores its filters and can skip describe."""
+    operator: SchemaOperator = SchemaOperator(
+        catalog="iceberg",
+        namespace="sales",
+        data_source="lakehouse",
+        include=[" orders "],
+        exclude=["returns"],
+        describe=False,
+        pack_max_files=12,
+    )
+    restored: SchemaOperator = operator_from_ref(operator.to_ref())
+    assert isinstance(restored, SchemaOperator)
+    assert restored == operator
+    assert restored.to_source().include == ["orders"]
+    assert "pack_max_files" in operator.to_ref().params
+    assert "describe" not in operator.context_flags()
+    context: _Context = _Context()
+    steps: _Steps = _Steps()
+    operator.execute(context, steps)
+    assert context.described is False
+    assert context.flags["include_graph"] is True
+    assert steps.steps == [
+        (BUILD_CONTEXT, "begin"),
+        (BUILD_CONTEXT, None),
+        (DESCRIBE, "begin"),
+        (DESCRIBE, None),
+    ]
+    context.context_present = True
+    skipping: SchemaOperator = SchemaOperator(catalog="iceberg", namespace="sales")
+    skipping.execute(context)
+    assert context.described is False
+    context.context_present = False
+    skipping.execute(context)
+    assert context.described is True
+    with pytest.raises(ValidationError, match="listed twice"):
+        SchemaOperator(catalog="iceberg", namespace="sales", include=["orders", " orders "])
+    with pytest.raises(ValidationError, match="cannot be blank"):
+        SchemaOperator(catalog="iceberg", namespace="sales", exclude=[" "])
+
+
+def test_schema_operator_fans_out_and_follows_the_catalog(tmp_path: Path) -> None:
+    """One schema declaration becomes one asset per table and tracks later changes."""
+    database, session, store, scanner, executor = _open(tmp_path)
+    try:
+        _table(session, "iceberg.sales.orders")
+        _table(session, "iceberg.sales.returns")
+        _put(store, "assets/sales/asset_sales.py", _SCHEMA)
+        scanner.scan(datetime.now(UTC))
+        keys: dict[str, AssetDefinitionItemRow] = {
+            item.item_key: item for item in session.scalars(select(AssetDefinitionItemRow))
+        }
+        assert set(keys) == {"sales", "sales/orders", "sales/returns"}
+        assert keys["sales"].asset_id is None
+        assert keys["sales"].status == DefinitionItemStatus.APPLIED.value
+        assert keys["sales"].run_status is None
+        orders_asset: AssetRow | None = session.get(AssetRow, keys["sales/orders"].asset_id)
+        returns_asset: AssetRow | None = session.get(AssetRow, keys["sales/returns"].asset_id)
+        assert orders_asset is not None and orders_asset.name == "orders"
+        assert returns_asset is not None and returns_asset.name == "returns"
+        assert {item.item_key for item in executor.workloads} == {"sales/orders", "sales/returns"}
+        table: CatalogTableRow | None = session.scalar(
+            select(CatalogTableRow).where(CatalogTableRow.name == "orders"),
+        )
+        assert table is not None and table.asset_id is None
+        executor.workloads.clear()
+        scanner.scan(datetime.now(UTC))
+        assert executor.workloads == []
+        _table(session, "iceberg.sales.payments")
+        scanner.scan(datetime.now(UTC))
+        assert [item.item_key for item in executor.workloads] == ["sales/payments"]
+        gone: CatalogTableRow | None = session.scalar(
+            select(CatalogTableRow).where(CatalogTableRow.name == "returns"),
+        )
+        assert gone is not None
+        session.delete(gone)
+        session.commit()
+        executor.workloads.clear()
+        scanner.scan(datetime.now(UTC))
+        left: set[str] = set(session.scalars(select(AssetDefinitionItemRow.item_key)))
+        assert "sales/returns" not in left
+        assert session.scalar(select(AssetRow).where(AssetRow.name == "returns")) is None
+        _put(store, "assets/sales/asset_sales.py", "pass\n")
+        scanner.scan(datetime.now(UTC))
+        assert list(session.scalars(select(AssetDefinitionItemRow))) == []
+        assert list(session.scalars(select(AssetRow))) == []
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_schema_operator_stays_unresolved_until_a_table_exists(tmp_path: Path) -> None:
+    """An empty schema is unresolved, then a later scan creates the child."""
+    database, session, store, scanner, executor = _open(tmp_path)
+    try:
+        _put(store, "assets/sales/asset_sales.py", _SCHEMA)
+        scanner.scan(datetime.now(UTC))
+        parent: AssetDefinitionItemRow | None = session.scalar(select(AssetDefinitionItemRow))
+        assert parent is not None
+        assert parent.status == DefinitionItemStatus.UNRESOLVED.value
+        assert parent.error == "data source not found: lakehouse"
+        assert executor.workloads == []
+        _table(session, "iceberg.sales.orders")
+        scanner.scan(datetime.now(UTC))
+        session.expire_all()
+        parent_again: AssetDefinitionItemRow | None = session.scalar(
+            select(AssetDefinitionItemRow).where(AssetDefinitionItemRow.item_key == "sales"),
+        )
+        child: AssetDefinitionItemRow | None = session.scalar(
+            select(AssetDefinitionItemRow).where(AssetDefinitionItemRow.item_key == "sales/orders"),
+        )
+        assert parent_again is not None
+        assert parent_again.status == DefinitionItemStatus.APPLIED.value
+        assert child is not None and child.asset_id is not None
+        assert [item.item_key for item in executor.workloads] == ["sales/orders"]
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_schema_include_and_exclude_limit_children(tmp_path: Path) -> None:
+    """include and exclude choose tables, and a later exclude retires a child."""
+    database, session, store, scanner, _executor = _open(tmp_path)
+    try:
+        _table(session, "iceberg.sales.orders")
+        _table(session, "iceberg.sales.returns")
+        included: str = (
+            "from intelegent_data_catalog.assets.dsl import Asset, SchemaOperator\n"
+            "Asset(\n"
+            '    "sales",\n'
+            "    SchemaOperator(\n"
+            '        catalog="iceberg",\n'
+            '        namespace="sales",\n'
+            '        data_source="lakehouse",\n'
+            '        include=["orders"],\n'
+            "    ),\n"
+            ")\n"
+        )
+        _put(store, "assets/sales/asset_sales.py", included)
+        scanner.scan(datetime.now(UTC))
+        keys: set[str] = set(session.scalars(select(AssetDefinitionItemRow.item_key)))
+        assert keys == {"sales", "sales/orders"}
+        _put(store, "assets/sales/asset_sales.py", _SCHEMA)
+        scanner.scan(datetime.now(UTC))
+        session.expire_all()
+        both: set[str] = set(session.scalars(select(AssetDefinitionItemRow.item_key)))
+        assert both == {"sales", "sales/orders", "sales/returns"}
+        excluded: str = included.replace('include=["orders"]', 'exclude=["returns"]')
+        _put(store, "assets/sales/asset_sales.py", excluded)
+        scanner.scan(datetime.now(UTC))
+        session.expire_all()
+        after: set[str] = set(session.scalars(select(AssetDefinitionItemRow.item_key)))
+        assert after == {"sales", "sales/orders"}
+        assert session.scalar(select(AssetRow).where(AssetRow.name == "returns")) is None
+    finally:
+        session.close()
+        database.dispose()
+
+
+def test_schema_child_is_an_alias_beside_an_explicit_table(tmp_path: Path) -> None:
+    """An explicit table asset and a schema child for the same table stay separate."""
+    database, session, store, scanner, _executor = _open(tmp_path)
+    try:
+        _table(session, "iceberg.sales.orders")
+        both: str = (
+            "from intelegent_data_catalog.assets.dsl import Asset, IcebergTableOperator, "
+            "SchemaOperator\n"
+            'Asset("orders", IcebergTableOperator(source_key="iceberg.sales.orders", '
+            'data_source="lakehouse"))\n'
+            + _SCHEMA
+        )
+        _put(store, "assets/sales/asset_sales.py", both)
+        scanner.scan(datetime.now(UTC))
+        explicit: AssetDefinitionItemRow | None = session.scalar(
+            select(AssetDefinitionItemRow).where(AssetDefinitionItemRow.item_key == "orders"),
+        )
+        child: AssetDefinitionItemRow | None = session.scalar(
+            select(AssetDefinitionItemRow).where(AssetDefinitionItemRow.item_key == "sales/orders"),
+        )
+        table: CatalogTableRow | None = session.scalar(select(CatalogTableRow))
+        assert explicit is not None and child is not None and table is not None
+        assert explicit.asset_id is not None and child.asset_id is not None
+        assert explicit.asset_id != child.asset_id
+        assert table.asset_id == explicit.asset_id
+        alias: AssetRow | None = session.get(AssetRow, child.asset_id)
+        assert alias is not None
+        assert alias.properties["table_id"] == str(table.id)
+        assert alias.properties["alias_of"] == str(explicit.asset_id)
+        assert TableStrategy().detail(session, explicit.asset_id).table_id == table.id
+        assert TableStrategy().detail(session, child.asset_id).table_id == table.id
+        table.context = "shared"
+        session.commit()
+        agents: _AliasAgents = _AliasAgents()
+        text: str = CatalogAsset(alias, session, agents, TableStrategy()).describe()
+        assert text == "alias context"
+        assert agents.primary is False
+        session.refresh(alias)
+        session.refresh(table)
+        assert alias.context == "alias context"
+        assert table.context == "shared"
+        _put(
+            store,
+            "assets/sales/asset_sales.py",
+            _SCHEMA,
+        )
+        scanner.scan(datetime.now(UTC))
+        session.expire_all()
+        assert session.get(AssetDefinitionItemRow, explicit.id) is None
+        kept: AssetDefinitionItemRow | None = session.scalar(
+            select(AssetDefinitionItemRow).where(AssetDefinitionItemRow.item_key == "sales/orders"),
+        )
+        assert kept is not None and kept.asset_id == alias.id
+        session.refresh(table)
+        assert table.asset_id is None
     finally:
         session.close()
         database.dispose()

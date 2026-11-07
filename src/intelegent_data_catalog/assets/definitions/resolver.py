@@ -9,6 +9,7 @@ from intelegent_data_catalog.assets.definitions.models import (
     AirflowInstanceSourceRef,
     AirflowSourceRef,
     PageSourceRef,
+    SchemaSourceRef,
     TableSourceRef,
 )
 from intelegent_data_catalog.persistence.enums import WorkspaceNodeKind
@@ -38,6 +39,7 @@ class RejectedSource:
 
 ResolvedSource = CatalogTableRow | AirflowDagRow | AirflowInstanceRow | WorkspaceNodeRow
 SourceOutcome = ResolvedSource | UnresolvedSource | RejectedSource
+SchemaOutcome = list[CatalogTableRow] | UnresolvedSource
 
 
 class SourceResolver:
@@ -48,9 +50,18 @@ class SourceResolver:
 
     def resolve(
         self,
-        source: TableSourceRef | AirflowSourceRef | AirflowInstanceSourceRef | PageSourceRef,
-    ) -> SourceOutcome:
-        """Return the source row, or why it cannot be linked yet."""
+        source: (
+            TableSourceRef
+            | AirflowSourceRef
+            | AirflowInstanceSourceRef
+            | PageSourceRef
+            | SchemaSourceRef
+        ),
+    ) -> SourceOutcome | SchemaOutcome:
+        """Return the source row, or why it cannot be linked yet.
+
+        A schema returns every matching table, or why none can be linked yet.
+        """
         match source:
             case TableSourceRef():
                 return self._table(source)
@@ -60,6 +71,8 @@ class SourceResolver:
                 return self._instance(source)
             case PageSourceRef():
                 return self._page(source)
+            case SchemaSourceRef():
+                return self._schema(source)
 
     def _table(self, source: TableSourceRef) -> CatalogTableRow | UnresolvedSource | RejectedSource:
         statement = select(CatalogTableRow).where(CatalogTableRow.source_key == source.source_key)
@@ -102,6 +115,31 @@ class SourceResolver:
         if instance is None:
             return UnresolvedSource(f"airflow instance not found: {source.instance}")
         return instance
+
+    def _schema(self, source: SchemaSourceRef) -> SchemaOutcome:
+        statement = select(CatalogTableRow).where(
+            CatalogTableRow.physical_catalog == source.catalog,
+            CatalogTableRow.physical_namespace == source.namespace,
+        )
+        if source.data_source is not None:
+            source_ids: list[UUID] = list(
+                self._session.scalars(
+                    select(DataSourceRow.id).where(DataSourceRow.name == source.data_source),
+                ),
+            )
+            if len(source_ids) == 0:
+                return UnresolvedSource(f"data source not found: {source.data_source}")
+            statement = statement.where(CatalogTableRow.data_source_id.in_(source_ids))
+        if source.include:
+            statement = statement.where(CatalogTableRow.name.in_(source.include))
+        if source.exclude:
+            statement = statement.where(CatalogTableRow.name.notin_(list(source.exclude)))
+        rows: list[CatalogTableRow] = list(
+            self._session.scalars(statement.order_by(CatalogTableRow.name)),
+        )
+        if len(rows) == 0:
+            return UnresolvedSource(f"no tables in schema: {source.catalog}.{source.namespace}")
+        return rows
 
     def _page(self, source: PageSourceRef) -> WorkspaceNodeRow | UnresolvedSource | RejectedSource:
         workspace: WorkspaceRow | None = self._session.scalar(

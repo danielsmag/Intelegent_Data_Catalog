@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import ValidationError
 from pydantic_ai_harness.memory import MemoryFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,6 +30,8 @@ from intelegent_data_catalog.assets.agent_pack.models import (
     AgentWrite,
     MemoryFileDetail,
     MemoryFileRead,
+    PackLayerRead,
+    PackLimitsRead,
     PromptDetail,
     PromptRead,
     PromptWrite,
@@ -40,6 +43,11 @@ from intelegent_data_catalog.assets.agent_pack.models import (
     SkillRead,
     SkillWrite,
 )
+from intelegent_data_catalog.assets.definitions.layout import NAME_PREFIX
+from intelegent_data_catalog.assets.definitions.models import AssetSpec
+from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
+from intelegent_data_catalog.assets.dsl.operators.registry import operator_from_ref
+from intelegent_data_catalog.assets.dsl.operators.tables.schema import SchemaOperator
 from intelegent_data_catalog.assets.repository import AssetRepository
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
@@ -52,7 +60,6 @@ from intelegent_data_catalog.persistence.models import (
 )
 from intelegent_data_catalog.storage.object_store import ObjectStore, StoredObject
 
-_MAX_FILES: int = 40
 _MEMORY_NAME: re.Pattern[str] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 _MEMORY_CHARS: int = 24_000
 _TOOLS: dict[AssetKind, frozenset[str]] = {
@@ -64,11 +71,48 @@ _TOOLS: dict[AssetKind, frozenset[str]] = {
 }
 
 
-class PackRoot:
-    """The directory that contains one ``asset_*.py`` and its markdown."""
+class PackLayer:
+    """One directory of agent files. ``name`` is ``asset``, ``schema``, or ``table``."""
 
-    def __init__(self, prefix: str, writable: bool, message: str | None) -> None:
+    def __init__(self, name: str, prefix: str) -> None:
+        self.name: str = name
         self.prefix: str = prefix
+
+
+class PackLimits:
+    """Per-layer file cap and whether only one prompt may be active."""
+
+    def __init__(self, max_files: int, single_active_prompt: bool) -> None:
+        self.max_files: int = max_files
+        self.single_active_prompt: bool = single_active_prompt
+
+
+_DEFAULT_LIMITS: PackLimits = PackLimits(40, True)
+
+
+class _LayerPack:
+    """Files read from one layer, keyed by file slug."""
+
+    def __init__(self) -> None:
+        self.agents: str = ""
+        self.agents_present: bool = False
+        self.prompts: dict[str, LoadedPrompt] = {}
+        self.rules: dict[str, LoadedRule] = {}
+        self.skills: dict[str, LoadedSkill] = {}
+
+
+class PackRoot:
+    """Directories that contribute agent files for one asset. Base layer first."""
+
+    def __init__(
+        self,
+        layers: list[PackLayer],
+        limits: PackLimits,
+        writable: bool,
+        message: str | None,
+    ) -> None:
+        self.layers: list[PackLayer] = layers
+        self.limits: PackLimits = limits
         self.writable: bool = writable
         self.message: str | None = message
 
@@ -94,62 +138,92 @@ class AgentPackService:
         self._require_asset(asset_id)
         root: PackRoot | None = self._root(asset_id)
         if root is None or not root.writable:
-            message: str | None = None if root is None else root.message
-            return AgentPackRead(
-                prefix=None if root is None else root.prefix,
-                writable=False,
-                message=message,
-                agent=AgentCardRead(present=False),
-                prompts=[],
-                rules=[],
-                skills=[],
+            return _empty_pack(root)
+        return self._merged_pack(root)
+
+    def _merged_pack(self, root: PackRoot) -> AgentPackRead:
+        agent: AgentCardRead = AgentCardRead(present=False, layer=root.layers[0].name)
+        prompts: dict[str, PromptRead] = {}
+        rules: dict[str, RuleRead] = {}
+        skills: dict[str, SkillRead] = {}
+        layer: PackLayer
+        for layer in root.layers:
+            objects: list[StoredObject] = self._layer_objects(layer.prefix)
+            card: AgentCardRead = _agent_card(objects, layer.prefix).model_copy(
+                update={"layer": layer.name},
             )
-        objects: list[StoredObject] = self._store.list(root.prefix)
+            if card.present:
+                agent = card
+            prompt: PromptRead
+            for prompt in _prompts(objects, layer.prefix, self._store):
+                prompts[prompt.slug] = prompt.model_copy(update={"layer": layer.name})
+            rule: RuleRead
+            for rule in _rules(objects, layer.prefix, self._store):
+                rules[rule.slug] = rule.model_copy(update={"layer": layer.name})
+            skill: SkillRead
+            for skill in _skills(objects, layer.prefix, self._store):
+                skills[skill.slug] = skill.model_copy(update={"layer": layer.name})
+        base_name: str = root.layers[0].name
+        if any(item.active and item.layer != base_name for item in prompts.values()):
+            slug: str
+            for slug, prompt in list(prompts.items()):
+                if prompt.layer == base_name and prompt.active:
+                    prompts[slug] = prompt.model_copy(update={"active": False})
         return AgentPackRead(
-            prefix=root.prefix,
+            prefix=root.layers[0].prefix,
             writable=True,
             message=None,
-            agent=_agent_card(objects, root.prefix),
-            prompts=_prompts(objects, root.prefix, self._store),
-            rules=_rules(objects, root.prefix, self._store),
-            skills=_skills(objects, root.prefix, self._store),
+            layers=_layer_reads(root),
+            limits=_limits_read(root.limits),
+            agent=agent,
+            prompts=sorted(prompts.values(), key=lambda item: item.slug),
+            rules=sorted(rules.values(), key=lambda item: (item.order, item.slug)),
+            skills=sorted(skills.values(), key=lambda item: item.slug),
         )
 
     def get_prompt(self, asset_id: UUID, slug: str) -> PromptDetail:
-        """Return one prompt, including its body."""
+        """Return one prompt, including its body. A table file wins over the schema file."""
         root: PackRoot = self._writable(asset_id)
-        key: str = f"{root.prefix}prompts/{check_slug(slug)}.md"
+        cleaned: str = check_slug(slug)
+        layer, key = self._winning(root, f"prompts/{cleaned}.md")
         parsed: MarkdownFile = _read(self._store, key)
+        active: bool = parsed.flag("active", False)
+        if active and layer is not root.layers[-1] and self._later_prompt_active(root, layer):
+            active = False
         return PromptDetail(
-            slug=slug,
-            name=parsed.text("name", slug),
+            slug=cleaned,
+            name=parsed.text("name", cleaned),
             description=parsed.text("description"),
             enabled=parsed.flag("enabled", True),
-            active=parsed.flag("active", False),
+            active=active,
+            layer=layer.name,
             updated_at=_modified(self._store.list(key), key),
             body=parsed.body,
         )
 
     def get_rule(self, asset_id: UUID, slug: str) -> RuleDetail:
-        """Return one rule, including its body."""
+        """Return one rule, including its body. A table file wins over the schema file."""
         root: PackRoot = self._writable(asset_id)
-        key: str = f"{root.prefix}rules/{check_slug(slug)}.md"
+        cleaned: str = check_slug(slug)
+        layer, key = self._winning(root, f"rules/{cleaned}.md")
         parsed: MarkdownFile = _read(self._store, key)
         return RuleDetail(
-            slug=slug,
-            name=parsed.text("name", slug),
+            slug=cleaned,
+            name=parsed.text("name", cleaned),
             description=parsed.text("description"),
             enabled=parsed.flag("enabled", True),
             order=parsed.number("order", 0),
+            layer=layer.name,
             updated_at=_modified(self._store.list(key), key),
             body=parsed.body,
         )
 
     def get_skill(self, asset_id: UUID, slug: str) -> SkillDetail:
-        """Return one skill, including ``SKILL.md`` and reference files."""
+        """Return one skill. Reference files merge by name, later layer wins."""
         root: PackRoot = self._writable(asset_id)
         cleaned: str = check_slug(slug)
-        key: str = f"{root.prefix}.agents/skills/{cleaned}/SKILL.md"
+        relative: str = f".agents/skills/{cleaned}/SKILL.md"
+        layer, key = self._winning(root, relative)
         parsed: MarkdownFile = _read(self._store, key)
         return SkillDetail(
             slug=cleaned,
@@ -157,35 +231,40 @@ class AgentPackService:
             description=parsed.text("description"),
             enabled=parsed.flag("enabled", True),
             tools=parsed.tools(),
+            layer=layer.name,
             updated_at=_modified(self._store.list(key), key),
             body=parsed.body,
-            references=_references(
-                self._store,
-                f"{root.prefix}.agents/skills/{cleaned}/references/",
-            ),
+            references=self._merged_references(root, cleaned),
         )
 
     def get_agent(self, asset_id: UUID) -> AgentDetail:
-        """Return ``AGENTS.md``."""
+        """Return ``AGENTS.md``. A table card replaces the schema card."""
         root: PackRoot = self._writable(asset_id)
-        key: str = f"{root.prefix}AGENTS.md"
         try:
-            raw: bytes = self._store.get(key)
+            layer, key = self._winning(root, "AGENTS.md")
         except EntityNotFoundError:
-            return AgentDetail(present=False, body="")
+            return AgentDetail(present=False, body="", layer=root.layers[0].name)
         return AgentDetail(
             present=True,
+            layer=layer.name,
             updated_at=_modified(self._store.list(key), key),
-            body=raw.decode("utf-8"),
+            body=self._store.get(key).decode("utf-8"),
         )
 
-    def put_prompt(self, asset_id: UUID, slug: str, body: PromptWrite) -> PromptDetail:
-        """Write one prompt. A second active prompt is rejected."""
-        asset: AssetRow = self._require_asset(asset_id)
+    def put_prompt(
+        self,
+        asset_id: UUID,
+        slug: str,
+        body: PromptWrite,
+        layer: str | None = None,
+    ) -> PromptDetail:
+        """Write one prompt. A second active prompt in the same layer is rejected."""
+        self._require_asset(asset_id)
         root: PackRoot = self._writable(asset_id)
+        target: PackLayer = self._target(root, layer)
         cleaned: str = _matching_slug(slug, body.name)
-        if body.active:
-            self._reject_other_active(root, cleaned)
+        if body.active and root.limits.single_active_prompt:
+            self._reject_other_active(target, cleaned)
         text: str = render_markdown(
             [
                 ("name", cleaned),
@@ -195,15 +274,20 @@ class AgentPackService:
             ],
             body.body,
         )
-        key: str = f"{root.prefix}prompts/{cleaned}.md"
-        self._put_new(root, key, text)
-        del asset
+        self._put_new(root, target, f"{target.prefix}prompts/{cleaned}.md", text)
         return self.get_prompt(asset_id, cleaned)
 
-    def put_rule(self, asset_id: UUID, slug: str, body: RuleWrite) -> RuleDetail:
-        """Write one rule."""
+    def put_rule(
+        self,
+        asset_id: UUID,
+        slug: str,
+        body: RuleWrite,
+        layer: str | None = None,
+    ) -> RuleDetail:
+        """Write one rule into ``layer``. Omitted ``layer`` is the most specific one."""
         self._require_asset(asset_id)
         root: PackRoot = self._writable(asset_id)
+        target: PackLayer = self._target(root, layer)
         cleaned: str = _matching_slug(slug, body.name)
         text: str = render_markdown(
             [
@@ -214,14 +298,20 @@ class AgentPackService:
             ],
             body.body,
         )
-        key: str = f"{root.prefix}rules/{cleaned}.md"
-        self._put_new(root, key, text)
+        self._put_new(root, target, f"{target.prefix}rules/{cleaned}.md", text)
         return self.get_rule(asset_id, cleaned)
 
-    def put_skill(self, asset_id: UUID, slug: str, body: SkillWrite) -> SkillDetail:
+    def put_skill(
+        self,
+        asset_id: UUID,
+        slug: str,
+        body: SkillWrite,
+        layer: str | None = None,
+    ) -> SkillDetail:
         """Write one ``SKILL.md``. The directory name and ``name`` must match."""
         asset: AssetRow = self._require_asset(asset_id)
         root: PackRoot = self._writable(asset_id)
+        target: PackLayer = self._target(root, layer)
         cleaned: str = _matching_slug(slug, body.name)
         allowed: frozenset[str] = _TOOLS[AssetKind(asset.kind)]
         tool: str
@@ -237,36 +327,38 @@ class AgentPackService:
             ],
             body.body,
         )
-        key: str = f"{root.prefix}.agents/skills/{cleaned}/SKILL.md"
-        self._put_new(root, key, text)
+        key: str = f"{target.prefix}.agents/skills/{cleaned}/SKILL.md"
+        self._put_new(root, target, key, text)
         return self.get_skill(asset_id, cleaned)
 
-    def put_agent(self, asset_id: UUID, body: AgentWrite) -> AgentDetail:
+    def put_agent(self, asset_id: UUID, body: AgentWrite, layer: str | None = None) -> AgentDetail:
         """Write ``AGENTS.md`` without catalog frontmatter."""
         self._require_asset(asset_id)
         root: PackRoot = self._writable(asset_id)
+        target: PackLayer = self._target(root, layer)
         text: str = body.body if body.body.endswith("\n") or body.body == "" else f"{body.body}\n"
         if len(text.encode()) > 32 * 1024:
             raise ValidationAppError("markdown file exceeds 32 KiB", field="body")
-        self._store.put(f"{root.prefix}AGENTS.md", text.encode(), "text/markdown")
+        self._put_new(root, target, f"{target.prefix}AGENTS.md", text)
         return self.get_agent(asset_id)
 
-    def delete(self, asset_id: UUID, kind: str, slug: str | None) -> None:
-        """Remove one markdown file. The asset declaration stays."""
+    def delete(self, asset_id: UUID, kind: str, slug: str | None, layer: str | None = None) -> None:
+        """Remove one markdown file from ``layer``. The asset declaration stays."""
         self._require_asset(asset_id)
         root: PackRoot = self._writable(asset_id)
+        target: PackLayer = self._target(root, layer)
         if kind == "agent":
-            self._store.delete(f"{root.prefix}AGENTS.md")
+            self._store.delete(f"{target.prefix}AGENTS.md")
             return
         cleaned: str = check_slug(slug or "")
         if kind == "prompts":
-            self._store.delete(f"{root.prefix}prompts/{cleaned}.md")
+            self._store.delete(f"{target.prefix}prompts/{cleaned}.md")
             return
         if kind == "rules":
-            self._store.delete(f"{root.prefix}rules/{cleaned}.md")
+            self._store.delete(f"{target.prefix}rules/{cleaned}.md")
             return
         if kind == "skills":
-            prefix: str = f"{root.prefix}.agents/skills/{cleaned}/"
+            prefix: str = f"{target.prefix}.agents/skills/{cleaned}/"
             stored: StoredObject
             for stored in self._store.list(prefix):
                 self._store.delete(stored.key)
@@ -313,52 +405,31 @@ class AgentPackService:
         root: PackRoot | None = self._root(asset_id)
         if root is None or not root.writable:
             return loaded
-        loaded.prefix = root.prefix
-        objects: list[StoredObject] = self._store.list(root.prefix)
-        agent_key: str = f"{root.prefix}AGENTS.md"
-        if _has(objects, agent_key):
-            loaded.agents = self._store.get(agent_key).decode("utf-8")
-        stored: StoredObject
-        for stored in objects:
-            relative: str = stored.key[len(root.prefix) :]
-            prompt_file: bool = relative.startswith("prompts/") and relative.endswith(".md")
-            if prompt_file and "/" not in relative[8:]:
-                parsed: MarkdownFile = _read(self._store, stored.key)
-                loaded.prompts.append(
-                    LoadedPrompt(
-                        parsed.text("name", relative[8:-3]),
-                        parsed.body,
-                        parsed.flag("enabled", True),
-                        parsed.flag("active", False),
-                    ),
-                )
-            elif (
-                relative.startswith("rules/")
-                and relative.endswith(".md")
-                and relative.count("/") == 1
-            ):
-                parsed = _read(self._store, stored.key)
-                loaded.rules.append(
-                    LoadedRule(
-                        parsed.text("name", relative[6:-3]),
-                        parsed.body,
-                        parsed.flag("enabled", True),
-                        parsed.number("order", 0),
-                    ),
-                )
-            elif relative.startswith(".agents/skills/") and relative.endswith("/SKILL.md"):
-                parts: list[str] = relative.split("/")
-                if len(parts) == 4:
-                    parsed = _read(self._store, stored.key)
-                    loaded.skills.append(
-                        LoadedSkill(
-                            parsed.text("name", parts[2]),
-                            parsed.text("description"),
-                            parsed.body,
-                            parsed.flag("enabled", True),
-                            parsed.tools(),
-                        ),
-                    )
+        loaded.layers = [layer.prefix for layer in root.layers]
+        prompts: dict[str, LoadedPrompt] = {}
+        rules: dict[str, LoadedRule] = {}
+        skills: dict[str, LoadedSkill] = {}
+        agents: str = ""
+        index: int
+        layer: PackLayer
+        for index, layer in enumerate(root.layers):
+            part: _LayerPack = self._read_layer(layer.prefix)
+            if part.agents_present:
+                agents = part.agents
+            overlay_active: bool = index > 0 and any(
+                prompt.active for prompt in part.prompts.values()
+            )
+            if overlay_active:
+                current: LoadedPrompt
+                for current in prompts.values():
+                    current.active = False
+            prompts.update(part.prompts)
+            rules.update(part.rules)
+            skills.update(part.skills)
+        loaded.agents = agents
+        loaded.prompts = list(prompts.values())
+        loaded.rules = list(rules.values())
+        loaded.skills = list(skills.values())
         return loaded
 
     def _require_asset(self, asset_id: UUID) -> AssetRow:
@@ -378,12 +449,14 @@ class AgentPackService:
         return root
 
     def _root(self, asset_id: UUID) -> PackRoot | None:
-        item: AssetDefinitionItemRow | None = self._session.scalar(
-            select(AssetDefinitionItemRow).where(
+        item: AssetDefinitionItemRow | None = self._session.scalars(
+            select(AssetDefinitionItemRow)
+            .where(
                 AssetDefinitionItemRow.asset_id == asset_id,
                 AssetDefinitionItemRow.kind == DefinitionKind.ASSET.value,
-            ),
-        )
+            )
+            .order_by(AssetDefinitionItemRow.item_key),
+        ).first()
         if item is None:
             return None
         definition: AssetDefinitionFileRow | None = self._session.get(
@@ -396,28 +469,145 @@ class AgentPackService:
         _file: str
         parent, _sep, _file = definition.key.rpartition("/")
         prefix: str = f"{parent}/"
-        objects: list[StoredObject] = self._store.list(prefix)
-        declarations: int = 0
-        stored: StoredObject
-        for stored in objects:
-            relative: str = stored.key[len(prefix) :]
-            if "/" in relative:
-                continue
-            name: str = relative.rsplit("/", 1)[-1]
-            if name.startswith("asset_") and name.endswith(".py"):
-                declarations += 1
-        if declarations != 1:
+        limits: PackLimits = _limits(item)
+        layers: list[PackLayer] = [PackLayer("asset", prefix)]
+        segment: str | None = _overlay_segment(item)
+        if segment is not None:
+            marker: str = NAME_PREFIX[DefinitionKind.ASSET]
+            overlay: str = f"{prefix}{marker}{segment}/"
+            layers = [PackLayer("schema", prefix), PackLayer("table", overlay)]
+            if _declaration_count(self._store, overlay) > 0:
+                return PackRoot(
+                    layers,
+                    limits,
+                    False,
+                    f"overlay folder {marker}{segment} holds another asset declaration",
+                )
+        if _declaration_count(self._store, prefix) != 1:
             return PackRoot(
-                prefix,
+                layers,
+                limits,
                 False,
                 "move this asset's asset_*.py into its own directory before adding agent files",
             )
-        return PackRoot(prefix, True, None)
+        return PackRoot(layers, limits, True, None)
 
-    def _reject_other_active(self, root: PackRoot, slug: str) -> None:
+    def _target(self, root: PackRoot, layer: str | None) -> PackLayer:
+        if layer is None:
+            return root.layers[-1]
+        found: PackLayer
+        for found in root.layers:
+            if found.name == layer:
+                return found
+        raise ValidationAppError("unknown agent layer", field="layer")
+
+    def _winning(self, root: PackRoot, relative: str) -> tuple[PackLayer, str]:
+        found: tuple[PackLayer, str] | None = None
+        layer: PackLayer
+        for layer in root.layers:
+            key: str = f"{layer.prefix}{relative}"
+            if _has(self._store.list(key), key):
+                found = (layer, key)
+        if found is None:
+            raise EntityNotFoundError("agent file", relative)
+        return found
+
+    def _later_prompt_active(self, root: PackRoot, layer: PackLayer) -> bool:
+        """True when a more specific layer has an active prompt."""
+        started: bool = False
+        candidate: PackLayer
+        for candidate in root.layers:
+            if candidate is layer:
+                started = True
+                continue
+            if not started:
+                continue
+            part: _LayerPack = self._read_layer(candidate.prefix)
+            if any(prompt.active for prompt in part.prompts.values()):
+                return True
+        return False
+
+    def _merged_references(self, root: PackRoot, slug: str) -> list[ReferenceRead]:
+        found: dict[str, ReferenceRead] = {}
+        layer: PackLayer
+        for layer in root.layers:
+            item: ReferenceRead
+            for item in _references(
+                self._store,
+                f"{layer.prefix}.agents/skills/{slug}/references/",
+            ):
+                found[item.name] = item
+        names: list[str] = sorted(found)
+        return [found[name] for name in names]
+
+    def _read_layer(self, prefix: str) -> _LayerPack:
+        part: _LayerPack = _LayerPack()
+        objects: list[StoredObject] = self._layer_objects(prefix)
+        agent_key: str = f"{prefix}AGENTS.md"
+        if _has(objects, agent_key):
+            part.agents_present = True
+            part.agents = self._store.get(agent_key).decode("utf-8")
         stored: StoredObject
-        for stored in self._store.list(f"{root.prefix}prompts/"):
-            relative: str = stored.key[len(root.prefix) :]
+        for stored in objects:
+            relative: str = stored.key[len(prefix) :]
+            prompt_file: bool = relative.startswith("prompts/") and relative.endswith(".md")
+            if prompt_file and "/" not in relative[8:]:
+                parsed: MarkdownFile = _read(self._store, stored.key)
+                slug: str = relative[8:-3]
+                part.prompts[slug] = LoadedPrompt(
+                    parsed.text("name", slug),
+                    parsed.body,
+                    parsed.flag("enabled", True),
+                    parsed.flag("active", False),
+                )
+            elif (
+                relative.startswith("rules/")
+                and relative.endswith(".md")
+                and relative.count("/") == 1
+            ):
+                parsed = _read(self._store, stored.key)
+                slug = relative[6:-3]
+                part.rules[slug] = LoadedRule(
+                    parsed.text("name", slug),
+                    parsed.body,
+                    parsed.flag("enabled", True),
+                    parsed.number("order", 0),
+                )
+            elif relative.startswith(".agents/skills/") and relative.endswith("/SKILL.md"):
+                parts: list[str] = relative.split("/")
+                if len(parts) == 4:
+                    parsed = _read(self._store, stored.key)
+                    part.skills[parts[2]] = LoadedSkill(
+                        parsed.text("name", parts[2]),
+                        parsed.text("description"),
+                        parsed.body,
+                        parsed.flag("enabled", True),
+                        parsed.tools(),
+                    )
+        return part
+
+    def _layer_objects(self, prefix: str) -> list[StoredObject]:
+        """Objects in one layer. Nested overlay folders are left out."""
+        nested: list[str] = []
+        marker: str = NAME_PREFIX[DefinitionKind.ASSET]
+        found: list[StoredObject] = []
+        stored: StoredObject
+        for stored in self._store.list(prefix):
+            relative: str = stored.key[len(prefix) :]
+            if relative.startswith(marker) and "/" in relative:
+                folder: str = relative.split("/", 1)[0]
+                nested_prefix: str = f"{prefix}{folder}/"
+                if nested_prefix not in nested:
+                    nested.append(nested_prefix)
+            if any(stored.key.startswith(item) for item in nested):
+                continue
+            found.append(stored)
+        return found
+
+    def _reject_other_active(self, layer: PackLayer, slug: str) -> None:
+        stored: StoredObject
+        for stored in self._store.list(f"{layer.prefix}prompts/"):
+            relative: str = stored.key[len(layer.prefix) :]
             if not relative.endswith(".md") or relative.count("/") != 1:
                 continue
             other: str = relative[len("prompts/") : -3]
@@ -430,11 +620,95 @@ class AgentPackService:
                     field="active",
                 )
 
-    def _put_new(self, root: PackRoot, key: str, text: str) -> None:
-        existing: set[str] = {item.key for item in self._store.list(root.prefix)}
-        if key not in existing and len(existing) >= _MAX_FILES:
-            raise ValidationAppError("this asset already has 40 agent files", field="slug")
+    def _put_new(self, root: PackRoot, layer: PackLayer, key: str, text: str) -> None:
+        existing: set[str] = {item.key for item in self._layer_objects(layer.prefix)}
+        if key not in existing and len(existing) >= root.limits.max_files:
+            raise ValidationAppError(
+                f"this layer already has {root.limits.max_files} agent files",
+                field="slug",
+            )
         self._store.put(key, text.encode(), "text/markdown")
+
+
+def _overlay_segment(item: AssetDefinitionItemRow) -> str | None:
+    """Table name for a schema child. ``None`` for a normal asset."""
+    try:
+        spec: AssetSpec = AssetSpec.model_validate(item.declaration)
+    except ValidationError:
+        return None
+    if spec.parent_key is None or "/" not in item.item_key:
+        return None
+    segment: str = item.item_key.split("/", 1)[1]
+    if segment == "" or "/" in segment or ".." in segment:
+        return None
+    return segment
+
+
+def _limits(item: AssetDefinitionItemRow) -> PackLimits:
+    """Pack caps from a schema operator. Anything else keeps the defaults."""
+    try:
+        spec: AssetSpec = AssetSpec.model_validate(item.declaration)
+    except ValidationError:
+        return _DEFAULT_LIMITS
+    if spec.operator is None:
+        return _DEFAULT_LIMITS
+    try:
+        operator: object = operator_from_ref(spec.operator)
+    except AssetDefinitionError:
+        return _DEFAULT_LIMITS
+    if isinstance(operator, SchemaOperator):
+        return PackLimits(operator.pack_max_files, operator.pack_single_active_prompt)
+    return _DEFAULT_LIMITS
+
+
+def _declaration_count(store: ObjectStore, prefix: str) -> int:
+    """Count ``asset_*.py`` files directly inside ``prefix``."""
+    marker: str = NAME_PREFIX[DefinitionKind.ASSET]
+    count: int = 0
+    stored: StoredObject
+    for stored in store.list(prefix):
+        relative: str = stored.key[len(prefix) :]
+        if "/" in relative:
+            continue
+        name: str = relative.rsplit("/", 1)[-1]
+        if name.startswith(marker) and name.endswith(".py"):
+            count += 1
+    return count
+
+
+def _empty_pack(root: PackRoot | None) -> AgentPackRead:
+    prefix: str | None = None
+    message: str | None = None
+    layers: list[PackLayerRead] = []
+    limits: PackLimits = _DEFAULT_LIMITS
+    if root is not None:
+        message = root.message
+        limits = root.limits
+        layers = _layer_reads(root)
+        if len(root.layers) > 0:
+            prefix = root.layers[0].prefix
+    return AgentPackRead(
+        prefix=prefix,
+        writable=False,
+        message=message,
+        layers=layers,
+        limits=_limits_read(limits),
+        agent=AgentCardRead(present=False),
+        prompts=[],
+        rules=[],
+        skills=[],
+    )
+
+
+def _layer_reads(root: PackRoot) -> list[PackLayerRead]:
+    return [PackLayerRead(name=layer.name, prefix=layer.prefix) for layer in root.layers]
+
+
+def _limits_read(limits: PackLimits) -> PackLimitsRead:
+    return PackLimitsRead(
+        max_files=limits.max_files,
+        single_active_prompt=limits.single_active_prompt,
+    )
 
 
 def _memory_order(item: MemoryFileRead) -> tuple[bool, str]:

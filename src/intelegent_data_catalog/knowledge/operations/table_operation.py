@@ -203,11 +203,11 @@ class TableAgent:
             raise LlmUnavailableError("language model is not configured")
         return self._operation_agent.run(cleaned, self, self._instructions())
 
-    def describe_table(self) -> str:
-        """Ask the model for the table's business context and store it."""
+    def propose_table_context(self) -> str:
+        """Ask the model for the table's business context without storing it."""
         agent: TableModelAgent
-        writer: TableContextWriter
-        agent, writer = self._describing()
+        _writer: TableContextWriter
+        agent, _writer = self._describing()
         catalog: TableCatalogContext = self._context()
         proposed: TableContextProposal = agent.describe_table(
             TableContextInput(
@@ -216,8 +216,16 @@ class TableAgent:
                 subgraph=self._subgraph(),
             )
         )
-        writer.save_table(self._table_id, proposed.context, ContextOrigin.LLM)
         return proposed.context
+
+    def describe_table(self) -> str:
+        """Ask the model for the table's business context and store it."""
+        text: str = self.propose_table_context()
+        _agent: TableModelAgent
+        writer: TableContextWriter
+        _agent, writer = self._describing()
+        writer.save_table(self._table_id, text, ContextOrigin.LLM)
+        return text
 
     def describe_columns(self) -> list[ColumnContextItem]:
         """Ask the model for every column's context, in batches, and store each one."""
