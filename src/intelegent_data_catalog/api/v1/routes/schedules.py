@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Response
 
 from intelegent_data_catalog.api.dependencies import SyncScheduleDep
-from intelegent_data_catalog.jobs.schemas import SyncScheduleRead, SyncScheduleWrite
+from intelegent_data_catalog.schedual.schemas import SyncScheduleRead, SyncScheduleWrite
 
 router: APIRouter = APIRouter()
 

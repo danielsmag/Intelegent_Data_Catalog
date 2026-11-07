@@ -28,12 +28,12 @@ from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.entity_configuration import EntityConfigurationService
 from intelegent_data_catalog.exceptions import AuthenticationError, PersistenceUnavailableError
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
-from intelegent_data_catalog.jobs.schedules import SyncScheduleService
 from intelegent_data_catalog.notebooks.service import NotebookKernelService
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.files import WorkspaceFileService
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.workspaces import WorkspaceService
+from intelegent_data_catalog.schedual.schedules import SyncScheduleService
 from intelegent_data_catalog.services.bindings import BindingService
 from intelegent_data_catalog.services.data_sources import DataSourceService
 from intelegent_data_catalog.services.engines import EngineService
