@@ -4,7 +4,8 @@ import { detailString, fetchAsset, type AssetKind, type AssetRecord } from "./as
 import { AssetRuns } from "./AssetRuns"
 import { ContextEditor } from "./ContextEditor"
 import { useTabParam } from "./useTabParam"
-import { useEntityConfig, type RefreshMode } from "./refreshSettings"
+import { optionsFromFields, type ConfigOption } from "./ConfigRail"
+import { useEntityConfig, type OptionField, type RefreshMode } from "./refreshSettings"
 import { onAssetBuildFinished, requestAssetBuild } from "./knowledgeBuild"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { TableAssetView, type TableAssetTab } from "./TableDetail"
@@ -38,14 +39,20 @@ const TAB_LABELS: Record<AssetTab, string> = {
   config: "Config",
 }
 
-const OPTION_FIELDS = [
+const TABLE_ASSET_FIELDS: readonly OptionField[] = [
   { key: "include_graph", label: "Include graph", defaultValue: true },
   { key: "include_lineage", label: "Include lineage", defaultValue: true },
   { key: "include_data_profile", label: "Include data profile", defaultValue: false },
-  { key: "include_source", label: "Include source", defaultValue: true },
-  { key: "include_previous", label: "Keep previous findings", defaultValue: true },
+]
+
+const FILE_ASSET_FIELDS: readonly OptionField[] = [
   { key: "include_outputs", label: "Include notebook outputs", defaultValue: false },
   { key: "include_table_links", label: "Link mentioned tables", defaultValue: true },
+]
+
+const AIRFLOW_ASSET_FIELDS: readonly OptionField[] = [
+  { key: "include_source", label: "Include source", defaultValue: true },
+  { key: "include_previous", label: "Keep previous findings", defaultValue: true },
 ]
 
 const TABLE_VIEW_TABS: readonly TableAssetTab[] = [
@@ -62,7 +69,8 @@ export function AssetPage(): ReactElement {
   const [asset, setAsset] = useState<AssetRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [building, setBuilding] = useState<boolean>(false)
-  const config = useEntityConfig("asset", assetId, OPTION_FIELDS)
+  const fields: readonly OptionField[] = optionFieldsForKind(asset?.kind)
+  const config = useEntityConfig("asset", assetId, fields, asset !== null)
   useEffect(() => {
     return onAssetBuildFinished((job) => {
       if (job.asset_id !== assetId) {
@@ -235,11 +243,51 @@ export function AssetPage(): ReactElement {
                 <option value="MANUAL">Manual</option>
               </select>
             </label>
+            <div className="config-options">
+              <h2>Context build</h2>
+              {optionsFromFields(fields, config.options).map((option: ConfigOption) => (
+                <label key={option.key} className="config-check">
+                  <input
+                    type="checkbox"
+                    checked={option.checked}
+                    disabled={config.busy || !config.loaded}
+                    onChange={(event) => {
+                      const next: Record<string, boolean> = {
+                        ...config.options,
+                        [option.key]: event.target.checked,
+                      }
+                      config.commit(
+                        config.minutes,
+                        config.enabled,
+                        next,
+                        config.model,
+                        config.effort,
+                        config.refreshMode,
+                      )
+                    }}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
           </section>
         </div>
       ) : null}
     </section>
   )
+}
+
+function optionFieldsForKind(kind: AssetKind | undefined): readonly OptionField[] {
+  if (kind === "TABLE") {
+    return TABLE_ASSET_FIELDS
+  }
+  if (kind === "FILE" || kind === "NOTEBOOK") {
+    return FILE_ASSET_FIELDS
+  }
+  if (kind === "AIRFLOW_DAG" || kind === "AIRFLOW_INSTANCE") {
+    return AIRFLOW_ASSET_FIELDS
+  }
+  return []
 }
 
 function isTableViewTab(tab: AssetTab): tab is TableAssetTab {

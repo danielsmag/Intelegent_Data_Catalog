@@ -8,11 +8,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.assets.agent_pack.compose import (
+    LoadedPack,
     LoadedRule,
     LoadedSkill,
     allowed_tools,
+    apply_explicit_pack_flags,
     compose_rules,
+    explicit_pack_flags,
     narrow_flags,
+    scoped_pack,
 )
 from intelegent_data_catalog.assets.agent_pack.document import (
     MarkdownFile,
@@ -25,8 +29,9 @@ from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.core.settings import AssetDefinitionsSettings
+from intelegent_data_catalog.entity_configuration import option_values
 from intelegent_data_catalog.exceptions import ValidationAppError
-from intelegent_data_catalog.persistence.enums import AssetKind
+from intelegent_data_catalog.persistence.enums import AssetKind, RefreshSubjectKind
 from intelegent_data_catalog.persistence.models import AssetDefinitionItemRow, AssetRow
 from intelegent_data_catalog.storage.object_store import MemoryObjectStore
 from tests import test_asset_definitions as definitions
@@ -80,6 +85,31 @@ def test_rules_sort_and_profile_stays_off_when_the_flag_is_false() -> None:
     )
     assert narrowed["include_graph"] is False
     assert narrowed["include_lineage"] is True
+
+
+def test_asset_switch_off_skips_rules_and_skills() -> None:
+    """A missing switch stays on. Off drops that set. An explicit operator flag wins."""
+    values: dict[str, bool] = option_values(
+        RefreshSubjectKind.ASSET,
+        {"include_graph": False},
+        "TABLE",
+    )
+    assert values["use_rules"] is True
+    assert values["use_skills"] is True
+    assert values["include_graph"] is False
+    pack: LoadedPack = LoadedPack()
+    pack.rules = [LoadedRule("keep", "Show this.", True, 0)]
+    pack.skills = [LoadedSkill("reader", "Read lineage", "body", True, ["lineage"])]
+    assert scoped_pack(pack, values) is pack
+    quiet: LoadedPack = scoped_pack(pack, {"use_rules": False, "use_skills": False})
+    assert quiet.rules == []
+    assert quiet.skills == []
+    saved: dict[str, bool] = {"use_rules": True, "use_skills": True}
+    with explicit_pack_flags({"use_rules": False, "include_lineage": True}):
+        merged: dict[str, bool] = apply_explicit_pack_flags(saved)
+    assert merged["use_rules"] is False
+    assert merged["use_skills"] is True
+    assert "include_lineage" not in merged
 
 
 def test_private_folder_round_trip_and_flat_file_is_not_writable(tmp_path: Path) -> None:

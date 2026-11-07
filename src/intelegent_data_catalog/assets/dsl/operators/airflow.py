@@ -20,6 +20,8 @@ class AirflowOperator(Operator):
     dag_id: str = Field(min_length=1, max_length=250)
     include_source: bool = DAG_FLAGS["include_source"]
     include_previous: bool = DAG_FLAGS["include_previous"]
+    use_rules: bool = DAG_FLAGS["use_rules"]
+    use_skills: bool = DAG_FLAGS["use_skills"]
 
     @model_validator(mode="after")
     def _instance_slug(self) -> AirflowOperator:
@@ -28,10 +30,12 @@ class AirflowOperator(Operator):
 
     def context_flags(self) -> dict[str, bool]:
         """DAG build flags."""
-        return {
+        flags: dict[str, bool] = {
             "include_source": self.include_source,
             "include_previous": self.include_previous,
         }
+        flags.update(self._explicit_pack_flags())
+        return flags
 
     def to_source(self) -> AirflowSourceRef:
         """Return the stored source reference."""
@@ -44,6 +48,8 @@ class AirflowInstanceOperator(Operator):
     instance: str = Field(min_length=1, max_length=255)
     include_source: bool = INSTANCE_FLAGS["include_source"]
     include_previous: bool = INSTANCE_FLAGS["include_previous"]
+    use_rules: bool = INSTANCE_FLAGS["use_rules"]
+    use_skills: bool = INSTANCE_FLAGS["use_skills"]
 
     @model_validator(mode="after")
     def _instance_slug(self) -> AirflowInstanceOperator:
@@ -52,10 +58,12 @@ class AirflowInstanceOperator(Operator):
 
     def context_flags(self) -> dict[str, bool]:
         """Instance build flags."""
-        return {
+        flags: dict[str, bool] = {
             "include_source": self.include_source,
             "include_previous": self.include_previous,
         }
+        flags.update(self._explicit_pack_flags())
+        return flags
 
     def to_source(self) -> AirflowInstanceSourceRef:
         """Return the stored source reference."""

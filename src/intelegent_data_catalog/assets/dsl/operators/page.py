@@ -17,6 +17,8 @@ class PageOperator(Operator):
     workspace: str = "shared"
     include_outputs: bool = FILE_FLAGS["include_outputs"]
     include_table_links: bool = FILE_FLAGS["include_table_links"]
+    use_rules: bool = FILE_FLAGS["use_rules"]
+    use_skills: bool = FILE_FLAGS["use_skills"]
 
     @model_validator(mode="after")
     def _workspace_slug(self) -> PageOperator:
@@ -25,10 +27,12 @@ class PageOperator(Operator):
 
     def context_flags(self) -> dict[str, bool]:
         """File and notebook build flags."""
-        return {
+        flags: dict[str, bool] = {
             "include_outputs": self.include_outputs,
             "include_table_links": self.include_table_links,
         }
+        flags.update(self._explicit_pack_flags())
+        return flags
 
     def to_source(self) -> PageSourceRef:
         """Return the stored source reference."""

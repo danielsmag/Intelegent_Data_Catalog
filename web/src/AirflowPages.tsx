@@ -50,7 +50,7 @@ import {
   onAssetBuildFinished,
   requestAssetBuild,
 } from "./knowledgeBuild"
-import { AirflowConfigRail } from "./ConfigRail"
+import { AirflowConfigRail, optionsFromFields, type ConfigOption } from "./ConfigRail"
 import { bumpAirflowRevision, useAirflowRevision } from "./airflowSidebarStore"
 import { errorMessage, isAbortError } from "./api"
 import { searchCatalog, type SearchHitRecord } from "./registryApi"
@@ -498,11 +498,44 @@ export function AirflowInstanceView(props: {
                 >
                   <option value="INTERVAL">Interval</option>
                   <option value="ON_CHANGE">On change</option>
-                  <option value="MANUAL">Manual</option>
-                </select>
-              </label>
-            </section>
-            <AirflowConfigRail instanceId={instanceId} />
+                <option value="MANUAL">Manual</option>
+              </select>
+            </label>
+            <div className="config-options">
+              <h2>Context build</h2>
+              {optionsFromFields(
+                [
+                  { key: "include_source", label: "Include source", defaultValue: true },
+                  { key: "include_previous", label: "Keep previous findings", defaultValue: true },
+                ],
+                config.options,
+              ).map((option: ConfigOption) => (
+                <label key={option.key} className="config-check">
+                  <input
+                    type="checkbox"
+                    checked={option.checked}
+                    disabled={config.busy || !config.loaded}
+                    onChange={(event) => {
+                      const next: Record<string, boolean> = {
+                        ...config.options,
+                        [option.key]: event.target.checked,
+                      }
+                      config.commit(
+                        config.minutes,
+                        config.enabled,
+                        next,
+                        config.model,
+                        config.effort,
+                        config.refreshMode,
+                      )
+                    }}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </section>
+          <AirflowConfigRail instanceId={instanceId} />
           </div>
         ) : null}
       </section>

@@ -20,6 +20,8 @@ class TableOperator(Operator):
     include_graph: bool = TABLE_FLAGS["include_graph"]
     include_lineage: bool = TABLE_FLAGS["include_lineage"]
     include_data_profile: bool = TABLE_FLAGS["include_data_profile"]
+    use_rules: bool = TABLE_FLAGS["use_rules"]
+    use_skills: bool = TABLE_FLAGS["use_skills"]
 
     @model_validator(mode="after")
     def _data_source_not_blank(self) -> TableOperator:
@@ -29,11 +31,13 @@ class TableOperator(Operator):
 
     def context_flags(self) -> dict[str, bool]:
         """Table build flags."""
-        return {
+        flags: dict[str, bool] = {
             "include_graph": self.include_graph,
             "include_lineage": self.include_lineage,
             "include_data_profile": self.include_data_profile,
         }
+        flags.update(self._explicit_pack_flags())
+        return flags
 
     def _source_ref(self) -> TableSourceRef:
         """Build the stored table reference from the shared fields."""

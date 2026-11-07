@@ -889,7 +889,18 @@ def test_operator_round_trip_and_default_execute() -> None:
     iceberg.execute(context)
     assert context.flags["include_lineage"] is False
     assert context.flags["include_graph"] is True
+    assert "use_rules" not in context.flags
+    assert "use_skills" not in context.flags
+    assert "use_rules" not in iceberg.to_ref().params
     assert context.described is True
+    explicit: IcebergTableOperator = IcebergTableOperator(
+        source_key="iceberg.sales.orders",
+        use_rules=False,
+    )
+    assert explicit.context_flags()["use_rules"] is False
+    assert "use_skills" not in explicit.context_flags()
+    assert explicit.to_ref().params["use_rules"] is False
+    assert "use_skills" not in explicit.to_ref().params
 
 
 def test_local_and_celery_executors_submit_the_workload() -> None:

@@ -12,9 +12,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
+from intelegent_data_catalog.assets.agent_pack.compose import explicit_pack_flags
 from intelegent_data_catalog.assets.definitions.models import OperatorRef, SourceRef
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
 from intelegent_data_catalog.assets.execution.tasks import BUILD_CONTEXT, DESCRIBE
+
+_PACK_FLAG_NAMES: tuple[str, ...] = ("use_rules", "use_skills")
 
 
 class OperatorContext(ABC):
@@ -63,11 +66,27 @@ class Operator(BaseModel, ABC):
         value: object
         for key, value in raw.items():
             params[str(key)] = cast(JsonValue, value)
+        dropped: str
+        for dropped in _PACK_FLAG_NAMES:
+            if dropped not in self.model_fields_set:
+                params.pop(dropped, None)
         return OperatorRef(type=type(self).__name__, params=params)
 
     def context_flags(self) -> dict[str, bool]:
         """Build flags for this asset kind. Subclasses expose them as fields."""
         return {}
+
+    def _explicit_pack_flags(self) -> dict[str, bool]:
+        """Pack switches the definition file set. Omitted fields stay out."""
+        flags: dict[str, bool] = {}
+        name: str
+        for name in _PACK_FLAG_NAMES:
+            if name not in self.model_fields_set:
+                continue
+            value: object = getattr(self, name)
+            if isinstance(value, bool):
+                flags[name] = value
+        return flags
 
     def execute(self, context: OperatorContext, observer: OperatorObserver | None = None) -> None:
         """Create the asset's context: build the knowledge snapshot, then describe it."""
@@ -76,8 +95,9 @@ class Operator(BaseModel, ABC):
         def build() -> None:
             context.build_context(flags)
 
-        _run_step(observer, BUILD_CONTEXT, build)
-        _run_step(observer, DESCRIBE, context.describe)
+        with explicit_pack_flags(flags):
+            _run_step(observer, BUILD_CONTEXT, build)
+            _run_step(observer, DESCRIBE, context.describe)
 
 
 def _run_step(observer: OperatorObserver | None, task_id: str, action: Callable[[], None]) -> None:

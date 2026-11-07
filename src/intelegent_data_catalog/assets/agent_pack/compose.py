@@ -1,6 +1,16 @@
 """Turn a loaded pack into the text a describe run adds."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
+
 from intelegent_data_catalog.persistence.enums import AssetKind
+
+_PACK_FLAG_NAMES: tuple[str, ...] = ("use_rules", "use_skills")
+_EXPLICIT_PACK_FLAGS: ContextVar[dict[str, bool] | None] = ContextVar(
+    "explicit_pack_flags",
+    default=None,
+)
 
 _TABLE_FLAG: dict[str, str] = {
     "profile": "include_data_profile",
@@ -70,6 +80,49 @@ class LoadedPack:
             if skill.enabled and skill.description.strip() != "":
                 names.append(skill.name)
         return names
+
+
+@contextmanager
+def explicit_pack_flags(flags: dict[str, bool]) -> Iterator[None]:
+    """Apply pack switches the definition file set, until the run step ends."""
+    picked: dict[str, bool] = {}
+    name: str
+    for name in _PACK_FLAG_NAMES:
+        if name in flags:
+            picked[name] = flags[name]
+    token: Token[dict[str, bool] | None] = _EXPLICIT_PACK_FLAGS.set(picked)
+    try:
+        yield
+    finally:
+        _EXPLICIT_PACK_FLAGS.reset(token)
+
+
+def apply_explicit_pack_flags(flags: dict[str, bool]) -> dict[str, bool]:
+    """Copy ``flags`` and overlay pack switches set by the running operator."""
+    merged: dict[str, bool] = dict(flags)
+    explicit: dict[str, bool] | None = _EXPLICIT_PACK_FLAGS.get()
+    if explicit is None:
+        return merged
+    name: str
+    for name in _PACK_FLAG_NAMES:
+        if name in explicit:
+            merged[name] = explicit[name]
+    return merged
+
+
+def scoped_pack(pack: LoadedPack, flags: dict[str, bool]) -> LoadedPack:
+    """Drop rules or skills when that asset switch is off. A missing switch stays on."""
+    use_rules: bool = flags.get("use_rules", True)
+    use_skills: bool = flags.get("use_skills", True)
+    if use_rules and use_skills:
+        return pack
+    scoped: LoadedPack = LoadedPack()
+    scoped.agents = pack.agents
+    scoped.prompts = list(pack.prompts)
+    scoped.prefix = pack.prefix
+    scoped.rules = list(pack.rules) if use_rules else []
+    scoped.skills = list(pack.skills) if use_skills else []
+    return scoped
 
 
 def compose_rules(rules: list[LoadedRule]) -> str | None:

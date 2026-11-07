@@ -71,9 +71,11 @@ export function useEntityConfig(
   kind: string,
   id: string,
   fields: readonly OptionField[],
+  active: boolean = true,
 ): EntityConfigController {
   const fieldsRef: MutableRefObject<readonly OptionField[]> = useRef(fields)
   fieldsRef.current = fields
+  const fieldKey: string = fields.map((field: OptionField) => field.key).join("|")
   const [config, setConfig] = useState<EntityConfig>(() => defaultConfig(fields))
   const [busy, setBusy] = useState<boolean>(true)
   const [loaded, setLoaded] = useState<boolean>(false)
@@ -81,6 +83,9 @@ export function useEntityConfig(
   const busyRef: MutableRefObject<boolean> = useRef(busy)
   busyRef.current = busy
   useEffect(() => {
+    if (!active || id === "") {
+      return
+    }
     const controller: AbortController = new AbortController()
     setBusy(true)
     setLoaded(false)
@@ -104,7 +109,7 @@ export function useEntityConfig(
     return () => {
       controller.abort()
     }
-  }, [kind, id])
+  }, [kind, id, active, fieldKey])
   useEffect(() => {
     if (!loaded) {
       return
@@ -267,6 +272,27 @@ function mergeConfig(config: EntityConfig, fields: readonly OptionField[]): Enti
     options,
     nextRunAt: config.nextRunAt,
   }
+}
+
+export async function readEntityOptions(
+  kind: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Record<string, boolean>> {
+  const loaded: EntityConfig = await fetchEntityConfiguration(kind, id, signal ?? AbortSignal.timeout(15000))
+  return loaded.options
+}
+
+export async function setEntityOption(
+  kind: string,
+  id: string,
+  key: string,
+  value: boolean,
+): Promise<Record<string, boolean>> {
+  const current: EntityConfig = await fetchEntityConfiguration(kind, id, AbortSignal.timeout(15000))
+  const options: Record<string, boolean> = { ...current.options, [key]: value }
+  const saved: EntityConfig = await saveEntityConfiguration(kind, id, { ...current, options })
+  return saved.options
 }
 
 async function fetchEntityConfiguration(

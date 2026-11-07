@@ -3,15 +3,19 @@
 import logging
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository
 from intelegent_data_catalog.assets.agent_pack.compose import (
+    LoadedPack,
     active_task,
     allowed_tools,
+    apply_explicit_pack_flags,
     compose_rules,
     describe_instructions,
     narrow_flags,
+    scoped_pack,
 )
 from intelegent_data_catalog.assets.agent_pack.runtime import render_skills
 from intelegent_data_catalog.assets.agent_pack.service import AgentPackService
@@ -26,6 +30,7 @@ from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.catalog.services.query_service import QueryService
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings, ModelId, ReasoningEffort
+from intelegent_data_catalog.entity_configuration import option_values
 from intelegent_data_catalog.exceptions import (
     EntityNotFoundError,
     GraphUnavailableError,
@@ -124,12 +129,13 @@ from intelegent_data_catalog.knowledge.store import (
 from intelegent_data_catalog.lineage.marquez import LineageReader, MarquezClient
 from intelegent_data_catalog.llm.factory import CatalogModels, thinking_level
 from intelegent_data_catalog.llm.overlay import DescribeOverlay, describe_overlay
-from intelegent_data_catalog.persistence.enums import AssetKind
+from intelegent_data_catalog.persistence.enums import AssetKind, RefreshSubjectKind
 from intelegent_data_catalog.persistence.models import (
     AirflowDagRow,
     AirflowInstanceRow,
     AssetRow,
     ColumnRow,
+    EntityConfigurationRow,
 )
 from intelegent_data_catalog.registry.annotations import CatalogAnnotations
 from intelegent_data_catalog.registry.llm_relationships import LlmRelationshipStore
@@ -417,7 +423,7 @@ class RequestPlatform:
         """Build one asset context with the agent for its kind and store the snapshot."""
         logger.info("build asset context start asset_id=%s", asset_id)
         selected: AssetContextOptions = self._narrow_pack_flags(asset_id, options)
-        with describe_overlay(self._pack_overlay(asset_id)):
+        with describe_overlay(self._pack_overlay(asset_id, selected.flags)):
             asset: Asset = AssetRegistry(
                 self._session,
                 _PlatformAgents(self, selected),
@@ -436,19 +442,38 @@ class RequestPlatform:
             _job_access(),
         )
 
-    def _pack_overlay(self, asset_id: UUID) -> DescribeOverlay | None:
+    def _pack_overlay(
+        self,
+        asset_id: UUID,
+        flags: dict[str, bool] | None = None,
+    ) -> DescribeOverlay | None:
         service: AgentPackService | None = self._pack_service()
         if service is None or self._definitions is None:
             return None
-        pack = service.load(asset_id)
-        rendered: str = render_skills(self._definitions, pack)
+        pack: LoadedPack = service.load(asset_id)
+        chosen: dict[str, bool] = self._asset_flags(asset_id)
+        if flags is not None:
+            chosen.update(flags)
+        chosen = apply_explicit_pack_flags(chosen)
+        scoped: LoadedPack = scoped_pack(pack, chosen)
+        rendered: str = render_skills(self._definitions, scoped)
         instructions: str | None = describe_instructions(
-            pack.agents,
-            compose_rules(pack.rules),
+            scoped.agents,
+            compose_rules(scoped.rules),
             rendered,
         )
-        task: str | None = active_task(pack.prompts)
+        task: str | None = active_task(scoped.prompts)
         return DescribeOverlay(instructions, task, asset_id, self._definitions)
+
+    def _asset_flags(self, asset_id: UUID) -> dict[str, bool]:
+        """Saved build flags. Missing pack switches stay on, and the row is not written."""
+        asset: AssetRow | None = self._session.get(AssetRow, asset_id)
+        kind: str | None = None if asset is None else asset.kind
+        row: EntityConfigurationRow | None = self._session.scalar(
+            select(EntityConfigurationRow).where(EntityConfigurationRow.asset_id == asset_id),
+        )
+        raw: dict[str, object] = {} if row is None else dict(row.options)
+        return option_values(RefreshSubjectKind.ASSET, raw, kind)
 
     def _narrow_pack_flags(
         self,
@@ -461,8 +486,12 @@ class RequestPlatform:
         row: AssetRow | None = self._session.get(AssetRow, asset_id)
         if row is None:
             return options
-        pack = service.load(asset_id)
-        allowed: set[str] | None = allowed_tools(pack.skills, options.flags, AssetKind(row.kind))
+        pack: LoadedPack = service.load(asset_id)
+        chosen: dict[str, bool] = self._asset_flags(asset_id)
+        chosen.update(options.flags)
+        chosen = apply_explicit_pack_flags(chosen)
+        scoped: LoadedPack = scoped_pack(pack, chosen)
+        allowed: set[str] | None = allowed_tools(scoped.skills, chosen, AssetKind(row.kind))
         return options.model_copy(update={"flags": narrow_flags(options.flags, allowed)})
 
     def read_asset_context(self, asset_id: UUID) -> AssetAnalysisContext:
