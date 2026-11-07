@@ -8,9 +8,9 @@ from intelegent_data_catalog.assets.definitions.models import AssetSpec, ScopeSp
 from intelegent_data_catalog.assets.dsl.collector import current_collector
 from intelegent_data_catalog.assets.dsl.errors import AssetDefinitionError
 from intelegent_data_catalog.assets.dsl.operators import Operator
-from intelegent_data_catalog.assets.execution.cron import parse_schedule
 from intelegent_data_catalog.persistence.enums import AssetStatus
 from intelegent_data_catalog.registry.identifiers import require_slug
+from intelegent_data_catalog.schedual.cron import parse_schedule
 
 _KEY: re.Pattern[str] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$")
 _TAG: re.Pattern[str] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")

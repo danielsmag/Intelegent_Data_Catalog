@@ -15,10 +15,8 @@ from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.assets.sync import AssetSync
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
-from intelegent_data_catalog.jobs.context_refresh import ContextRefreshService
 from intelegent_data_catalog.jobs.models import KnowledgeBuildJobRead
 from intelegent_data_catalog.jobs.publisher import SyncJobPublisher
-from intelegent_data_catalog.jobs.schedules import SyncScheduleService
 from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
@@ -32,6 +30,8 @@ from intelegent_data_catalog.persistence.models import (
     MetadataSyncRunRow,
     SyncScheduleRow,
 )
+from intelegent_data_catalog.schedual.context_refresh import ContextRefreshService
+from intelegent_data_catalog.schedual.schedules import SyncScheduleService
 
 
 class _RecordingBuilds:

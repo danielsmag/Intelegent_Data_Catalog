@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
 from intelegent_data_catalog.assets.execution.runtime import OperatorRunner, PlatformOperatorContext
-from intelegent_data_catalog.assets.execution.schedule import AssetOperatorSchedule
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.assets.models import AssetContextOptions
 from intelegent_data_catalog.bootstrap import create_app
@@ -34,6 +33,7 @@ from intelegent_data_catalog.persistence.models import (
     AssetOperatorRunTaskRow,
     AssetRow,
 )
+from intelegent_data_catalog.schedual.operators import AssetOperatorSchedule
 from tests.test_asset_definitions import _ORDERS, _open, _put, _send, _table
 
 

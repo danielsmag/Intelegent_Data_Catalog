@@ -10,13 +10,13 @@ from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.lease import JobLeaseStore
-from intelegent_data_catalog.jobs.reclaim import ABANDONED_JOB_ERROR, AbandonedJobReclaimer
 from intelegent_data_catalog.jobs.trace import BuildTraceEvent, MemoryBuildTrace
 from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import CatalogJobRow
+from intelegent_data_catalog.schedual.reclaim import ABANDONED_JOB_ERROR, AbandonedJobReclaimer
 
 _RECLAIM_AFTER: timedelta = timedelta(seconds=120)
 _ABANDON_AFTER: timedelta = timedelta(seconds=1800)
