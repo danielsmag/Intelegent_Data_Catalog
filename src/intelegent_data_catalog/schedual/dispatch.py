@@ -11,13 +11,13 @@ from intelegent_data_catalog.jobs.cancel import RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs, CatalogJobStore
 from intelegent_data_catalog.jobs.lease import RedisJobLeaseStore
 from intelegent_data_catalog.jobs.publisher import CeleryJobPublisher
-from intelegent_data_catalog.jobs.runner import build_operator_executor
+from intelegent_data_catalog.jobs.runner import build_asset_operator_executor
 from intelegent_data_catalog.jobs.runtime import job_container
 from intelegent_data_catalog.jobs.trace import RedisBuildTrace
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.schedual.asset_operators import AssetOperatorSchedule
 from intelegent_data_catalog.schedual.context_refresh import ContextRefreshService
-from intelegent_data_catalog.schedual.operators import AgentOperatorSchedule
 from intelegent_data_catalog.schedual.reclaim import AbandonedJobReclaimer
 from intelegent_data_catalog.schedual.schedules import SyncScheduleService
 
@@ -37,9 +37,9 @@ def dispatch_due_syncs() -> int:
             session,
             CatalogJobs(database, publisher),
         ).claim_due(now)
-        operators = AgentOperatorSchedule(
+        operators = AssetOperatorSchedule(
             session,
-            build_operator_executor(job_container().settings()),
+            build_asset_operator_executor(job_container().settings()),
         ).claim_due(now)
     except Exception:
         session.rollback()

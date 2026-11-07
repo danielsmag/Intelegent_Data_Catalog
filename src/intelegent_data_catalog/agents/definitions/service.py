@@ -16,7 +16,6 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
-    DefinitionRunStatus,
 )
 from intelegent_data_catalog.persistence.models import (
     AgentDefinitionFileRow,
@@ -89,9 +88,4 @@ def _item_read(row: AgentDefinitionItemRow) -> AgentDefinitionItemRead:
         status=DefinitionItemStatus(row.status),
         error=row.error,
         agent_id=row.agent_id,
-        run_status=None if row.run_status is None else DefinitionRunStatus(row.run_status),
-        run_error=row.run_error,
-        ran_at=row.ran_at,
-        schedule=row.schedule,
-        next_run_at=row.next_run_at,
     )

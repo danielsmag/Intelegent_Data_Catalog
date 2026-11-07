@@ -478,7 +478,6 @@ class AgentDefinitionsSettings(BaseModel):
     poll_interval_seconds: float = Field(default=10.0, gt=0)
     exec_timeout_seconds: float = Field(default=30.0, gt=0)
     max_file_bytes: int = Field(default=1024 * 1024, ge=1)
-    executor: Literal["celery", "local"] = "celery"
 
     @model_validator(mode="after")
     def _normalize_prefix_and_folders(self) -> AgentDefinitionsSettings:
@@ -489,6 +488,61 @@ class AgentDefinitionsSettings(BaseModel):
         for folder in folders:
             if folder != folder.strip() or "/" in folder or folder in {"", ".", ".."}:
                 raise ValueError("definition folder must be a single path segment")
+        return self
+
+
+class AssetDefinitionsSettings(BaseModel):
+    """S3 prefix of Python files that declare deterministic assets.
+
+    Beat polls the prefix every ``poll_interval_seconds`` when ``enabled`` is true.
+    Operator markdown is written under ``outputs_prefix`` in the same bucket.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    endpoint: str = ""
+    access_key: str = ""
+    secret_key: SecretStr = Field(default=SecretStr(""))
+    bucket: str = ""
+    region: str = ""
+    prefix: str = "asset-definitions/"
+    assets_folder: str = Field(default="assets", min_length=1)
+    outputs_prefix: str = "asset-outputs/"
+    poll_interval_seconds: float = Field(default=10.0, gt=0)
+    exec_timeout_seconds: float = Field(default=30.0, gt=0)
+    max_file_bytes: int = Field(default=1024 * 1024, ge=1)
+    executor: Literal["celery", "local"] = "celery"
+
+    @model_validator(mode="after")
+    def _normalize_prefix_and_folders(self) -> AssetDefinitionsSettings:
+        prefix: str = self.prefix.strip().strip("/")
+        self.prefix = f"{prefix}/" if prefix != "" else ""
+        outputs: str = self.outputs_prefix.strip().strip("/")
+        self.outputs_prefix = f"{outputs}/" if outputs != "" else ""
+        folder: str = self.assets_folder
+        if folder != folder.strip() or "/" in folder or folder in {"", ".", ".."}:
+            raise ValueError("definition folder must be a single path segment")
+        return self
+
+
+class GitHubSettings(BaseModel):
+    """GitHub REST API. An empty token reads public repositories."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_url: str = Field(default="https://api.github.com", min_length=1)
+    token: SecretStr = Field(default=SecretStr(""))
+    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    max_file_bytes: int = Field(default=200_000, ge=1)
+    max_files: int = Field(default=200, ge=1, le=5000)
+
+    @model_validator(mode="after")
+    def _normalize_api_url(self) -> GitHubSettings:
+        trimmed: str = self.api_url.strip().rstrip("/")
+        if trimmed == "":
+            raise ValueError("github api_url is required")
+        self.api_url = trimmed
         return self
 
 
@@ -594,6 +648,8 @@ class AppSettings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
     object_store: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
     agent_definitions: AgentDefinitionsSettings = Field(default_factory=AgentDefinitionsSettings)
+    asset_definitions: AssetDefinitionsSettings = Field(default_factory=AssetDefinitionsSettings)
+    github: GitHubSettings = Field(default_factory=GitHubSettings)
     notebook: NotebookSettings = Field(default_factory=NotebookSettings)
     credentials: dict[str, CredentialEntry] = Field(default_factory=dict)
 

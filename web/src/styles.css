@@ -2874,6 +2874,14 @@ html.pane-dragging * {
   border-left-color: var(--kind-airflow);
 }
 
+.trace-kind-agent {
+  border-left-color: var(--kind-column);
+}
+
+.trace-kind-asset {
+  border-left-color: #79c0ff;
+}
+
 .trace-alert-success {
   border-left-color: var(--ok);
 }
@@ -4027,6 +4035,14 @@ html.editor-dragging * {
   border-bottom: 1px solid var(--border);
 }
 
+.agent-row--assets {
+  grid-template-columns: minmax(220px, 1.8fr) minmax(120px, 0.7fr) minmax(140px, 0.8fr) minmax(170px, 1fr) minmax(160px, 0.9fr) 110px;
+}
+
+.agent-board__table:has(.agent-row--assets) {
+  min-width: 860px;
+}
+
 .agent-row--head {
   color: var(--muted);
   font-size: 11px;
@@ -4099,11 +4115,6 @@ html.editor-dragging * {
   gap: 2px;
   min-width: 0;
   line-height: 1.3;
-}
-
-.agent-row__when {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .agent-availability {
@@ -5255,4 +5266,296 @@ span.run-status {
 
 .skill-doc-source {
   margin-top: 10px;
+}
+
+.asset-page {
+  container-type: inline-size;
+}
+
+.asset-page .catalog-kicker,
+.asset-page .tab.selected,
+.asset-page .agent-card > h2,
+.asset-page .columns th,
+.asset-markdown h1,
+.asset-markdown h2,
+.asset-markdown h3,
+.asset-sheet .run-expand-grid h3 {
+  color: var(--catalog);
+}
+
+.asset-page .tab.selected {
+  border-bottom-color: var(--catalog);
+}
+
+.asset-hero .catalog-hero-top {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.asset-hero .catalog-hero-copy {
+  flex: 1 1 auto;
+}
+
+.asset-hero .catalog-hero-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.asset-page .agent-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.asset-page .agent-stats li {
+  min-width: 0;
+}
+
+.asset-page .agent-stats strong {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.asset-page .agent-overview-grid {
+  grid-template-columns: 1fr;
+}
+
+@container (min-width: 880px) {
+  .asset-page .agent-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .asset-page .agent-overview-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  }
+}
+
+.asset-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.asset-sheet .agent-stats strong.asset-stat-text {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+
+.asset-facts {
+  margin-top: 14px;
+}
+
+.asset-output {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.asset-output > .error-text {
+  grid-column: 1 / -1;
+}
+
+.asset-output-rail {
+  position: sticky;
+  top: 8px;
+}
+
+.asset-output-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asset-output-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.asset-output-item strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.asset-output-item span,
+.asset-output-item small {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.asset-output-item:hover,
+.asset-output-item.is-selected {
+  border-color: color-mix(in srgb, var(--catalog) 55%, var(--border));
+  background: color-mix(in srgb, var(--catalog) 10%, transparent);
+}
+
+.asset-markdown {
+  min-width: 0;
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  padding: 8px 28px 32px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #161616;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.asset-markdown h1,
+.asset-markdown h2,
+.asset-markdown h3 {
+  margin: 28px 0 10px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.asset-markdown h1 {
+  margin-top: 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--catalog) 35%, var(--border));
+  font-size: 26px;
+}
+
+.asset-markdown h2 {
+  font-size: 18px;
+}
+
+.asset-markdown h3 {
+  font-size: 15px;
+}
+
+.asset-markdown p,
+.asset-markdown li {
+  max-width: 88ch;
+}
+
+.asset-markdown a {
+  color: #8ec8ff;
+}
+
+.asset-markdown code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.asset-markdown :not(pre) > code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--catalog) 14%, transparent);
+  color: #b9dcff;
+}
+
+.asset-markdown pre {
+  overflow: auto;
+  max-height: 420px;
+  margin: 12px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #101010;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
+
+.asset-md-scroll {
+  overflow: auto;
+  max-height: 440px;
+  margin: 12px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.asset-md-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.asset-md-scroll th,
+.asset-md-scroll td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.asset-md-scroll th {
+  position: sticky;
+  top: 0;
+  background: #1a2836;
+  color: var(--catalog);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.asset-md-scroll tr:last-child td {
+  border-bottom: 0;
+}
+
+.asset-md-scroll tbody tr:hover td {
+  background: var(--hover);
+}
+
+.asset-page .columns th {
+  background: #1a2836;
+  letter-spacing: 0.06em;
+}
+
+@container (max-width: 760px) {
+  .asset-page .run-table th:nth-child(6),
+  .asset-page .run-table td:nth-child(6),
+  .asset-page .run-table th:nth-child(7),
+  .asset-page .run-table td:nth-child(7) {
+    display: none;
+  }
+
+  .asset-page .run-expand-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.asset-task-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-log {
+  max-height: 480px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@container (max-width: 760px) {
+  .asset-output {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-output-rail {
+    position: static;
+  }
 }

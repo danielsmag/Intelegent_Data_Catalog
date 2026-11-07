@@ -90,7 +90,6 @@ class CatalogAgentBuild:
         try:
             recorder.open(
                 agent_id=subject_id,
-                item_id=None,
                 catalog_job_id=catalog_job_id,
                 trigger=OperatorRunTrigger.MANUAL,
                 operator_type=None,

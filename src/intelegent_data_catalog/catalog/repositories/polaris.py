@@ -1,9 +1,10 @@
 """Apache Polaris client for catalog metadata."""
 
+import json
 import logging
 import threading
 import time
-from typing import TypeVar
+from typing import TypeVar, cast
 from urllib.parse import quote
 
 import httpx
@@ -252,6 +253,25 @@ class PolarisClient:
             columns=_columns(schema),
         )
 
+    def load_table_raw(self, catalog: str, namespace: str, table: str) -> dict[str, JsonValue]:
+        """Return the full Iceberg REST load-table document."""
+        path: str = (
+            f"/api/catalog/v1/{quote(catalog, safe='')}"
+            f"/namespaces/{encode_namespace(namespace)}"
+            f"/tables/{quote(table, safe='')}"
+        )
+        response: httpx.Response = self._request("GET", path, "load table")
+        self._require_success(
+            response,
+            "load table",
+            not_found=TableNotFoundError(catalog, namespace, table),
+        )
+        try:
+            payload: object = response.json()
+        except ValueError as err:
+            raise PolarisError("polaris load table returned invalid JSON") from err
+        return _json_object(payload)
+
     def _get_model(
         self,
         path: str,
@@ -370,6 +390,21 @@ def _current_schema(metadata: IcebergTableMetadata) -> IcebergSchema:
         if schema.schema_id == metadata.current_schema_id:
             return schema
     raise PolarisError("polaris table metadata current schema was not found")
+
+
+def _json_object(payload: object) -> dict[str, JsonValue]:
+    try:
+        raw: object = json.loads(json.dumps(payload))
+    except (TypeError, ValueError) as err:
+        raise PolarisError("polaris load table returned an unexpected payload") from err
+    if not isinstance(raw, dict):
+        raise PolarisError("polaris load table returned an unexpected payload")
+    found: dict[str, JsonValue] = {}
+    key: object
+    value: object
+    for key, value in raw.items():
+        found[str(key)] = cast(JsonValue, value)
+    return found
 
 
 def _columns(schema: IcebergSchema) -> list[ColumnDetail]:

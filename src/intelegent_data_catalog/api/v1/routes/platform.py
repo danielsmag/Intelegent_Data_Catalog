@@ -5,6 +5,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.dependencies import (
@@ -36,6 +38,7 @@ from intelegent_data_catalog.jobs.trace import (
     BuildTraceJob,
     BuildTraceList,
     RedisBuildTrace,
+    trace_status_for_run,
 )
 from intelegent_data_catalog.knowledge.models import (
     AirflowAnalysisContext,
@@ -45,8 +48,9 @@ from intelegent_data_catalog.knowledge.models import (
     TableAnalysisContext,
     TableContextOptions,
 )
+from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import RefreshSubjectKind
-from intelegent_data_catalog.persistence.models import CatalogJobRow
+from intelegent_data_catalog.persistence.models import AssetRunRow, CatalogJobRow
 from intelegent_data_catalog.query.spark_bridge import (
     NOT_CONFIGURED,
     SparkQueryPreview,
@@ -531,14 +535,17 @@ def read_build_traces(
     cursor: str | None = events[-1].id if len(events) > 0 else after
     wanted: set[UUID] = {event.job_id for event in events}
     wanted.update(_trace_job_ids(jobs))
-    loaded: list[CatalogJobRow] = CatalogJobStore(container.database()).statuses(wanted)
+    database: CatalogDatabase = container.database()
+    loaded: list[CatalogJobRow] = CatalogJobStore(database).statuses(wanted)
     rows: list[CatalogJobRow] = loaded
     states: list[BuildTraceJob] = []
+    seen: set[UUID] = set()
     row: CatalogJobRow
     for row in rows:
         status: Literal["running", "succeeded", "failed"] | None = _trace_status(row.status)
         if status is None:
             continue
+        seen.add(row.id)
         states.append(
             BuildTraceJob(
                 job_id=row.id,
@@ -547,6 +554,7 @@ def read_build_traces(
                 finished_at=row.finished_at,
             ),
         )
+    states.extend(_asset_trace_jobs(database, wanted - seen))
     return BuildTraceList(events=events, cursor=cursor, jobs=states)
 
 
@@ -576,6 +584,34 @@ def _trace_status(value: str) -> Literal["running", "succeeded", "failed"] | Non
     if value == "running" or value == "succeeded" or value == "failed":
         return value
     return None
+
+
+def _asset_trace_jobs(database: CatalogDatabase, run_ids: set[UUID]) -> list[BuildTraceJob]:
+    """Close asset cards from the run row when the terminal step never reached Redis."""
+    if len(run_ids) == 0:
+        return []
+    session: Session = database.session()
+    try:
+        rows: list[AssetRunRow] = list(
+            session.scalars(select(AssetRunRow).where(AssetRunRow.id.in_(run_ids))),
+        )
+    finally:
+        session.close()
+    states: list[BuildTraceJob] = []
+    run: AssetRunRow
+    for run in rows:
+        status: Literal["running", "succeeded", "failed"] | None = trace_status_for_run(run.status)
+        if status is None:
+            continue
+        states.append(
+            BuildTraceJob(
+                job_id=run.id,
+                status=status,
+                error=run.error,
+                finished_at=run.finished_at,
+            ),
+        )
+    return states
 
 
 def _start_context(

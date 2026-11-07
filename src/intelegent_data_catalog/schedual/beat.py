@@ -3,7 +3,11 @@
 from datetime import timedelta
 
 from intelegent_data_catalog.core.settings import AppSettings
-from intelegent_data_catalog.jobs.names import DISPATCH_DUE_SYNCS, SCAN_AGENT_DEFINITIONS
+from intelegent_data_catalog.jobs.names import (
+    DISPATCH_DUE_SYNCS,
+    SCAN_AGENT_DEFINITIONS,
+    SCAN_ASSET_DEFINITIONS,
+)
 
 
 def beat_schedule(settings: AppSettings) -> dict[str, dict[str, object]]:
@@ -18,5 +22,10 @@ def beat_schedule(settings: AppSettings) -> dict[str, dict[str, object]]:
         schedule["scan-agent-definitions"] = {
             "task": SCAN_AGENT_DEFINITIONS,
             "schedule": timedelta(seconds=settings.agent_definitions.poll_interval_seconds),
+        }
+    if settings.asset_definitions.enabled:
+        schedule["scan-asset-definitions"] = {
+            "task": SCAN_ASSET_DEFINITIONS,
+            "schedule": timedelta(seconds=settings.asset_definitions.poll_interval_seconds),
         }
     return schedule

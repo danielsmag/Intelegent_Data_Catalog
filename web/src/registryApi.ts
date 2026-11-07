@@ -427,7 +427,7 @@ export async function searchCatalog(query: string, signal: AbortSignal): Promise
   return body.hits
 }
 
-export type BuildTraceKind = "table" | "scope" | "space" | "airflow" | "agent"
+export type BuildTraceKind = "table" | "scope" | "space" | "airflow" | "agent" | "asset"
 
 export type BuildTraceEvent = {
   id: string

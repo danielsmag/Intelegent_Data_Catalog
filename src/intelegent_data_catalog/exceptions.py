@@ -124,6 +124,22 @@ class AirflowAuthError(AirflowUnavailableError):
         super().__init__(message)
 
 
+class GitHubUnavailableError(CatalogError):
+    """Raised when a GitHub REST call cannot complete. The message is sanitized."""
+
+    def __init__(self, message: str = "GitHub is unavailable") -> None:
+        super().__init__(message)
+
+
+class GitHubNotFoundError(GitHubUnavailableError):
+    """Raised when GitHub has no repository for the owner and name."""
+
+    def __init__(self, owner: str, repo: str) -> None:
+        self.owner: str = owner
+        self.repo: str = repo
+        super().__init__(f"GitHub repository not found: {owner}/{repo}")
+
+
 class AuthenticationError(CatalogError):
     """Raised when a request has no valid bearer token."""
 

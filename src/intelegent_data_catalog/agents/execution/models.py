@@ -43,7 +43,6 @@ class AgentRunRead(BaseModel):
 
     id: UUID
     agent_id: UUID
-    item_id: UUID | None
     catalog_job_id: UUID | None
     status: DefinitionRunStatus
     trigger: OperatorRunTrigger

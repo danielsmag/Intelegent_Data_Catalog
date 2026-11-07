@@ -4,14 +4,13 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from intelegent_data_catalog.persistence.enums import (
     AgentStatus,
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
-    DefinitionRunStatus,
 )
 
 DefinitionFolder = Literal["agents"]
@@ -88,39 +87,22 @@ class PackSpec(BaseModel):
     single_active_prompt: bool = True
 
 
-class OperatorRef(BaseModel):
-    """Operator class name and fields as the definition file wrote them.
-
-    An executor rebuilds the operator from this and calls ``execute``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: str = Field(min_length=1, max_length=255)
-    params: dict[str, JsonValue] = Field(default_factory=dict)
-
-
 class AgentSpec(BaseModel):
     """One agent declaration.
 
-    ``operators`` run in order. An empty list resolves the agent and runs nothing.
-    A stored ``operator`` from an older file is folded into ``operators`` so the
-    row still loads. ``schedule`` is a five-field cron, or null when the steps
-    run once on first apply.
     ``key`` identifies the declaration and is the visible name. ``name`` stays
     on stored items from older files and is ignored.
     ``tags`` lists labels the file passed. An empty list with ``tags`` absent from
     ``set_fields`` means the file did not mention tags.
     ``pack`` caps the agent files stored beside the declaration.
+    A stored ``operator`` or ``schedule`` from an older file is ignored.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     key: str
     source: SourceRef
-    operators: list[OperatorRef] = Field(default_factory=list)
     pack: PackSpec | None = None
-    schedule: str | None = None
     name: str | None = None
     description: str | None = None
     context: str | None = None
@@ -131,27 +113,16 @@ class AgentSpec(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _fold_stored_operator(cls, value: object) -> object:
-        """Accept a stored single ``operator`` and drop a schema ``parent_key``."""
+    def _drop_retired_fields(cls, value: object) -> object:
+        """Ignore operator and schedule fields left by older definition files."""
         if not isinstance(value, dict):
             return value
         data: dict[object, object] = dict(value)
         data.pop("parent_key", None)
-        if "operators" not in data and "operator" in data:
-            stored: object = data.pop("operator")
-            data["operators"] = [] if stored is None else [stored]
-        else:
-            data.pop("operator", None)
+        data.pop("operator", None)
+        data.pop("operators", None)
+        data.pop("schedule", None)
         return data
-
-    @field_validator("schedule")
-    @classmethod
-    def _cron(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        from intelegent_data_catalog.schedual.cron import parse_schedule
-
-        return parse_schedule(value)
 
 
 class DefinitionSpec(BaseModel):
@@ -190,11 +161,6 @@ class AgentDefinitionItemRead(BaseModel):
     status: DefinitionItemStatus
     error: str | None
     agent_id: UUID | None
-    run_status: DefinitionRunStatus | None = None
-    run_error: str | None = None
-    ran_at: datetime | None = None
-    schedule: str | None = None
-    next_run_at: datetime | None = None
 
 
 class AgentDefinitionFileDetail(BaseModel):

@@ -138,7 +138,24 @@ agents_folder = "agents"
 poll_interval_seconds = 10
 exec_timeout_seconds = 30
 max_file_bytes = 1048576
+
+# Python files under assets/. Beat polls only when enabled.
+[asset_definitions]
+enabled = false
+prefix = "asset-definitions/"
+assets_folder = "assets"
+outputs_prefix = "asset-outputs/"
+poll_interval_seconds = 10
+exec_timeout_seconds = 30
+max_file_bytes = 1048576
 executor = "celery"
+
+[github]
+api_url = "https://api.github.com"
+token = ""
+timeout_seconds = 30
+max_file_bytes = 200000
+max_files = 200
 
 [notebook]
 enabled = false

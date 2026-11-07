@@ -103,8 +103,6 @@ class AgentListItem(BaseModel):
     build_running: bool
     refresh_mode: AgentRefreshMode
     interval_seconds: int
-    schedule: str | None = None
-    next_run_at: datetime | None = None
     updated_at: datetime
 
 

@@ -12,6 +12,7 @@ import {
 import { openInFocusedGroup } from "./editorLayout"
 import { setSidebarView, useSidebarView, type SidebarView } from "./sidebarView"
 import { setAgentsSidebarOpen } from "./agentsSidebarStore"
+import { setAssetsSidebarOpen } from "./assetsSidebarStore"
 import { setWorkspaceSidebarOpen } from "./workspaceSidebar"
 import { useMe } from "./workspaceApi"
 
@@ -35,6 +36,7 @@ export function ActivityBar(): ReactElement {
   const items: Item[] = [
     { view: "workspace", label: "Workspace", icon: <TableIcon /> },
     { view: "agents", label: "Agents", icon: <AgentIcon /> },
+    { view: "assets", label: "Assets", icon: <CatalogIcon /> },
     { view: "catalog", label: "Catalog", icon: <CatalogIcon /> },
     { view: "search", label: "Search", icon: <QueryIcon />, gap: true },
     { view: "query", label: "Query", icon: <TableIcon /> },
@@ -61,6 +63,10 @@ export function ActivityBar(): ReactElement {
               if (item.view === "agents") {
                 setAgentsSidebarOpen(true)
                 openInFocusedGroup("/agents")
+              }
+              if (item.view === "assets") {
+                setAssetsSidebarOpen(true)
+                openInFocusedGroup("/assets")
               }
             }}
           >

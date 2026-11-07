@@ -69,7 +69,9 @@ def upgrade() -> None:
     """Rename asset tables and columns, and store agent enum values."""
     bind: Connection = op.get_bind()
     tables: set[str] = _tables(bind)
-    if "assets" not in tables:
+    # A current database already has ``agents``. The ``assets`` table is the
+    # later deterministic-asset store, not the table this revision renames.
+    if "agents" in tables or "assets" not in tables:
         return
     _jobs(bind, "asset", "agent", _JOB_AGENT)
     _definition_kind(

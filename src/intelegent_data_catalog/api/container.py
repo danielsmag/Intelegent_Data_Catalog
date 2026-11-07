@@ -21,6 +21,7 @@ from intelegent_data_catalog.core.logger import configure_logging
 from intelegent_data_catalog.core.settings import (
     AgentDefinitionsSettings,
     AppSettings,
+    AssetDefinitionsSettings,
     ObjectStoreSettings,
     load_settings,
     resolve_project_root,
@@ -29,6 +30,7 @@ from intelegent_data_catalog.notebooks.directory import KernelDirectory
 from intelegent_data_catalog.notebooks.gateway import KernelGatewayClient
 from intelegent_data_catalog.notebooks.tickets import KernelTickets
 from intelegent_data_catalog.persistence.database import CatalogDatabase
+from intelegent_data_catalog.sources.github.client import GitHubClient
 from intelegent_data_catalog.sources.trino.client import TrinoClient
 from intelegent_data_catalog.storage.object_store import (
     ObjectStore,
@@ -142,6 +144,32 @@ def build_kernel_gateway(settings: AppSettings) -> KernelGatewayClient:
     )
 
 
+def build_github_client(
+    settings: AppSettings,
+    http_client: httpx.Client,
+    logger: logging.Logger,
+) -> GitHubClient:
+    """Build a GitHub client from application settings."""
+    return GitHubClient(settings.github, http_client, logger.getChild("github"))
+
+
+def build_asset_definition_store(settings: AppSettings) -> ObjectStore:
+    """Object store for asset definitions and operator output.
+
+    Blank fields use the workspace store.
+    """
+    pages: AssetDefinitionsSettings = settings.asset_definitions
+    store_settings: ObjectStoreSettings = definition_store_settings(
+        settings.object_store,
+        endpoint=pages.endpoint,
+        access_key=pages.access_key,
+        secret_key=pages.secret_key,
+        region=pages.region,
+        bucket=pages.bucket,
+    )
+    return build_object_store(store_settings)
+
+
 def build_agent_definition_store(settings: AppSettings) -> ObjectStore:
     """Object store for agent definition files. Blank fields use the workspace store."""
     pages: AgentDefinitionsSettings = settings.agent_definitions
@@ -227,6 +255,16 @@ class AppContainer(containers.DeclarativeContainer):
     agent_definition_store: providers.Singleton[ObjectStore] = providers.Singleton(
         build_agent_definition_store,
         settings,
+    )
+    asset_definition_store: providers.Singleton[ObjectStore] = providers.Singleton(
+        build_asset_definition_store,
+        settings,
+    )
+    github_client: providers.Singleton[GitHubClient] = providers.Singleton(
+        build_github_client,
+        settings,
+        http_client,
+        logger,
     )
     kernel_gateway: providers.Singleton[KernelGatewayClient] = providers.Singleton(
         build_kernel_gateway,

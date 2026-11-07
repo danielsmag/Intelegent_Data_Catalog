@@ -1,4 +1,4 @@
-"""Sources name what an agent is. Operators are the steps that run on it."""
+"""Sources name what an agent is."""
 
 from __future__ import annotations
 
@@ -14,21 +14,8 @@ from intelegent_data_catalog.agents.definitions.models import (
     SourceRef,
     TableSourceRef,
 )
-from intelegent_data_catalog.agents.strategies.flags import (
-    DAG_FLAGS,
-    FILE_FLAGS,
-    INSTANCE_FLAGS,
-    TABLE_FLAGS,
-)
 from intelegent_data_catalog.persistence.enums import AgentKind
 from intelegent_data_catalog.registry.identifiers import require_slug
-
-_PACK_FLAGS: frozenset[str] = frozenset({"use_rules", "use_skills"})
-_TABLE_FLAGS: frozenset[str] = frozenset(
-    {"include_graph", "include_lineage", "include_data_profile"},
-) | _PACK_FLAGS
-_DAG_FLAGS: frozenset[str] = frozenset({"include_source", "include_previous"}) | _PACK_FLAGS
-_FILE_FLAGS: frozenset[str] = frozenset({"include_outputs", "include_table_links"}) | _PACK_FLAGS
 
 
 class Source(BaseModel, ABC):
@@ -44,11 +31,6 @@ class Source(BaseModel, ABC):
     @abstractmethod
     def kind(self) -> AgentKind | None:
         """Stored agent kind. ``None`` when apply decides, as a page does."""
-
-    @property
-    @abstractmethod
-    def flag_names(self) -> frozenset[str]:
-        """Build flags a ``BuildContext`` step may set for this source."""
 
 
 class IcebergTable(Source):
@@ -71,11 +53,6 @@ class IcebergTable(Source):
         """Table agent."""
         return AgentKind.TABLE
 
-    @property
-    def flag_names(self) -> frozenset[str]:
-        """Table build flags."""
-        return _TABLE_FLAGS
-
 
 class PostgresTable(Source):
     """One Postgres table, named by source key."""
@@ -96,11 +73,6 @@ class PostgresTable(Source):
     def kind(self) -> AgentKind:
         """Table agent."""
         return AgentKind.TABLE
-
-    @property
-    def flag_names(self) -> frozenset[str]:
-        """Table build flags."""
-        return _TABLE_FLAGS
 
 
 class Schema(Source):
@@ -138,11 +110,6 @@ class Schema(Source):
         """Schema agent."""
         return AgentKind.SCHEMA
 
-    @property
-    def flag_names(self) -> frozenset[str]:
-        """Schema builds use the table flags across every matching table."""
-        return _TABLE_FLAGS
-
 
 class AirflowDag(Source):
     """One synced Airflow DAG."""
@@ -164,11 +131,6 @@ class AirflowDag(Source):
         """DAG agent."""
         return AgentKind.AIRFLOW_DAG
 
-    @property
-    def flag_names(self) -> frozenset[str]:
-        """DAG build flags."""
-        return _DAG_FLAGS
-
 
 class AirflowInstance(Source):
     """One registered Airflow instance."""
@@ -188,11 +150,6 @@ class AirflowInstance(Source):
     def kind(self) -> AgentKind:
         """Instance agent."""
         return AgentKind.AIRFLOW_INSTANCE
-
-    @property
-    def flag_names(self) -> frozenset[str]:
-        """Instance build flags."""
-        return _DAG_FLAGS
 
 
 class Page(Source):
@@ -214,11 +171,6 @@ class Page(Source):
     def kind(self) -> None:
         """The file extension decides the kind at apply time."""
         return None
-
-    @property
-    def flag_names(self) -> frozenset[str]:
-        """File and notebook build flags."""
-        return _FILE_FLAGS
 
 
 def _table_ref(source_key: str, data_source: str | None) -> TableSourceRef:
@@ -247,14 +199,3 @@ def _table_names(names: list[str] | None) -> list[str] | None:
         seen.add(cleaned)
         found.append(cleaned)
     return found
-
-
-def default_flags(source: Source) -> dict[str, bool]:
-    """Flag defaults for a source. A page uses the file defaults until apply."""
-    if isinstance(source, AirflowDag):
-        return dict(DAG_FLAGS)
-    if isinstance(source, AirflowInstance):
-        return dict(INSTANCE_FLAGS)
-    if isinstance(source, Page):
-        return dict(FILE_FLAGS)
-    return dict(TABLE_FLAGS)

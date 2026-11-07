@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from intelegent_data_catalog.agents.definitions.models import OperatorRef
+from intelegent_data_catalog.assets.definitions.models import OperatorRef
 from intelegent_data_catalog.persistence.enums import OperatorRunTrigger
 
 
@@ -14,9 +14,10 @@ class OperatorWorkload(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     item_id: UUID
-    agent_id: UUID
-    agent_name: str
+    asset_id: UUID
+    asset_key: str
     file_key: str
     item_key: str
     operators: list[OperatorRef]
     trigger: OperatorRunTrigger = OperatorRunTrigger.APPLY
+    force: bool = False

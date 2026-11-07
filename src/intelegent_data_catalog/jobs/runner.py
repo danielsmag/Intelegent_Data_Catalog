@@ -5,19 +5,21 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from intelegent_data_catalog.agents.definitions.models import ScanResult
+from intelegent_data_catalog.agents.definitions.models import ScanResult as AgentScanResult
 from intelegent_data_catalog.agents.definitions.scanner import AgentDefinitionScanner
-from intelegent_data_catalog.agents.execution.executor import (
-    CeleryOperatorExecutor,
-    LocalOperatorExecutor,
-    OperatorExecutor,
-)
-from intelegent_data_catalog.agents.execution.runtime import OperatorRunner
-from intelegent_data_catalog.agents.execution.workload import OperatorWorkload
 from intelegent_data_catalog.agents.models import AgentContextOptions
 from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
+from intelegent_data_catalog.assets.definitions.models import ScanResult as AssetScanResult
+from intelegent_data_catalog.assets.definitions.scanner import AssetDefinitionScanner
+from intelegent_data_catalog.assets.execution.executor import (
+    CeleryOperatorExecutor,
+    LocalOperatorExecutor,
+    OperatorExecutor,
+)
+from intelegent_data_catalog.assets.execution.runtime import AssetOperatorRunner
+from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings, CelerySettings
 from intelegent_data_catalog.exceptions import CatalogError
@@ -164,26 +166,26 @@ def execute_trino_sync(source_binding_id: UUID) -> None:
         session.close()
 
 
-def execute_agent_operator(payload: str) -> None:
-    """Run one serialized agent operator."""
+def execute_asset_operator(payload: str) -> None:
+    """Run one serialized asset operator."""
     workload: OperatorWorkload = OperatorWorkload.model_validate_json(payload)
-    run_operator_workload(workload)
+    run_asset_operator(workload)
 
 
-def run_operator_workload(workload: OperatorWorkload) -> None:
-    """Run one operator workload on the process container."""
+def run_asset_operator(workload: OperatorWorkload) -> None:
+    """Run one asset operator workload on the process container."""
     container: AppContainer = job_container()
-    OperatorRunner(container, container.logger().getChild("agent_operator")).run(workload)
+    AssetOperatorRunner(container, container.logger().getChild("asset_operator")).run(workload)
 
 
-def build_operator_executor(settings: AppSettings) -> OperatorExecutor:
-    """Return the executor named by ``agent_definitions.executor``."""
-    if settings.agent_definitions.executor == "local":
-        return LocalOperatorExecutor(run_operator_workload)
+def build_asset_operator_executor(settings: AppSettings) -> OperatorExecutor:
+    """Return the executor named by ``asset_definitions.executor``."""
+    if settings.asset_definitions.executor == "local":
+        return LocalOperatorExecutor(run_asset_operator)
     return CeleryOperatorExecutor()
 
 
-def execute_agent_definition_scan() -> ScanResult:
+def execute_agent_definition_scan() -> AgentScanResult:
     """Scan the agent-definition prefix on a fresh session."""
     container: AppContainer = job_container()
     database: CatalogDatabase = container.database()
@@ -194,7 +196,29 @@ def execute_agent_definition_scan() -> ScanResult:
             container.agent_definition_store(),
             container.settings().agent_definitions,
             container.logger().getChild("agent_definitions"),
-            build_operator_executor(container.settings()),
+        )
+        return scanner.scan(utc_now())
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def execute_asset_definition_scan() -> AssetScanResult:
+    """Scan the asset-definition prefix on a fresh session."""
+    container: AppContainer = job_container()
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    try:
+        scanner: AssetDefinitionScanner = AssetDefinitionScanner(
+            session,
+            container.asset_definition_store(),
+            container.settings().asset_definitions,
+            container.logger().getChild("asset_definitions"),
+            build_asset_operator_executor(container.settings()),
+            container.polaris_client(),
+            container.github_client(),
         )
         return scanner.scan(utc_now())
     except Exception:

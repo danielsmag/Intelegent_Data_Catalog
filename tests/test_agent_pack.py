@@ -14,9 +14,7 @@ from intelegent_data_catalog.agents.agent_pack.compose import (
     LoadedSkill,
     active_task,
     allowed_tools,
-    apply_explicit_pack_flags,
     compose_rules,
-    explicit_pack_flags,
     narrow_flags,
     scoped_pack,
 )
@@ -94,7 +92,7 @@ def test_rules_sort_and_profile_stays_off_when_the_flag_is_false() -> None:
 
 
 def test_agent_switch_off_skips_rules_and_skills() -> None:
-    """A missing switch stays on. Off drops that set. An explicit operator flag wins."""
+    """A missing switch stays on. Off drops that set."""
     values: dict[str, bool] = option_values(
         RefreshSubjectKind.AGENT,
         {"include_graph": False},
@@ -110,12 +108,6 @@ def test_agent_switch_off_skips_rules_and_skills() -> None:
     quiet: LoadedPack = scoped_pack(pack, {"use_rules": False, "use_skills": False})
     assert quiet.rules == []
     assert quiet.skills == []
-    saved: dict[str, bool] = {"use_rules": True, "use_skills": True}
-    with explicit_pack_flags({"use_rules": False, "include_lineage": True}):
-        merged: dict[str, bool] = apply_explicit_pack_flags(saved)
-    assert merged["use_rules"] is False
-    assert merged["use_skills"] is True
-    assert "include_lineage" not in merged
 
 
 def test_private_folder_round_trip_and_flat_file_is_not_writable(tmp_path: Path) -> None:

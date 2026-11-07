@@ -22,7 +22,6 @@ from intelegent_data_catalog.agents.definitions.resolver import (
     SourceResolver,
     UnresolvedSource,
 )
-from intelegent_data_catalog.agents.execution.workload import OperatorWorkload
 from intelegent_data_catalog.agents.repository import AgentRepository
 from intelegent_data_catalog.agents.sync import AgentSync
 from intelegent_data_catalog.exceptions import CatalogError
@@ -31,7 +30,6 @@ from intelegent_data_catalog.persistence.enums import (
     DefinitionFileStatus,
     DefinitionItemStatus,
     DefinitionKind,
-    DefinitionRunStatus,
 )
 from intelegent_data_catalog.persistence.models import (
     AgentDefinitionFileRow,
@@ -59,17 +57,6 @@ class AgentDefinitionApplier:
         self._agents: AgentRepository = AgentRepository(session)
         self._resolver: SourceResolver = SourceResolver(session)
         self._sync: AgentSync = AgentSync(session)
-        self._pending: list[OperatorWorkload] = []
-
-    def take_workloads(self) -> list[OperatorWorkload]:
-        """Return operator runs collected since the last take, then clear them."""
-        found: list[OperatorWorkload] = list(self._pending)
-        self._pending.clear()
-        return found
-
-    def drop_workloads(self) -> None:
-        """Forget operator runs collected for a file that failed."""
-        self._pending.clear()
 
     def apply_file(self, file_row: AgentDefinitionFileRow, spec: DefinitionSpec) -> None:
         """Upsert declarations and retire ones the file no longer contains."""
@@ -107,13 +94,11 @@ class AgentDefinitionApplier:
         item: AgentDefinitionItemRow
         for item in self._repo.unresolved():
             item_id: UUID = item.id
-            kept: int = len(self._pending)
             try:
                 status: DefinitionItemStatus = self._retry(item)
                 self._session.commit()
             except (CatalogError, ValidationError, SQLAlchemyError):
                 self._logger.exception("agent definition retry failed: %s", item_id)
-                self._pending = self._pending[:kept]
                 self._session.rollback()
                 self._mark_retry_error(item_id)
                 self._session.commit()
@@ -128,13 +113,11 @@ class AgentDefinitionApplier:
         item: AgentDefinitionItemRow
         for item in self._repo.schema_parents():
             item_id: UUID = item.id
-            kept: int = len(self._pending)
             try:
                 self._refresh_schema(item)
                 self._session.commit()
             except (CatalogError, ValidationError, SQLAlchemyError):
                 self._logger.exception("agent schema refresh failed: %s", item_id)
-                self._pending = self._pending[:kept]
                 self._session.rollback()
                 self._mark_retry_error(item_id)
                 self._session.commit()
@@ -219,9 +202,7 @@ class AgentDefinitionApplier:
             return DefinitionItemStatus.ERROR
         agent: AgentRow = self._ensure_agent(resolved, spec, prior)
         self._overlay(agent, spec, file_row.key)
-        recorded: AgentDefinitionItemRow
-        changed: bool
-        recorded, changed = self._record(
+        self._record(
             file_row,
             DefinitionKind.AGENT,
             spec.key,
@@ -231,8 +212,6 @@ class AgentDefinitionApplier:
             prior,
             agent_id=agent.id,
         )
-        if changed and len(spec.operators) > 0:
-            self._queue(file_row, recorded, agent, spec)
         return DefinitionItemStatus.APPLIED
 
     def _apply_schema(
@@ -267,9 +246,7 @@ class AgentDefinitionApplier:
             existing = self._session.get(AgentRow, prior.agent_id)
         agent: AgentRow = self._sync.ensure_schema(spec, existing)
         self._overlay(agent, spec, file_row.key)
-        recorded: AgentDefinitionItemRow
-        changed: bool
-        recorded, changed = self._record(
+        self._record(
             file_row,
             DefinitionKind.AGENT,
             spec.key,
@@ -279,8 +256,6 @@ class AgentDefinitionApplier:
             prior,
             agent_id=agent.id,
         )
-        if changed and len(spec.operators) > 0:
-            self._queue(file_row, recorded, agent, spec)
         return DefinitionItemStatus.APPLIED
 
     def _retire_schema_children(self, file_row: AgentDefinitionFileRow, key: str) -> None:
@@ -290,32 +265,6 @@ class AgentDefinitionApplier:
         for child in self._repo.items_for(file_row.id):
             if child.item_key.startswith(prefix):
                 self._retire_item(child)
-
-    def _queue(
-        self,
-        file_row: AgentDefinitionFileRow,
-        item: AgentDefinitionItemRow,
-        agent: AgentRow,
-        spec: AgentSpec,
-    ) -> None:
-        if len(spec.operators) == 0:
-            return
-        item.run_status = DefinitionRunStatus.QUEUED.value
-        item.run_error = None
-        item.schedule = spec.schedule
-        item.next_run_at = None
-        item.updated_at = utc_now()
-        self._session.flush()
-        self._pending.append(
-            OperatorWorkload(
-                item_id=item.id,
-                agent_id=agent.id,
-                agent_name=agent.name,
-                file_key=file_row.key,
-                item_key=spec.key,
-                operators=list(spec.operators),
-            ),
-        )
 
     def _ensure_agent(
         self,

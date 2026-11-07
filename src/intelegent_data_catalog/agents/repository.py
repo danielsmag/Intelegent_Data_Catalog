@@ -26,7 +26,6 @@ from intelegent_data_catalog.persistence.enums import (
     CatalogJobStatus,
 )
 from intelegent_data_catalog.persistence.models import (
-    AgentDefinitionItemRow,
     AgentRow,
     CatalogJobRow,
     CatalogTableRow,
@@ -224,16 +223,12 @@ class AgentRepository:
         built: dict[UUID, datetime] = self._last_built(ids)
         running: set[UUID] = self._running(ids)
         modes: dict[UUID, tuple[str, int]] = self._modes(ids)
-        schedules: dict[UUID, tuple[str | None, datetime | None]] = self._operator_schedules(ids)
         now: datetime = utc_now()
         items: list[AgentListItem] = []
         row: AgentRow
         for row in rows:
             fallback: tuple[str, int] = (AgentRefreshMode.INTERVAL.value, _DEFAULT_INTERVAL)
             mode_name, interval = modes.get(row.id, fallback)
-            schedule_pair: tuple[str | None, datetime | None] = schedules.get(row.id, (None, None))
-            schedule: str | None = schedule_pair[0]
-            next_run: datetime | None = schedule_pair[1]
             last_built: datetime | None = built.get(row.id)
             items.append(
                 AgentListItem(
@@ -253,8 +248,6 @@ class AgentRepository:
                     interval_seconds=interval,
                     build_running=row.id in running,
                     refresh_mode=AgentRefreshMode(mode_name),
-                    schedule=schedule,
-                    next_run_at=next_run,
                     updated_at=row.updated_at,
                 ),
             )
@@ -328,33 +321,6 @@ class AgentRepository:
                 continue
             found[row.agent_id] = (row.refresh_mode, row.interval_seconds)
         return found
-
-    def _operator_schedules(
-        self,
-        agent_ids: list[UUID],
-    ) -> dict[UUID, tuple[str | None, datetime | None]]:
-        """Cron and next fire time from the newest definition item for each agent."""
-        statement = (
-            select(AgentDefinitionItemRow)
-            .where(AgentDefinitionItemRow.agent_id.in_(agent_ids))
-            .order_by(AgentDefinitionItemRow.updated_at.desc())
-        )
-        chosen: dict[UUID, tuple[str | None, datetime | None]] = {}
-        row: AgentDefinitionItemRow
-        for row in self._session.scalars(statement):
-            agent_id: UUID | None = row.agent_id
-            if agent_id is None:
-                continue
-            current: tuple[str | None, datetime | None] | None = chosen.get(agent_id)
-            if current is not None and current[0] is not None:
-                continue
-            if current is not None and row.schedule is None:
-                continue
-            next_run: datetime | None = (
-                None if row.next_run_at is None else _aware(row.next_run_at)
-            )
-            chosen[agent_id] = (row.schedule, next_run)
-        return chosen
 
 
 def _build_source() -> SelectBase:

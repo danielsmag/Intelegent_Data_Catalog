@@ -62,7 +62,6 @@ class AgentRunRecorder:
         self,
         *,
         agent_id: UUID,
-        item_id: UUID | None,
         catalog_job_id: UUID | None,
         trigger: OperatorRunTrigger,
         operator_type: str | None,
@@ -86,7 +85,6 @@ class AgentRunRecorder:
                 AgentOperatorRunRow(
                     id=run_id,
                     agent_id=agent_id,
-                    item_id=item_id,
                     catalog_job_id=catalog_job_id,
                     status=DefinitionRunStatus.RUNNING.value,
                     trigger=trigger.value,
@@ -515,7 +513,6 @@ def _run_read(run: AgentOperatorRunRow, tasks: list[AgentOperatorRunTaskRow]) ->
     return AgentRunRead(
         id=run.id,
         agent_id=run.agent_id,
-        item_id=run.item_id,
         catalog_job_id=run.catalog_job_id,
         status=DefinitionRunStatus(run.status),
         trigger=OperatorRunTrigger(run.trigger),

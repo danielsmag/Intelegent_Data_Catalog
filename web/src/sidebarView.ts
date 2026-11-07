@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-export type SidebarView = "catalog" | "search" | "query" | "workspace" | "agents"
+export type SidebarView = "catalog" | "search" | "query" | "workspace" | "agents" | "assets"
 
 type PendingSql = {
   sql: string
@@ -21,7 +21,8 @@ function isSidebarView(value: string | null): value is SidebarView {
     value === "search" ||
     value === "query" ||
     value === "workspace" ||
-    value === "agents"
+    value === "agents" ||
+    value === "assets"
   )
 }
 
@@ -41,6 +42,9 @@ export function sidebarViewForPath(path: string): SidebarView | null {
   }
   if (pathname === "/workspace") {
     return "workspace"
+  }
+  if (pathname === "/assets" || pathname.startsWith("/assets/") || pathname.startsWith("/asset-definitions/")) {
+    return "assets"
   }
   return null
 }
@@ -162,6 +166,11 @@ export function rememberQueryDraft(sql: string): void {
   queryDraft = sql
 }
 
+export function isSidebarOnlyPath(path: string): boolean {
+  const matched: SidebarView | null = sidebarViewForPath(path)
+  return matched !== null && matched !== "assets"
+}
+
 export function redirectSidebarPath(path: string): boolean {
   const viewForPath: SidebarView | null = sidebarViewForPath(path)
   if (viewForPath === null) {
@@ -176,5 +185,5 @@ export function redirectSidebarPath(path: string): boolean {
       setPendingQuerySql(sql)
     }
   }
-  return true
+  return viewForPath !== "assets"
 }

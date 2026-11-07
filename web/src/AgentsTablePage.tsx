@@ -605,14 +605,7 @@ function AgentRow(props: {
         </button>
       </span>
       <span className="agent-row__refresh" role="cell">
-        {typeof row.schedule === "string" && row.schedule !== "" ? (
-          <span title={row.schedule}>{scheduleTime(row.schedule)}</span>
-        ) : (
-          <span>—</span>
-        )}
-        {typeof row.next_run_at === "string" && row.next_run_at !== "" ? (
-          <small className="agent-row__when">next {formatWhen(row.next_run_at)}</small>
-        ) : null}
+        {refreshLabel(row.refresh_mode)}
       </span>
       <span role="cell">
         {formatWhen(row.last_built_at)}
@@ -741,67 +734,18 @@ function localStamp(value: Date): string {
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`
 }
 
-const WEEKDAYS: readonly string[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-function scheduleTime(cron: string): string {
-  const parts: string[] = cron.trim().split(/\s+/)
-  if (parts.length !== 5) {
-    return cron
+function refreshLabel(mode: AgentListItem["refresh_mode"]): string {
+  if (mode === "ON_CHANGE") {
+    return "On change"
   }
-  const minute: string = parts[0] ?? "*"
-  const hour: string = parts[1] ?? "*"
-  const day: string = parts[2] ?? "*"
-  const month: string = parts[3] ?? "*"
-  const weekday: string = parts[4] ?? "*"
-  if (minute.startsWith("*/") && hour === "*" && day === "*" && month === "*" && weekday === "*") {
-    const step: string = minute.slice(2)
-    return step === "1" ? "every minute" : `every ${step} min`
+  if (mode === "MANUAL") {
+    return "Manual"
   }
-  if (minute === "0" && hour === "*" && day === "*" && month === "*" && weekday === "*") {
-    return "hourly"
-  }
-  if (isField(minute, 59) && isField(hour, 23) && day === "*" && month === "*") {
-    const clock: string = `${pad2(hour)}:${pad2(minute)}`
-    if (weekday === "*") {
-      return `${clock} daily`
-    }
-    const days: string | null = weekdayLabel(weekday)
-    if (days !== null) {
-      return `${clock} ${days}`
-    }
-  }
-  return cron
-}
-
-function isField(value: string, max: number): boolean {
-  if (!/^\d{1,2}$/.test(value)) {
-    return false
-  }
-  const parsed: number = Number(value)
-  return parsed >= 0 && parsed <= max
+  return "Interval"
 }
 
 function pad2(value: string): string {
   return value.padStart(2, "0")
-}
-
-function weekdayLabel(value: string): string | null {
-  if (/^\d$/.test(value)) {
-    const index: number = Number(value)
-    return WEEKDAYS[index] ?? null
-  }
-  const range: RegExpMatchArray | null = /^(\d)-(\d)$/.exec(value)
-  if (range === null) {
-    return null
-  }
-  const start: number = Number(range[1])
-  const end: number = Number(range[2])
-  const left: string | undefined = WEEKDAYS[start]
-  const right: string | undefined = WEEKDAYS[end]
-  if (left === undefined || right === undefined || start > end) {
-    return null
-  }
-  return `${left}–${right}`
 }
 
 type ServiceId = "" | "airflow" | "iceberg"

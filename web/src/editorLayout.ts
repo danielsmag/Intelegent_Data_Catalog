@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react"
-import { redirectSidebarPath, sidebarViewForPath } from "./sidebarView"
+import { isSidebarOnlyPath, redirectSidebarPath } from "./sidebarView"
 
 export type SplitDirection = "row" | "column"
 
@@ -115,6 +115,21 @@ export function titleFromPath(path: string): string {
   if (head === "agents") {
     return parts[1] === undefined ? "Agents" : "Agent"
   }
+  if (head === "assets") {
+    return parts[1] === undefined ? "Assets" : "Asset"
+  }
+  if (head === "asset-definitions") {
+    if (parts[1] === "text") {
+      const encodedKey: string | undefined = parts[2]
+      if (encodedKey === undefined) {
+        return "Definition"
+      }
+      const objectName: string | undefined = decodeURIComponent(encodedKey).split("/").pop()
+      return objectName === undefined || objectName === "" ? "Definition" : objectName
+    }
+    const assetFileName: string | undefined = parts[2]
+    return assetFileName === undefined ? "Definition" : decodeURIComponent(assetFileName)
+  }
   if (head === "agent-definitions") {
     if (parts[1] === "text") {
       const encodedKey: string | undefined = parts[2]
@@ -211,7 +226,7 @@ function isAuthCallback(path: string): boolean {
 function boot(): EditorLayout {
   const url: string = currentUrl()
   const callback: boolean = isAuthCallback(url)
-  const sidebarOnly: boolean = sidebarViewForPath(url) !== null
+  const sidebarOnly: boolean = isSidebarOnlyPath(url)
   const saved: EditorLayout | null = readStorage()
   const base: EditorLayout = saved ?? createInitial(sidebarOnly || callback ? "/" : url)
   const opened: EditorLayout =
@@ -232,7 +247,7 @@ function dropAuthTabs(state: EditorLayout): EditorLayout {
 }
 
 function dropSidebarTabs(state: EditorLayout): EditorLayout {
-  return dropTabs(state, (tab: EditorTab) => sidebarViewForPath(tab.path) !== null)
+  return dropTabs(state, (tab: EditorTab) => isSidebarOnlyPath(tab.path))
 }
 
 function dropTabs(state: EditorLayout, reject: (tab: EditorTab) => boolean): EditorLayout {

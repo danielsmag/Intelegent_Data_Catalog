@@ -24,7 +24,7 @@ _LIST_KEY: str = "catalog:build-trace"
 _SEQ_KEY: str = "catalog:build-trace:seq"
 _LIMIT: int = 400
 
-TraceKind = Literal["table", "scope", "space", "airflow", "agent"]
+TraceKind = Literal["table", "scope", "space", "airflow", "agent", "asset"]
 TraceStep = Literal[
     "started",
     "ask",
@@ -34,6 +34,7 @@ TraceStep = Literal[
     "text",
     "output",
     "usage",
+    "note",
     "succeeded",
     "failed",
 ]
@@ -235,6 +236,17 @@ def kind_from_agent(agent: str) -> TraceKind:
     return "table"
 
 
+def trace_status_for_run(status: str) -> Literal["running", "succeeded", "failed"] | None:
+    """Map an operator-run status onto the clock the stream panel reads."""
+    if status == "queued" or status == "running":
+        return "running"
+    if status == "succeeded":
+        return "succeeded"
+    if status == "failed":
+        return "failed"
+    return None
+
+
 def trace_kind_for_job(kind: str, options: dict[str, object]) -> TraceKind:
     """Map a catalog job onto a panel filter. Context jobs use the subject they write."""
     if kind == "scope":
@@ -285,6 +297,9 @@ def step_copy(step: str, body: str) -> tuple[str, str]:
         return "Model answer", detail
     if step == "usage":
         return "Tokens", detail
+    if step == "note":
+        title, _, rest = detail.partition("\n")
+        return title or "Step", rest
     if step == "succeeded":
         return "Saved", detail or "Context saved"
     if step == "failed":

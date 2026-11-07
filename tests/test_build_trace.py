@@ -13,6 +13,7 @@ from intelegent_data_catalog.jobs.trace import (
     publish_build_step,
     step_copy,
     trace_kind_for_job,
+    trace_status_for_run,
 )
 from intelegent_data_catalog.llm.trace import AgentTrace
 
@@ -44,6 +45,15 @@ def test_kind_maps_agents_and_context_jobs() -> None:
     assert trace_kind_for_job("context", {"kind": "scope"}) == "scope"
     assert trace_kind_for_job("space", {}) == "space"
     assert trace_kind_for_job("airflow", {}) == "airflow"
+    note_title: str
+    note_detail: str
+    note_title, note_detail = step_copy("note", "Iceberg table metadata\nskipped")
+    assert note_title == "Iceberg table metadata"
+    assert note_detail == "skipped"
+    assert trace_status_for_run("queued") == "running"
+    assert trace_status_for_run("succeeded") == "succeeded"
+    assert trace_status_for_run("failed") == "failed"
+    assert trace_status_for_run("skipped") is None
 
 
 def test_memory_buffer_reads_after_cursor_and_drops_the_oldest() -> None:

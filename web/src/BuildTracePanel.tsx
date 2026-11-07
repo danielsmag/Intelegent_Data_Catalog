@@ -14,7 +14,7 @@ const RAIL_TRACE: number = 440
 const POLL_MS: number = 1000
 const EXPAND_KEY: string = "idc-trace-expand"
 
-type TraceFilter = "all" | BuildTraceKind
+type TraceFilter = "all" | "asset" | "agent"
 
 type FilterChoice = {
   id: TraceFilter
@@ -39,10 +39,9 @@ function writeExpandAll(open: boolean): void {
 }
 
 const FILTERS = [
-  { id: "all", label: "All", empty: "No builds are in this window." },
-  { id: "table", label: "Tables", empty: "No table builds are in this window." },
-  { id: "agent", label: "Agents", empty: "No agent builds are in this window." },
-  { id: "airflow", label: "Airflow", empty: "No Airflow builds are in this window." },
+  { id: "all", label: "All", empty: "No runs are in this window." },
+  { id: "asset", label: "Assets", empty: "No asset runs are in this window." },
+  { id: "agent", label: "Agents", empty: "No agent runs are in this window." },
 ] as const satisfies readonly FilterChoice[]
 
 type CardStatus = "running" | "saved" | "failed"
@@ -53,7 +52,7 @@ type JobClock = {
   finishedAt: string | null
 }
 
-type StepKind = "thought" | "tool" | "prose" | "meta" | "saved" | "failed" | "retry"
+type StepKind = "thought" | "tool" | "prose" | "meta" | "saved" | "failed" | "retry" | "note"
 
 type TraceStepView = {
   id: string
@@ -142,7 +141,7 @@ export function BuildTracePanel(): ReactElement {
 
   const cards: TraceCard[] = groupCards(events, clocks)
   openJobsRef.current = openJobIds(cards)
-  const shown: TraceCard[] = cards.filter((card: TraceCard) => filter === "all" || card.kind === filter)
+  const shown: TraceCard[] = cards.filter((card: TraceCard) => cardMatches(card.kind, filter))
   const choice: FilterChoice = FILTERS.find((item: FilterChoice) => item.id === filter) ?? FILTERS[0]
   const newestCard: TraceCard | undefined = shown[0]
   const tailStep: TraceStepView | undefined =
@@ -570,7 +569,7 @@ function disclosureKeys(card: TraceCard): string[] {
       }
       continue
     }
-    if ((step.kind === "thought" || step.kind === "retry") && step.detail !== "") {
+    if ((step.kind === "thought" || step.kind === "retry" || step.kind === "note") && step.detail !== "") {
       keys.push(step.id)
     }
     index += 1
@@ -602,11 +601,24 @@ function hasRunTime(detail: string): boolean {
   return /·\s*(?:<\d+s|\d+m(?:\s+\d+s)?|\d+s)\s*$/.test(detail)
 }
 
+function cardMatches(kind: BuildTraceKind, filter: TraceFilter): boolean {
+  if (filter === "all") {
+    return true
+  }
+  if (filter === "asset") {
+    return kind === "asset"
+  }
+  return kind !== "asset"
+}
+
 function requestCopy(card: TraceCard): string {
+  if (card.kind === "asset") {
+    return `Run ${card.subjectName}`
+  }
   if (card.kind === "airflow") {
     return `Analyze ${card.subjectName}`
   }
-  if (card.kind === "table") {
+  if (card.kind === "table" || card.kind === "agent") {
     return `Build context for ${card.subjectName}`
   }
   return `Build ${card.kind} context for ${card.subjectName}`
@@ -1157,6 +1169,9 @@ function viewKind(step: string): StepKind | null {
   }
   if (step === "retry") {
     return "retry"
+  }
+  if (step === "note") {
+    return "note"
   }
   return null
 }

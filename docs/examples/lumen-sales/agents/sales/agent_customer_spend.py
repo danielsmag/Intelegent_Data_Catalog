@@ -1,6 +1,6 @@
-"""Customer spend mart. Analyst context stays on later operator runs."""
+"""Customer spend mart. Context is edited on the agent, not by an operator."""
 
-from intelegent_data_catalog.agents.dsl import Agent, BuildContext, Describe, IcebergTable
+from intelegent_data_catalog.agents.dsl import Agent, IcebergTable
 
 agent = Agent(
     key="customer_spend",
@@ -14,8 +14,6 @@ agent = Agent(
         source_key="polaris.sales.customer_spend",
         data_source="Polaris",
     ),
-    operators=[BuildContext(include_lineage=True), Describe()],
     properties={"owner": "commerce-analytics", "tier": "gold"},
     tags=["gold", "customer"],
-    schedule="0 2 * * *",
 )

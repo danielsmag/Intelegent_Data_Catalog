@@ -10,7 +10,6 @@ from intelegent_data_catalog.agents.agent_pack.compose import (
     LoadedPack,
     active_task,
     allowed_tools,
-    apply_explicit_pack_flags,
     compose_rules,
     describe_instructions,
     narrow_flags,
@@ -286,7 +285,6 @@ class RequestPlatform:
         chosen: dict[str, bool] = self._agent_flags(agent_id)
         if flags is not None:
             chosen.update(flags)
-        chosen = apply_explicit_pack_flags(chosen)
         scoped: LoadedPack = scoped_pack(pack, chosen)
         rendered: str = render_skills(self._definitions, scoped)
         instructions: str | None = describe_instructions(
@@ -321,7 +319,6 @@ class RequestPlatform:
         pack: LoadedPack = service.load(agent_id)
         chosen: dict[str, bool] = self._agent_flags(agent_id)
         chosen.update(options.flags)
-        chosen = apply_explicit_pack_flags(chosen)
         scoped: LoadedPack = scoped_pack(pack, chosen)
         allowed: set[str] | None = allowed_tools(scoped.skills, chosen, AgentKind(row.kind))
         return options.model_copy(update={"flags": narrow_flags(options.flags, allowed)})

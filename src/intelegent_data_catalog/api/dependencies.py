@@ -16,6 +16,9 @@ from intelegent_data_catalog.agents.triggers import AgentChangeTrigger
 from intelegent_data_catalog.airflow.service import AirflowService
 from intelegent_data_catalog.api.container import AppContainer
 from intelegent_data_catalog.api.platform import RequestPlatform
+from intelegent_data_catalog.assets.definitions.listing import AssetDefinitionListing
+from intelegent_data_catalog.assets.definitions.service import AssetDefinitionService
+from intelegent_data_catalog.assets.service import AssetService
 from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.auth.service import AccessService
@@ -26,6 +29,7 @@ from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.entity_configuration import EntityConfigurationService
 from intelegent_data_catalog.exceptions import AuthenticationError, PersistenceUnavailableError
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
+from intelegent_data_catalog.jobs.runner import build_asset_operator_executor
 from intelegent_data_catalog.notebooks.service import NotebookKernelService
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.registry.files import WorkspaceFileService
@@ -390,6 +394,67 @@ def get_agent_definition_listing(
 
 
 AgentDefinitionListingDep = Annotated[AgentDefinitionListing, Depends(get_agent_definition_listing)]
+
+
+def get_asset_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[AssetService]:
+    """Open one catalog session for asset reads and manual runs."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: AssetService = AssetService(
+        session,
+        container.asset_definition_store(),
+        build_asset_operator_executor(container.settings()),
+    )
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AssetServiceDep = Annotated[AssetService, Depends(get_asset_service)]
+
+
+def get_asset_definition_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> Iterator[AssetDefinitionService]:
+    """Open one catalog session for asset definition file reads."""
+    database: CatalogDatabase = container.database()
+    session: Session = database.session()
+    service: AssetDefinitionService = AssetDefinitionService(session)
+    try:
+        yield service
+    except SQLAlchemyError as err:
+        session.rollback()
+        raise PersistenceUnavailableError("catalog database unavailable") from err
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+AssetDefinitionServiceDep = Annotated[AssetDefinitionService, Depends(get_asset_definition_service)]
+
+
+def get_asset_definition_listing(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> AssetDefinitionListing:
+    """List asset definition objects from the definition object store."""
+    return AssetDefinitionListing(
+        container.asset_definition_store(),
+        container.settings().asset_definitions,
+    )
+
+
+AssetDefinitionListingDep = Annotated[AssetDefinitionListing, Depends(get_asset_definition_listing)]
 
 
 def get_agent_pack(

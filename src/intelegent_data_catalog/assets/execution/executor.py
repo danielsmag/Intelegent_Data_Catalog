@@ -1,17 +1,17 @@
-"""Local and Celery executors for one operator workload."""
+"""Local and Celery executors for one asset operator workload."""
 
 from collections.abc import Callable
 from typing import Protocol
 
-from intelegent_data_catalog.agents.execution.workload import OperatorWorkload
-from intelegent_data_catalog.jobs.names import RUN_AGENT_OPERATOR
+from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
+from intelegent_data_catalog.jobs.names import RUN_ASSET_OPERATOR
 
 
 class OperatorExecutor(Protocol):
     """Submits one operator run. Local runs it; Celery queues it."""
 
     def submit(self, workload: OperatorWorkload) -> None:
-        """Run or enqueue ``workload``. The agent row is already committed."""
+        """Run or enqueue ``workload``. The asset row is already committed."""
 
 
 class LocalOperatorExecutor:
@@ -39,4 +39,4 @@ class CeleryOperatorExecutor:
 def _celery_send(payload: str) -> None:
     from intelegent_data_catalog.jobs.celery_app import celery_app
 
-    celery_app.tasks[RUN_AGENT_OPERATOR].delay(payload)
+    celery_app.tasks[RUN_ASSET_OPERATOR].delay(payload)

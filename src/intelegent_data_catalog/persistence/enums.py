@@ -39,6 +39,22 @@ class AgentStatus(StrEnum):
     DEPRECATED = "DEPRECATED"
 
 
+class AssetKind(StrEnum):
+    """Kind of deterministic asset. The source lives in the declaration, not an agent row."""
+
+    AIRFLOW_INSTANCE = "AIRFLOW_INSTANCE"
+    ICEBERG_TABLE = "ICEBERG_TABLE"
+    ICEBERG_SCHEMA = "ICEBERG_SCHEMA"
+    GITHUB_REPO = "GITHUB_REPO"
+
+
+class AssetStatus(StrEnum):
+    """Observation state of an asset. Missing means no definition file still applies it."""
+
+    ACTIVE = "ACTIVE"
+    MISSING = "MISSING"
+
+
 class AgentRefreshMode(StrEnum):
     """When an agent rebuilds its context."""
 
@@ -206,6 +222,7 @@ class DefinitionKind(StrEnum):
     """Object a definition file is allowed to declare."""
 
     AGENT = "AGENT"
+    ASSET = "ASSET"
 
 
 class DefinitionFileStatus(StrEnum):
@@ -235,7 +252,7 @@ class DefinitionRunStatus(StrEnum):
 
 
 class OperatorRunTrigger(StrEnum):
-    """Why an agent operator run started."""
+    """Why an operator run or a manual agent build started."""
 
     APPLY = "apply"
     SCHEDULE = "schedule"
@@ -243,7 +260,7 @@ class OperatorRunTrigger(StrEnum):
 
 
 class OperatorTaskState(StrEnum):
-    """State of one task inside an agent operator run."""
+    """State of one task inside an operator run."""
 
     QUEUED = "queued"
     RUNNING = "running"

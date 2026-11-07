@@ -48,8 +48,6 @@ export type AgentListItem = {
   build_running: boolean
   refresh_mode: RefreshMode
   interval_seconds: number
-  schedule: string | null
-  next_run_at: string | null
   updated_at: string
 }
 
@@ -103,7 +101,6 @@ export type AgentRunTaskSummary = {
 export type AgentRun = {
   id: string
   agent_id: string
-  item_id: string | null
   catalog_job_id: string | null
   status: AgentRunStatus
   trigger: AgentRunTrigger

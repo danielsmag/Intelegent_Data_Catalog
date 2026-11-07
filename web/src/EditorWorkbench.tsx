@@ -43,7 +43,12 @@ import { AgentDefinitionPage } from "./AgentDefinitionPage"
 import { AgentPage } from "./AgentPage"
 import { AgentsSidebar } from "./AgentsSidebar"
 import { AgentsTablePage } from "./AgentsTablePage"
+import { AssetDefinitionPage } from "./AssetDefinitionPage"
+import { AssetPage } from "./AssetPage"
+import { AssetsSidebar } from "./AssetsSidebar"
+import { AssetsTablePage } from "./AssetsTablePage"
 import { setAgentsSidebarOpen, useAgentsSidebarOpen } from "./agentsSidebarStore"
+import { setAssetsSidebarOpen, useAssetsSidebarOpen } from "./assetsSidebarStore"
 import { WorkspaceFilePage } from "./WorkspaceFilePage"
 import { WorkspaceSidebar } from "./WorkspaceSidebarPanel"
 import { fetchCatalogTable } from "./registryApi"
@@ -70,7 +75,9 @@ export function EditorWorkbench(): ReactElement {
             setPendingQuerySql(sql)
           }
         }
-        return
+        if (view !== "assets") {
+          return
+        }
       }
       const marker: { groupId: string; tabId: string } | null = readHistoryMarker(event.state)
       if (marker !== null) {
@@ -111,6 +118,7 @@ function SecondSidebar(): ReactElement {
   const view: SidebarView = useSidebarView()
   const workspaceOpen: boolean = useWorkspaceSidebarOpen()
   const agentsOpen: boolean = useAgentsSidebarOpen()
+  const assetsOpen: boolean = useAssetsSidebarOpen()
   if (view === "catalog") {
     return <CatalogSidebar />
   }
@@ -130,6 +138,16 @@ function SecondSidebar(): ReactElement {
         collapsed={!agentsOpen}
         onToggleCollapsed={() => {
           setAgentsSidebarOpen(!agentsOpen)
+        }}
+      />
+    )
+  }
+  if (view === "assets") {
+    return (
+      <AssetsSidebar
+        collapsed={!assetsOpen}
+        onToggleCollapsed={() => {
+          setAssetsSidebarOpen(!assetsOpen)
         }}
       />
     )
@@ -440,6 +458,10 @@ function EditorRoutes(): ReactElement {
       <Route path="/agent-definitions/:fileId/:fileName?" element={<AgentDefinitionPage />} />
       <Route path="/agents" element={<AgentsTablePage />} />
       <Route path="/agents/:agentId" element={<AgentPage />} />
+      <Route path="/assets" element={<AssetsTablePage />} />
+      <Route path="/assets/:assetId" element={<AssetPage />} />
+      <Route path="/asset-definitions/text/:objectKey" element={<AssetDefinitionPage />} />
+      <Route path="/asset-definitions/:fileId/:fileName?" element={<AssetDefinitionPage />} />
       <Route path="/registry/tables/:tableId" element={<TableAgentRedirect />} />
       <Route path="/iceberg" element={<Navigate to="/catalog" replace />} />
       <Route path="/sources" element={<Navigate to="/catalog" replace />} />
