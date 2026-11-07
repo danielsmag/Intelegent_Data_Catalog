@@ -15,7 +15,6 @@ from intelegent_data_catalog.core.settings import (
 )
 from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
 from intelegent_data_catalog.jobs.publisher import SyncJobPublisher
-from intelegent_data_catalog.jobs.schemas import SyncScheduleRead, SyncScheduleWrite
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
     AirflowInstanceStatus,
@@ -29,6 +28,7 @@ from intelegent_data_catalog.persistence.models import (
     SourceEngineBindingRow,
     SyncScheduleRow,
 )
+from intelegent_data_catalog.schedual.schemas import SyncScheduleRead, SyncScheduleWrite
 
 _DEFAULT_INTERVAL_SECONDS: int = 600
 

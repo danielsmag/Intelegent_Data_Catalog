@@ -1,12 +1,10 @@
-"""Celery application. Beat has one tick; sync and context schedules live in Postgres."""
-
-from datetime import timedelta
+"""Celery application. Beat entries come from ``schedual``. Schedules live in Postgres."""
 
 from celery import Celery
 from celery.signals import worker_init, worker_process_init
 
 from intelegent_data_catalog.core.settings import AppSettings, load_settings
-from intelegent_data_catalog.jobs.names import DISPATCH_DUE_SYNCS, SCAN_ASSET_DEFINITIONS
+from intelegent_data_catalog.schedual.beat import beat_schedule
 
 _settings: AppSettings = load_settings()
 
@@ -22,17 +20,7 @@ app.conf.broker_transport_options = {
 }
 app.conf.worker_send_task_events = True
 app.conf.task_send_sent_event = True
-app.conf.beat_schedule = {
-    "dispatch-due-syncs": {
-        "task": DISPATCH_DUE_SYNCS,
-        "schedule": timedelta(seconds=_settings.celery.dispatch_interval_seconds),
-    },
-}
-if _settings.asset_definitions.enabled:
-    app.conf.beat_schedule["scan-asset-definitions"] = {
-        "task": SCAN_ASSET_DEFINITIONS,
-        "schedule": timedelta(seconds=_settings.asset_definitions.poll_interval_seconds),
-    }
+app.conf.beat_schedule = beat_schedule(_settings)
 
 
 def _start_worker_container(**_kwargs: object) -> None:

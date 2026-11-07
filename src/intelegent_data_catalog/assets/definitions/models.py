@@ -148,7 +148,7 @@ class AssetSpec(BaseModel):
     def _cron(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        from intelegent_data_catalog.assets.execution.cron import parse_schedule
+        from intelegent_data_catalog.schedual.cron import parse_schedule
 
         return parse_schedule(value)
 
