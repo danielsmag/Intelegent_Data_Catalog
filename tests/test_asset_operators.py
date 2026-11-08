@@ -82,8 +82,15 @@ class _Context(OperatorContext):
         assert self.github_reader is not None
         return self.github_reader
 
+    def profile_graph(self) -> None:
+        return None
+
 
 class _Iceberg:
+    def list_namespaces(self, catalog: str) -> list[str]:
+        del catalog
+        return ["sales"]
+
     def list_table_names(self, catalog: str, namespace: str) -> list[str]:
         del catalog, namespace
         return ["orders"]

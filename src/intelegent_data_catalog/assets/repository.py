@@ -89,6 +89,19 @@ class AssetRepository:
             found[row.asset_id] = row
         return found
 
+    def latest_output(self, asset_id: UUID, task_ids: frozenset[str]) -> AssetOutputRow | None:
+        """Return the newest output whose task is one of ``task_ids``."""
+        statement = (
+            select(AssetOutputRow)
+            .where(
+                AssetOutputRow.asset_id == asset_id,
+                AssetOutputRow.task_id.in_(tuple(task_ids)),
+            )
+            .order_by(AssetOutputRow.created_at.desc())
+            .limit(1)
+        )
+        return self._session.scalars(statement).first()
+
     def outputs(self, asset_id: UUID) -> list[AssetOutputRow]:
         """Return stored outputs, newest first."""
         statement = (

@@ -4,6 +4,8 @@ from intelegent_data_catalog.assets.dsl.nodes import Asset
 from intelegent_data_catalog.assets.dsl.operators import (
     AirflowMetadata,
     GitHubRepoSnapshot,
+    IcebergCatalogMetadata,
+    IcebergCatalogProfile,
     IcebergSchemaMetadata,
     IcebergSchemaProfile,
     IcebergTableMetadata,
@@ -14,6 +16,7 @@ from intelegent_data_catalog.assets.dsl.operators import (
 from intelegent_data_catalog.assets.dsl.sources import (
     AirflowInstance,
     GitHubRepo,
+    IcebergCatalog,
     IcebergSchema,
     IcebergTable,
     Source,
@@ -25,6 +28,9 @@ __all__ = [
     "Asset",
     "GitHubRepo",
     "GitHubRepoSnapshot",
+    "IcebergCatalog",
+    "IcebergCatalogMetadata",
+    "IcebergCatalogProfile",
     "IcebergSchema",
     "IcebergSchemaMetadata",
     "IcebergSchemaProfile",

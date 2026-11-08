@@ -11,6 +11,10 @@ from intelegent_data_catalog.assets.dsl.operators.iceberg import (
     IcebergTableMetadata,
     IcebergTableProfile,
 )
+from intelegent_data_catalog.assets.dsl.operators.iceberg_catalog import (
+    IcebergCatalogMetadata,
+    IcebergCatalogProfile,
+)
 
 _OPERATORS: dict[str, type[Operator]] = {
     cls.__name__: cls
@@ -20,6 +24,8 @@ _OPERATORS: dict[str, type[Operator]] = {
         IcebergTableProfile,
         IcebergSchemaMetadata,
         IcebergSchemaProfile,
+        IcebergCatalogMetadata,
+        IcebergCatalogProfile,
         GitHubRepoSnapshot,
     )
 }

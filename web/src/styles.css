@@ -5550,6 +5550,32 @@ span.run-status {
   word-break: break-word;
 }
 
+.asset-profile {
+  display: grid;
+  gap: 16px;
+}
+
+.asset-profile-key {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--catalog);
+  color: #041018;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.asset-profile-scroll {
+  overflow: auto;
+}
+
+.asset-profile-graph {
+  min-height: 420px;
+}
+
 @container (max-width: 760px) {
   .asset-output {
     grid-template-columns: 1fr;

@@ -22,10 +22,12 @@ from intelegent_data_catalog.core.settings import (
     AgentDefinitionsSettings,
     AppSettings,
     AssetDefinitionsSettings,
+    Neo4jSettings,
     ObjectStoreSettings,
     load_settings,
     resolve_project_root,
 )
+from intelegent_data_catalog.graph.neo4j_store import Neo4jProjection
 from intelegent_data_catalog.notebooks.directory import KernelDirectory
 from intelegent_data_catalog.notebooks.gateway import KernelGatewayClient
 from intelegent_data_catalog.notebooks.tickets import KernelTickets
@@ -141,6 +143,19 @@ def build_kernel_gateway(settings: AppSettings) -> KernelGatewayClient:
         base_url=settings.notebook.gateway_url,
         token=settings.notebook.gateway_token.get_secret_value(),
         kernel_name=settings.notebook.kernel_name,
+    )
+
+
+def build_neo4j_projection(settings: AppSettings) -> Neo4jProjection | None:
+    """Return a Neo4j projection when profiling graphs are enabled."""
+    configured: Neo4jSettings = settings.neo4j
+    if not configured.enabled:
+        return None
+    return Neo4jProjection(
+        uri=configured.uri,
+        user=configured.user,
+        password=configured.password,
+        database=configured.database,
     )
 
 
@@ -265,6 +280,10 @@ class AppContainer(containers.DeclarativeContainer):
         settings,
         http_client,
         logger,
+    )
+    neo4j_projection: providers.Singleton[Neo4jProjection | None] = providers.Singleton(
+        build_neo4j_projection,
+        settings,
     )
     kernel_gateway: providers.Singleton[KernelGatewayClient] = providers.Singleton(
         build_kernel_gateway,

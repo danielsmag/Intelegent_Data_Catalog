@@ -14,6 +14,7 @@ from intelegent_data_catalog.assets.dsl.operators.ports import (
     AirflowReader,
     GitHubReader,
     IcebergReader,
+    ProfileGraphWriter,
     TableQuery,
 )
 
@@ -78,6 +79,10 @@ class OperatorContext(ABC):
     @abstractmethod
     def github(self) -> GitHubReader:
         """Return the GitHub reader."""
+
+    @abstractmethod
+    def profile_graph(self) -> ProfileGraphWriter | None:
+        """Return the profile-graph writer, or none when Neo4j is disabled."""
 
 
 class OperatorObserver(Protocol):

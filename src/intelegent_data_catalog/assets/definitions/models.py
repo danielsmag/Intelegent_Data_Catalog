@@ -39,6 +39,21 @@ class IcebergTableSourceRef(BaseModel):
     table: str = Field(min_length=1, max_length=512)
 
 
+class IcebergCatalogSourceRef(BaseModel):
+    """Every namespace in one Iceberg catalog.
+
+    ``include`` limits namespace names. ``None`` and an empty list mean the whole catalog.
+    ``exclude`` drops names after ``include``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["iceberg_catalog"] = "iceberg_catalog"
+    catalog: str = Field(min_length=1, max_length=512)
+    include: list[str] | None = None
+    exclude: list[str] = Field(default_factory=list)
+
+
 class IcebergSchemaSourceRef(BaseModel):
     """Every table in one Iceberg namespace.
 
@@ -67,7 +82,11 @@ class GitHubRepoSourceRef(BaseModel):
 
 
 SourceRef = Annotated[
-    AirflowInstanceSourceRef | IcebergTableSourceRef | IcebergSchemaSourceRef | GitHubRepoSourceRef,
+    AirflowInstanceSourceRef
+    | IcebergTableSourceRef
+    | IcebergSchemaSourceRef
+    | IcebergCatalogSourceRef
+    | GitHubRepoSourceRef,
     Field(discriminator="kind"),
 ]
 
@@ -127,6 +146,8 @@ def asset_kind_for(source: SourceRef) -> AssetKind:
             return AssetKind.ICEBERG_TABLE
         case IcebergSchemaSourceRef():
             return AssetKind.ICEBERG_SCHEMA
+        case IcebergCatalogSourceRef():
+            return AssetKind.ICEBERG_CATALOG
         case GitHubRepoSourceRef():
             return AssetKind.GITHUB_REPO
 

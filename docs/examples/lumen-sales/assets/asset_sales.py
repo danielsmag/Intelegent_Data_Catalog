@@ -6,6 +6,9 @@ from intelegent_data_catalog.assets.dsl import (
     Asset,
     GitHubRepo,
     GitHubRepoSnapshot,
+    IcebergCatalog,
+    IcebergCatalogMetadata,
+    IcebergCatalogProfile,
     IcebergSchema,
     IcebergSchemaMetadata,
     IcebergSchemaProfile,
@@ -28,6 +31,14 @@ schema = Asset(
     source=IcebergSchema(catalog="catalog", namespace="sales"),
     operators=[IcebergSchemaMetadata(), IcebergSchemaProfile(max_tables=10)],
     schedule="30 3 * * *",
+)
+
+catalog = Asset(
+    key="sales_catalog",
+    description="Metadata and a profile for every namespace in the sales catalog.",
+    source=IcebergCatalog(catalog="catalog", include=["sales"]),
+    operators=[IcebergCatalogMetadata(), IcebergCatalogProfile(max_tables=10)],
+    schedule="0 4 * * *",
 )
 
 airflow = Asset(

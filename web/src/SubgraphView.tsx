@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactElement } from "react"
+import { Fragment, useEffect, useRef, useState, type PointerEvent, type ReactElement } from "react"
 import { Link } from "react-router-dom"
 import { ResizeHandle } from "./ResizeHandle"
 import type { GraphEdgeRecord, GraphNodeRecord, GraphViewRecord } from "./registryApi"
@@ -367,6 +367,12 @@ function NodeDetails(props: {
         <dd>{node.id}</dd>
         <dt>resolved</dt>
         <dd>{node.resolved ? "true" : "false"}</dd>
+        {propertyEntries(node).map((entry: PropertyEntry) => (
+          <Fragment key={entry.name}>
+            <dt>{entry.name}</dt>
+            <dd>{entry.value}</dd>
+          </Fragment>
+        ))}
       </dl>
       {node.kind === "table" && node.catalog_id !== null ? (
         <Link className="subgraph-open" to={`/registry/tables/${node.catalog_id}`}>
@@ -397,6 +403,27 @@ function NodeDetails(props: {
     </aside>
     </div>
   )
+}
+
+type PropertyEntry = {
+  name: string
+  value: string
+}
+
+function propertyEntries(node: GraphNodeRecord): PropertyEntry[] {
+  const properties: Record<string, unknown> = node.properties ?? {}
+  const names: string[] = Object.keys(properties).sort()
+  return names.map((name: string) => ({ name, value: propertyText(properties[name]) }))
+}
+
+function propertyText(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "—"
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+  return JSON.stringify(value)
 }
 
 function badgeClass(kind: string): string {

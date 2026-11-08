@@ -9,11 +9,17 @@ from intelegent_data_catalog.assets.dsl.operators.iceberg import (
     IcebergTableMetadata,
     IcebergTableProfile,
 )
+from intelegent_data_catalog.assets.dsl.operators.iceberg_catalog import (
+    IcebergCatalogMetadata,
+    IcebergCatalogProfile,
+)
 from intelegent_data_catalog.assets.dsl.operators.registry import operator_from_ref
 
 __all__ = [
     "AirflowMetadata",
     "GitHubRepoSnapshot",
+    "IcebergCatalogMetadata",
+    "IcebergCatalogProfile",
     "IcebergSchemaMetadata",
     "IcebergSchemaProfile",
     "IcebergTableMetadata",

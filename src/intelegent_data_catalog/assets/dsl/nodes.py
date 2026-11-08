@@ -11,6 +11,7 @@ from intelegent_data_catalog.assets.dsl.operators.base import Operator
 from intelegent_data_catalog.assets.dsl.sources import (
     AirflowInstance,
     GitHubRepo,
+    IcebergCatalog,
     IcebergSchema,
     IcebergTable,
     Source,
@@ -24,6 +25,7 @@ _ALLOWED: dict[type[Source], frozenset[str]] = {
     AirflowInstance: frozenset({"AirflowMetadata"}),
     IcebergTable: frozenset({"IcebergTableMetadata", "IcebergTableProfile"}),
     IcebergSchema: frozenset({"IcebergSchemaMetadata", "IcebergSchemaProfile"}),
+    IcebergCatalog: frozenset({"IcebergCatalogMetadata", "IcebergCatalogProfile"}),
     GitHubRepo: frozenset({"GitHubRepoSnapshot"}),
 }
 

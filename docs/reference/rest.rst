@@ -34,3 +34,19 @@ Auth
      - Bearer token when auth is enabled. These routes do not apply the workspace visibility check.
 
 ``X-Workspace-Id`` selects the workspace. See :doc:`/howto/sign-in`.
+
+Assets
+------
+
+Profile reads are signed in, like the rest of ``/api/v1/assets``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 58
+
+   * - Route
+     - Result
+   * - ``GET /api/v1/assets/{asset_id}/profile``
+     - Newest profile document and markdown. 404 when the asset has no profile output.
+   * - ``GET /api/v1/assets/{asset_id}/profile/graph``
+     - Neo4j profile subgraph for that asset. 503 when the projection is not configured.
