@@ -2,10 +2,8 @@
 
 from uuid import UUID
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.models import Model
-from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.column_graph import (
@@ -21,8 +19,10 @@ from intelegent_data_catalog.knowledge.models import (
     TableRelation,
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
-from intelegent_data_catalog.llm.run import ModelCall
-from intelegent_data_catalog.llm.structured import structured_output
+from intelegent_data_catalog.llm.errors import ToolRetry
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 _INSTRUCTIONS: str = (
     "You build a column subgraph for one catalog table. "
@@ -123,7 +123,7 @@ class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelati
 
     def __init__(
         self,
-        model: Model,
+        model: BaseChatModel,
         *,
         max_requests: int,
         temperature: float,
@@ -131,7 +131,7 @@ class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelati
         timeout_seconds: float,
         thinking: ThinkingLevel = False,
     ) -> None:
-        self._call: ModelCall[ColumnGraphDeps, ColumnRelationSet] = ModelCall(
+        self._call: GraphCall[ColumnGraphDeps, ColumnRelationSet] = GraphCall(
             _column_agent(model),
             name="column-subgraph",
             max_requests=max_requests,
@@ -149,28 +149,22 @@ class ColumnSubgraphAgent(ProposalAgent[ColumnProposalContext, list[ColumnRelati
         return selected.relations
 
 
-def _column_agent(model: Model) -> Agent[ColumnGraphDeps, ColumnRelationSet]:
+def _column_agent(model: BaseChatModel) -> AgentSpec[ColumnGraphDeps, ColumnRelationSet]:
     """JSON schema. A tool call lets Qwen think until the answer is empty."""
-    agent: Agent[ColumnGraphDeps, ColumnRelationSet] = Agent(
+    return AgentSpec(
         model,
-        deps_type=ColumnGraphDeps,
-        output_type=structured_output(model, ColumnRelationSet),
-        name="column-subgraph",
+        output_type=ColumnRelationSet,
         instructions=_INSTRUCTIONS,
         retries=2,
+        validator=_accept_output,
     )
-    agent.output_validator(_accept_output)
-    return agent
 
 
-def _accept_output(
-    ctx: RunContext[ColumnGraphDeps],
-    proposed: ColumnRelationSet,
-) -> ColumnRelationSet:
+def _accept_output(deps: ColumnGraphDeps, proposed: ColumnRelationSet) -> ColumnRelationSet:
     try:
-        accept_column_relations(ctx.deps.focus_table_id, ctx.deps.columns, proposed.relations)
+        accept_column_relations(deps.focus_table_id, deps.columns, proposed.relations)
     except ValidationAppError as err:
-        raise ModelRetry(str(err)) from err
+        raise ToolRetry(str(err)) from err
     return proposed
 
 

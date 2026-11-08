@@ -878,8 +878,8 @@ class CatalogJobRow(Base):
             "subject_id",
             "lane",
             unique=True,
-            sqlite_where=text("status = 'running'"),
-            postgresql_where=text("status = 'running'"),
+            sqlite_where=text("status IN ('running', 'waiting_approval')"),
+            postgresql_where=text("status IN ('running', 'waiting_approval')"),
         ),
     )
 

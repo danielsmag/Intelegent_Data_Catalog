@@ -1,17 +1,14 @@
-"""Pydantic AI model selection for the table question agent."""
+"""LangGraph model selection for the table question agent."""
 
-import asyncio
 from collections.abc import Callable
-from typing import cast
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from langchain_anthropic import ChatAnthropic
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
-from pydantic_ai import Agent
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.ollama import OllamaModel
-from pydantic_ai.models.openai import OpenAIChatModel
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.api.platform import RequestPlatform
@@ -36,7 +33,9 @@ from intelegent_data_catalog.exceptions import (
 )
 from intelegent_data_catalog.knowledge.models import TableContextOptions
 from intelegent_data_catalog.llm.factory import CatalogModels, build_model
-from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.run import GraphCall, completion_limit
+from intelegent_data_catalog.llm.spec import AgentSpec
+from tests.llm_fakes import HangingModel
 
 
 def test_provider_defaults() -> None:
@@ -76,14 +75,14 @@ def test_unknown_provider_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_build_model_uses_local_ollama() -> None:
     """The default provider is the Ollama server on this computer."""
     model: object = build_model(LlmSettings(provider="ollama"))
-    assert isinstance(model, OllamaModel)
+    assert isinstance(model, ChatOllama)
 
 
 @pytest.mark.parametrize(
     ("provider", "kind"),
     [
-        ("openai", OpenAIChatModel),
-        ("claude", AnthropicModel),
+        ("openai", ChatOpenAI),
+        ("claude", ChatAnthropic),
     ],
 )
 def test_build_model_uses_remote_provider(provider: LlmProvider, kind: type[object]) -> None:
@@ -107,7 +106,7 @@ def test_local_profile_uses_the_ollama_block() -> None:
     assert chosen.provider == "ollama"
     assert chosen.model == "qwen3:4b"
     assert chosen.timeout_seconds == 90
-    assert isinstance(build_model(chosen), OllamaModel)
+    assert isinstance(build_model(chosen), ChatOllama)
 
 
 def test_gpt_profile_uses_the_openai_block() -> None:
@@ -123,7 +122,7 @@ def test_gpt_profile_uses_the_openai_block() -> None:
     assert chosen.model == "gpt-4.1-mini"
     assert chosen.api_key.get_secret_value() == "parent-key"
     assert chosen.temperature == 0.2
-    assert isinstance(build_model(chosen), OpenAIChatModel)
+    assert isinstance(build_model(chosen), ChatOpenAI)
 
 
 def test_gpt_section_overrides_a_local_default() -> None:
@@ -159,7 +158,7 @@ def test_gpt_api_key_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch)
     assert loaded.provider == "openai"
     assert chosen.provider == "openai"
     assert chosen.api_key.get_secret_value() == "from-env"
-    assert isinstance(build_model(chosen), OpenAIChatModel)
+    assert isinstance(build_model(chosen), ChatOpenAI)
 
 
 def test_gpt_4_1_completion_budget_is_capped() -> None:
@@ -214,7 +213,7 @@ def test_claude_completion_budget_follows_the_model_profile() -> None:
         max_tokens=100_000,
     )
     models: CatalogModels = CatalogModels(settings, text_chars=20, column_graph=False)
-    cap: object = build_model(settings).profile.get("anthropic_max_output_tokens")
+    cap: int | None = completion_limit("claude", settings.model)
     assert isinstance(cap, int)
     assert models.dag_describer._call._settings["max_tokens"] == cap
 
@@ -229,7 +228,7 @@ def test_specific_model_ids_keep_their_names() -> None:
     qwen: LlmSettings = parent.profile("qwen3:4b")
     assert qwen.provider == "ollama"
     assert qwen.model == "qwen3:4b"
-    assert isinstance(build_model(qwen), OllamaModel)
+    assert isinstance(build_model(qwen), ChatOllama)
     mini: LlmSettings = parent.profile("gpt-4.1-mini")
     assert mini.provider == "openai"
     assert mini.model == "gpt-4.1-mini"
@@ -238,7 +237,7 @@ def test_specific_model_ids_keep_their_names() -> None:
     assert higher.provider == "openai"
     assert higher.model == "gpt-6-astra"
     assert higher.api_key.get_secret_value() == "gpt-key"
-    assert isinstance(build_model(higher), OpenAIChatModel)
+    assert isinstance(build_model(higher), ChatOpenAI)
 
 
 def test_knowledge_build_constructs_the_gpt_profile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,11 +275,10 @@ def test_knowledge_build_constructs_the_gpt_profile(monkeypatch: pytest.MonkeyPa
 
 
 def test_model_call_stops_when_the_total_timeout_elapses() -> None:
-    """A stream that keeps sending bytes still stops at the total timeout."""
-    agent: _HangingAgent = _HangingAgent()
-    call: ModelCall[None, str] = ModelCall(
-        cast(Agent[None, str], agent),
-        name="scope-context",
+    """A model that never returns still stops at the total timeout."""
+    call: GraphCall[None, str] = GraphCall(
+        AgentSpec(HangingModel(), output_type=str),
+        name="schema-context",
         max_requests=1,
         temperature=0.0,
         max_tokens=16,
@@ -288,16 +286,3 @@ def test_model_call_stops_when_the_total_timeout_elapses() -> None:
     )
     with pytest.raises(LlmError, match="timed out"):
         call.run("summarize", None)
-
-
-class _HangingAgent:
-    """Model stand-in that never returns. The total timeout must cut it off."""
-
-    def __init__(self) -> None:
-        self.model: object = object()
-
-    async def run(self, *args: object, **kwargs: object) -> str:
-        """Sleep until the caller cancels the call."""
-        del args, kwargs
-        await asyncio.sleep(30)
-        return ""

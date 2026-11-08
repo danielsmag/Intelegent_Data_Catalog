@@ -1,13 +1,12 @@
 """Structured model call that writes business context for one Airflow DAG."""
 
-from pydantic_ai import Agent
-from pydantic_ai.models import Model
-from pydantic_ai.settings import ThinkingLevel
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from intelegent_data_catalog.agents.models import DagDescribeInput, FileContextProposal
 from intelegent_data_catalog.llm.agent import ProposalAgent
-from intelegent_data_catalog.llm.run import ModelCall
-from intelegent_data_catalog.llm.structured import structured_output
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 _INSTRUCTIONS: str = (
     "You write business context for one Airflow DAG. "
@@ -23,7 +22,7 @@ class DagContextAgent(ProposalAgent[DagDescribeInput, FileContextProposal]):
 
     def __init__(
         self,
-        model: Model,
+        model: BaseChatModel,
         *,
         max_requests: int,
         temperature: float,
@@ -31,7 +30,7 @@ class DagContextAgent(ProposalAgent[DagDescribeInput, FileContextProposal]):
         timeout_seconds: float,
         thinking: ThinkingLevel = False,
     ) -> None:
-        self._call: ModelCall[DagDescribeInput, FileContextProposal] = ModelCall(
+        self._call: GraphCall[DagDescribeInput, FileContextProposal] = GraphCall(
             _agent(model),
             name="dag-context",
             max_requests=max_requests,
@@ -46,13 +45,11 @@ class DagContextAgent(ProposalAgent[DagDescribeInput, FileContextProposal]):
         return self._call.run(context.model_dump_json(exclude_none=True), context)
 
 
-def _agent(model: Model) -> Agent[DagDescribeInput, FileContextProposal]:
-    agent: Agent[DagDescribeInput, FileContextProposal] = Agent(
+def _agent(model: BaseChatModel) -> AgentSpec[DagDescribeInput, FileContextProposal]:
+    return AgentSpec(
         model,
-        deps_type=DagDescribeInput,
-        output_type=structured_output(model, FileContextProposal),
-        name="dag-context",
+        output_type=FileContextProposal,
         instructions=_INSTRUCTIONS,
         retries=2,
+        approve_output=True,
     )
-    return agent

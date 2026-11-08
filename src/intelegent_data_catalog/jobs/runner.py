@@ -22,7 +22,7 @@ from intelegent_data_catalog.assets.execution.runtime import AssetOperatorRunner
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import AppSettings, CelerySettings
-from intelegent_data_catalog.exceptions import CatalogError
+from intelegent_data_catalog.exceptions import ApprovalRequired, CatalogError
 from intelegent_data_catalog.jobs.cancel import CANCELLED_JOB_ERROR, CancelSignal, RedisCancelSignal
 from intelegent_data_catalog.jobs.catalog import (
     CatalogAgentBuild,
@@ -46,6 +46,7 @@ from intelegent_data_catalog.knowledge.models import (
     ContextGenerationOptions,
     TableContextOptions,
 )
+from intelegent_data_catalog.llm.session import bind_llm_runtime, llm_job, llm_resume
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import CatalogJobKind, CatalogJobStatus
@@ -76,7 +77,12 @@ def execute_catalog_job(job_id: UUID) -> None:
     container: AppContainer = job_container()
     store: CatalogJobStore = CatalogJobStore(container.database())
     row: CatalogJobRow | None = store.get(job_id)
-    if row is None or row.status != CatalogJobStatus.RUNNING.value:
+    if row is None or not _is_active(row.status):
+        return
+    if row.status == CatalogJobStatus.WAITING_APPROVAL.value and not isinstance(
+        row.options.get("_decision"),
+        dict,
+    ):
         return
     celery_settings: CelerySettings = container.settings().celery
     broker_url: str = celery_settings.broker_url
@@ -106,7 +112,7 @@ def execute_catalog_job(job_id: UUID) -> None:
         _LOGGER.info("catalog job lease held job_id=%s", job_id)
         return
     current: CatalogJobRow | None = store.get(job_id)
-    if current is None or current.status != CatalogJobStatus.RUNNING.value:
+    if current is None or not _is_active(current.status):
         leases.release(job_id, token)
         return
     heartbeat: LeaseHeartbeat = LeaseHeartbeat(leases, job_id, token, ttl_seconds, cancels)
@@ -120,7 +126,14 @@ def execute_catalog_job(job_id: UUID) -> None:
     try:
         with build_trace_scope(subject, RedisBuildTrace.from_url(broker_url)):
             publish_build_step("", "started", "")
-            _finish(container, store, current)
+            bind_llm_runtime(container.settings().llm)
+            decision: object = current.options.get("_decision")
+            with llm_job(job_id):
+                if isinstance(decision, dict):
+                    with llm_resume(decision):
+                        _finish(container, store, current)
+                else:
+                    _finish(container, store, current)
     finally:
         heartbeat.stop()
         leases.release(job_id, token)
@@ -133,6 +146,10 @@ def _finish(container: AppContainer, store: CatalogJobStore, row: CatalogJobRow)
     options: dict[str, object] = row.options
     try:
         _execute(container, kind, subject_id, options, job_id)
+    except ApprovalRequired as err:
+        store.mark_waiting(job_id, err.payload)
+        publish_build_step("", "note", "waiting for approval")
+        return
     except CatalogError as err:
         message: str = str(err)
         store.complete(job_id, "failed", message)
@@ -145,6 +162,13 @@ def _finish(container: AppContainer, store: CatalogJobStore, row: CatalogJobRow)
     else:
         store.complete(job_id, "succeeded", None)
         publish_build_step("", "succeeded", "Context saved")
+
+
+def _is_active(status: str) -> bool:
+    return status in {
+        CatalogJobStatus.RUNNING.value,
+        CatalogJobStatus.WAITING_APPROVAL.value,
+    }
 
 
 def execute_trino_sync(source_binding_id: UUID) -> None:

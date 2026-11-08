@@ -6,7 +6,6 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import ValidationError
-from pydantic_ai_harness.memory import MemoryFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +22,7 @@ from intelegent_data_catalog.agents.agent_pack.document import (
     render_markdown,
 )
 from intelegent_data_catalog.agents.agent_pack.memory_store import ObjectMemoryStore
+from intelegent_data_catalog.agents.agent_pack.memory_types import MemoryFile
 from intelegent_data_catalog.agents.agent_pack.models import (
     AgentCardRead,
     AgentDetail,

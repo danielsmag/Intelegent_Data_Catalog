@@ -4,20 +4,12 @@ import json
 import logging
 import time
 from collections.abc import Sequence
-from typing import TypeVar
+from dataclasses import dataclass
 
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.outputs import LLMResult
 from pydantic import BaseModel
-from pydantic_ai.messages import (
-    ModelMessage,
-    RetryFeedbackPart,
-    RetryPromptPart,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
-from pydantic_ai.run import AgentRunResult
-from pydantic_ai.usage import RunUsage
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 
@@ -34,14 +26,22 @@ _STEPS: dict[str, str] = {
 
 logger: logging.Logger = logging.getLogger(f"{LOGGER_NAME}.llm")
 
-OutputT = TypeVar("OutputT")
+
+@dataclass
+class RunUsage:
+    """Token totals collected from the model messages in one run."""
+
+    requests: int
+    tool_calls: int
+    input_tokens: int
+    output_tokens: int
 
 
 class AgentTrace:
     """Writes one agent run to the package logger and the build trace.
 
     The ask is logged before the model runs. Live tool steps are logged as the
-    event stream yields them. The final output and token usage are logged after.
+    graph yields them. The final output and token usage are logged after.
     """
 
     def __init__(self, agent_name: str) -> None:
@@ -73,20 +73,16 @@ class AgentTrace:
         rendered_retry: str = _render(content)
         self._emit("retry", f"{name} {rendered_retry}", publish=True)
 
-    def finish(self, result: AgentRunResult[OutputT]) -> None:
-        """Log remaining steps, the model output, and token usage."""
-        saw_text: bool = False
+    def finish(self, messages: list[BaseMessage], usage: RunUsage) -> None:
+        """Log remaining text, the model output, and token usage."""
         publish_parts: bool = not self._streamed
-        message: ModelMessage
-        for message in result.all_messages():
-            for part in message.parts:
-                if isinstance(part, TextPart):
-                    saw_text = True
-                self._log_part(part, publish=publish_parts)
-        output: OutputT = result.output
-        if not isinstance(output, str) or not saw_text or self._streamed:
-            self._emit("output", _render(output), publish=True)
-        usage: RunUsage = result.usage
+        message: BaseMessage
+        for message in messages:
+            if not isinstance(message, AIMessage):
+                continue
+            text: str = _message_text(message)
+            if text != "":
+                self._emit("text", text, publish=publish_parts)
         logger.info(
             "agent=%s usage requests=%s tool_calls=%s input_tokens=%s output_tokens=%s",
             self._agent_name,
@@ -99,28 +95,9 @@ class AgentTrace:
         usage_detail: str = _usage_detail(usage.input_tokens, usage.output_tokens, elapsed_seconds)
         self._emit("usage", usage_detail, publish=True, log=False)
 
-    def _log_part(self, part: object, *, publish: bool) -> None:
-        if isinstance(part, UserPromptPart):
-            return
-        if isinstance(part, ToolCallPart):
-            rendered_args: str = _render(part.args)
-            self._emit("tool_call", f"{part.tool_name} {rendered_args}", publish=publish)
-            return
-        if isinstance(part, ToolReturnPart):
-            rendered_content: str = _render(part.content)
-            self._emit("tool_result", f"{part.tool_name} {rendered_content}", publish=publish)
-            return
-        if isinstance(part, RetryFeedbackPart):
-            rendered_feedback: str = _render(part.content)
-            self._emit("retry", f"model {rendered_feedback}", publish=publish)
-            return
-        if isinstance(part, RetryPromptPart):
-            tool_name: str = part.tool_name or "model"
-            rendered_retry: str = _render(part.content)
-            self._emit("retry", f"{tool_name} {rendered_retry}", publish=publish)
-            return
-        if isinstance(part, TextPart):
-            self._emit("text", part.content, publish=publish)
+    def emit_output(self, output: object) -> None:
+        """Log the value returned to the caller."""
+        self._emit("output", _render(output), publish=True)
 
     def _emit(self, kind: str, body: str, *, publish: bool, log: bool = True) -> None:
         seen_key: tuple[str, str] = (kind, body)
@@ -140,6 +117,82 @@ class AgentTrace:
         from intelegent_data_catalog.jobs.trace import publish_build_step
 
         publish_build_step(self._agent_name, step, body)  # type: ignore[arg-type]
+
+
+class AgentTraceCallback(BaseCallbackHandler):
+    """Forwards LangChain tool events into ``AgentTrace``."""
+
+    def __init__(self, trace: AgentTrace) -> None:
+        super().__init__()
+        self._trace: AgentTrace = trace
+
+    def on_tool_start(
+        self,
+        serialized: dict[str, object],
+        input_str: str,
+        *,
+        inputs: dict[str, object] | None = None,
+        **kwargs: object,
+    ) -> None:
+        name: object = serialized.get("name", "tool")
+        body: object = inputs if inputs is not None else input_str
+        self._trace.observe_tool_call(str(name), body)
+
+    def on_tool_end(self, output: object, **kwargs: object) -> None:
+        name: object = kwargs.get("name", "tool")
+        self._trace.observe_tool_result(str(name), output)
+
+    def on_tool_error(self, error: BaseException, **kwargs: object) -> None:
+        name: object = kwargs.get("name", "tool")
+        self._trace.observe_retry(str(name), error)
+
+    def on_llm_end(self, response: LLMResult, **kwargs: object) -> None:
+        del response, kwargs
+
+
+def usage_from(messages: list[BaseMessage], requests: int) -> RunUsage:
+    """Sum token metadata the chat model attached to its replies."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    tool_calls: int = 0
+    message: BaseMessage
+    for message in messages:
+        if isinstance(message, AIMessage):
+            tool_calls += len(message.tool_calls)
+            metadata: object = message.usage_metadata
+            if isinstance(metadata, dict):
+                incoming: object = metadata.get("input_tokens", 0)
+                outgoing: object = metadata.get("output_tokens", 0)
+                if isinstance(incoming, int):
+                    input_tokens += incoming
+                if isinstance(outgoing, int):
+                    output_tokens += outgoing
+        if isinstance(message, ToolMessage):
+            continue
+    return RunUsage(
+        requests=requests,
+        tool_calls=tool_calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _message_text(message: AIMessage) -> str:
+    content: object = message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        block: object
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                text: object = block.get("text", "")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return str(content)
 
 
 def _usage_detail(input_tokens: int, output_tokens: int, elapsed_seconds: float) -> str:

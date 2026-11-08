@@ -1,4 +1,4 @@
-"""OTLP export of catalog logs and pydantic-ai agent spans."""
+"""OTLP export of catalog logs and LangGraph model spans."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import base64
 import logging
 import warnings
 
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
@@ -18,12 +20,11 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import set_tracer_provider
-from pydantic_ai import Agent
-from pydantic_ai.models.instrumented import InstrumentationSettings
+from opentelemetry.trace import Span, get_tracer, set_tracer_provider
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import ObservabilitySettings
+from intelegent_data_catalog.llm.callbacks import register_llm_callback
 
 
 class CatalogTelemetry:
@@ -80,11 +81,70 @@ class CatalogTelemetry:
         set_meter_provider(provider)
 
     def _instrument_agents(self) -> None:
-        settings: InstrumentationSettings = InstrumentationSettings(
+        handler: OtelLlmCallback = OtelLlmCallback(
             include_content=self._settings.include_content,
-            include_binary_content=False,
         )
-        Agent.instrument_all(settings)
+        register_llm_callback(handler)
+
+
+class OtelLlmCallback(BaseCallbackHandler):
+    """One span per model call and one span per tool call."""
+
+    def __init__(self, include_content: bool) -> None:
+        super().__init__()
+        self.include_content: bool = include_content
+        self.include_binary_content: bool = False
+        self._spans: dict[object, Span] = {}
+
+    def on_llm_start(
+        self,
+        serialized: dict[str, object],
+        prompts: list[str],
+        *,
+        run_id: object,
+        **kwargs: object,
+    ) -> None:
+        del serialized, kwargs
+        span: Span = get_tracer(LOGGER_NAME).start_span("llm")
+        if self.include_content:
+            span.set_attribute("llm.prompts", "\n".join(prompts)[:2000])
+        self._spans[run_id] = span
+
+    def on_llm_end(self, response: LLMResult, *, run_id: object, **kwargs: object) -> None:
+        del response, kwargs
+        self._end(run_id)
+
+    def on_llm_error(self, error: BaseException, *, run_id: object, **kwargs: object) -> None:
+        del error, kwargs
+        self._end(run_id)
+
+    def on_tool_start(
+        self,
+        serialized: dict[str, object],
+        input_str: str,
+        *,
+        run_id: object,
+        **kwargs: object,
+    ) -> None:
+        del kwargs
+        name: object = serialized.get("name", "tool")
+        span: Span = get_tracer(LOGGER_NAME).start_span(f"tool.{name}")
+        if self.include_content:
+            span.set_attribute("tool.input", input_str[:2000])
+        self._spans[run_id] = span
+
+    def on_tool_end(self, output: object, *, run_id: object, **kwargs: object) -> None:
+        del output, kwargs
+        self._end(run_id)
+
+    def on_tool_error(self, error: BaseException, *, run_id: object, **kwargs: object) -> None:
+        del error, kwargs
+        self._end(run_id)
+
+    def _end(self, run_id: object) -> None:
+        span: Span | None = self._spans.pop(run_id, None)
+        if span is not None:
+            span.end()
 
 
 def _signal_endpoint(endpoint: str, signal: str) -> str:

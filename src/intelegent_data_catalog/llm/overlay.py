@@ -5,9 +5,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from uuid import UUID
 
-from pydantic_ai_harness import ArtifactScanner, Memory
-
-from intelegent_data_catalog.agents.agent_pack.memory_store import ObjectMemoryStore
+from intelegent_data_catalog.llm.memory_tools import MemoryTools
+from intelegent_data_catalog.llm.scanner import ArtifactScanner
 from intelegent_data_catalog.storage.object_store import ObjectStore
 
 _MEMORY_ROOT: str = "agent-memory/"
@@ -59,12 +58,14 @@ def current_task() -> str | None:
     return overlay.task
 
 
-def current_memory() -> Memory[object] | None:
-    """Notebook for the agent run on the stack. ``None`` for scope and space builds."""
+def current_memory() -> MemoryTools | None:
+    """Notebook for the agent run on the stack. ``None`` for schema builds."""
     overlay: DescribeOverlay | None = _CURRENT.get()
     if overlay is None or overlay.agent_id is None or overlay.store is None:
         return None
-    return Memory(
+    from intelegent_data_catalog.agents.agent_pack.memory_store import ObjectMemoryStore
+
+    return MemoryTools(
         ObjectMemoryStore(overlay.store, _MEMORY_ROOT),
         namespace=str(overlay.agent_id),
         max_memory_size=_MEMORY_CHARS,

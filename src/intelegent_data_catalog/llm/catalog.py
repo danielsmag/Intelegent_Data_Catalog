@@ -1,4 +1,4 @@
-"""Short-lived Pydantic AI agent for one catalog table.
+"""Short-lived LangGraph agent for one catalog table.
 
 One ``TableOperationAgent`` runs a tool-using operation and writes business
 context for the table, a batch of its columns, or one column.
@@ -9,10 +9,8 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.models import Model
-from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.access import accept_named_column_contexts
@@ -33,9 +31,10 @@ from intelegent_data_catalog.knowledge.models import (
     _context_text,
 )
 from intelegent_data_catalog.llm.agent import TableModelAgent
+from intelegent_data_catalog.llm.errors import ToolRetry
 from intelegent_data_catalog.llm.overlay import current_task
-from intelegent_data_catalog.llm.run import ModelCall
-from intelegent_data_catalog.llm.structured import structured_output
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
 from intelegent_data_catalog.llm.tools.table import (
     TableToolSource,
     compare_columns,
@@ -46,6 +45,7 @@ from intelegent_data_catalog.llm.tools.table import (
     get_neighbors,
     publish_graph,
 )
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 _TABLE_INSTRUCTIONS: str = (
     "You write business context for one catalog table. "
@@ -241,7 +241,7 @@ class TableOperationAgent(TableModelAgent):
 
     def __init__(
         self,
-        model: Model,
+        model: BaseChatModel,
         *,
         max_requests: int,
         temperature: float,
@@ -249,7 +249,7 @@ class TableOperationAgent(TableModelAgent):
         timeout_seconds: float,
         thinking: ThinkingLevel = False,
     ) -> None:
-        self._operation: ModelCall[TableToolSource, str] = ModelCall(
+        self._operation: GraphCall[TableToolSource, str] = GraphCall(
             _operation_agent(model),
             name="table-catalog",
             max_requests=max_requests,
@@ -258,7 +258,7 @@ class TableOperationAgent(TableModelAgent):
             timeout_seconds=timeout_seconds,
             thinking=thinking,
         )
-        self._table: ModelCall[TableContextInput, TableContextProposal] = ModelCall(
+        self._table: GraphCall[TableContextInput, TableContextProposal] = GraphCall(
             _table_context_agent(model),
             name="table-context",
             max_requests=max_requests,
@@ -267,7 +267,7 @@ class TableOperationAgent(TableModelAgent):
             timeout_seconds=timeout_seconds,
             thinking=thinking,
         )
-        self._columns: ModelCall[_ColumnsDeps, _NamedColumns] = ModelCall(
+        self._columns: GraphCall[_ColumnsDeps, _NamedColumns] = GraphCall(
             _columns_context_agent(model),
             name="table-columns-context",
             max_requests=max_requests,
@@ -276,7 +276,7 @@ class TableOperationAgent(TableModelAgent):
             timeout_seconds=timeout_seconds,
             thinking=thinking,
         )
-        self._column: ModelCall[ColumnContextInput, ColumnContextProposal] = ModelCall(
+        self._column: GraphCall[ColumnContextInput, ColumnContextProposal] = GraphCall(
             _column_context_agent(model),
             name="column-context",
             max_requests=max_requests,
@@ -308,71 +308,65 @@ class TableOperationAgent(TableModelAgent):
         return self._column.run(prompt, context)
 
 
-def _operation_agent(model: Model) -> Agent[TableToolSource, str]:
+def _operation_agent(model: BaseChatModel) -> AgentSpec[TableToolSource, str]:
     """Build the tool-using agent and attach its catalog tools."""
-    agent: Agent[TableToolSource, str] = Agent(
+    return AgentSpec(
         model,
-        deps_type=TableToolSource,
         output_type=str,
-        name="table-catalog",
+        tools=[
+            get_metadata,
+            get_data_profile,
+            get_column_profile,
+            compare_columns,
+            get_neighbors,
+            get_lineage,
+            publish_graph,
+        ],
     )
-    agent.tool(get_metadata)
-    agent.tool(get_data_profile)
-    agent.tool(get_column_profile)
-    agent.tool(compare_columns)
-    agent.tool(get_neighbors)
-    agent.tool(get_lineage)
-    agent.tool(publish_graph)
-    return agent
 
 
-def _table_context_agent(model: Model) -> Agent[TableContextInput, TableContextProposal]:
-    agent: Agent[TableContextInput, TableContextProposal] = Agent(
+def _table_context_agent(
+    model: BaseChatModel,
+) -> AgentSpec[TableContextInput, TableContextProposal]:
+    return AgentSpec(
         model,
-        deps_type=TableContextInput,
-        output_type=structured_output(model, TableContextProposal),
-        name="table-context",
+        output_type=TableContextProposal,
         instructions=_TABLE_INSTRUCTIONS,
         retries=2,
+        approve_output=True,
     )
-    return agent
 
 
-def _columns_context_agent(model: Model) -> Agent[_ColumnsDeps, _NamedColumns]:
-    """Ask for column names, not ids. Ollama grammar-constrains the JSON when it can."""
-    agent: Agent[_ColumnsDeps, _NamedColumns] = Agent(
+def _columns_context_agent(model: BaseChatModel) -> AgentSpec[_ColumnsDeps, _NamedColumns]:
+    """Ask for column names, not ids. JSON schema constrains the answer when it can."""
+    return AgentSpec(
         model,
-        deps_type=_ColumnsDeps,
-        output_type=structured_output(model, _NamedColumns),
-        name="table-columns-context",
+        output_type=_NamedColumns,
         instructions=_COLUMNS_INSTRUCTIONS,
         retries=2,
+        validator=_accept_columns,
+        approve_output=True,
     )
-    agent.output_validator(_accept_columns)
-    return agent
 
 
-def _column_context_agent(model: Model) -> Agent[ColumnContextInput, ColumnContextProposal]:
-    agent: Agent[ColumnContextInput, ColumnContextProposal] = Agent(
+def _column_context_agent(
+    model: BaseChatModel,
+) -> AgentSpec[ColumnContextInput, ColumnContextProposal]:
+    return AgentSpec(
         model,
-        deps_type=ColumnContextInput,
-        output_type=structured_output(model, ColumnContextProposal),
-        name="column-context",
+        output_type=ColumnContextProposal,
         instructions=_COLUMN_INSTRUCTIONS,
         retries=2,
+        approve_output=True,
     )
-    return agent
 
 
-def _accept_columns(
-    ctx: RunContext[_ColumnsDeps],
-    proposed: _NamedColumns,
-) -> _NamedColumns:
+def _accept_columns(deps: _ColumnsDeps, proposed: _NamedColumns) -> _NamedColumns:
     pairs: list[tuple[str, str]] = [(item.name, item.context) for item in proposed.columns]
     try:
-        accept_named_column_contexts(ctx.deps.columns, pairs)
+        accept_named_column_contexts(deps.columns, pairs)
     except ValidationAppError as err:
-        raise ModelRetry(str(err)) from err
+        raise ToolRetry(str(err)) from err
     return proposed
 
 

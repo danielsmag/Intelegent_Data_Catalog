@@ -4,15 +4,6 @@ import json
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelResponse,
-    RetryFeedbackPart,
-    RetryPromptPart,
-    TextPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.airflow.repository import AirflowRepository, DagWrite, LlmMappingWrite
@@ -49,6 +40,16 @@ from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import AirflowDagTableRow, AirflowInstanceRow
 from intelegent_data_catalog.registry.repository import RegistryRepository
 from intelegent_data_catalog.registry.schemas import CatalogTableCreate, DataSourceCreate, SourceRef
+from tests.llm_fakes import (
+    AgentInfo,
+    FunctionModel,
+    ModelMessage,
+    ModelResponse,
+    RetryFeedbackPart,
+    RetryPromptPart,
+    TextPart,
+    UserPromptPart,
+)
 from tests.registry_factory import OpenRegistry, open_registry
 
 

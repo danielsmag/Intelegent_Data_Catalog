@@ -3,15 +3,16 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from dependency_injector import providers
 from fastapi import FastAPI
-from pydantic_ai import Agent
-from pydantic_ai_harness.memory._store import (
+from sqlalchemy.orm import Session
+
+from intelegent_data_catalog.agents.agent_pack.memory_store import ObjectMemoryStore
+from intelegent_data_catalog.agents.agent_pack.memory_types import (
     MemoryConflictError,
     MemoryFile,
     MemoryMutation,
@@ -20,9 +21,6 @@ from pydantic_ai_harness.memory._store import (
     MemoryPathEscapeError,
     MemorySearchResult,
 )
-from sqlalchemy.orm import Session
-
-from intelegent_data_catalog.agents.agent_pack.memory_store import ObjectMemoryStore
 from intelegent_data_catalog.agents.agent_pack.models import MemoryFileDetail, MemoryFileRead
 from intelegent_data_catalog.agents.agent_pack.service import AgentPackService
 from intelegent_data_catalog.api.container import AppContainer
@@ -30,31 +28,17 @@ from intelegent_data_catalog.auth.access import AccessContext
 from intelegent_data_catalog.auth.principal import Principal
 from intelegent_data_catalog.bootstrap import create_app
 from intelegent_data_catalog.core.settings import AgentDefinitionsSettings
-from intelegent_data_catalog.exceptions import EntityNotFoundError, ValidationAppError
+from intelegent_data_catalog.exceptions import EntityNotFoundError, LlmError, ValidationAppError
 from intelegent_data_catalog.llm.overlay import DescribeOverlay, current_memory, describe_overlay
-from intelegent_data_catalog.llm.run import ModelCall
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
 from intelegent_data_catalog.persistence.constants import SHARED_WORKSPACE_ID
 from intelegent_data_catalog.persistence.database import CatalogDatabase
 from intelegent_data_catalog.persistence.enums import AgentKind, AgentStatus
 from intelegent_data_catalog.persistence.migrate import upgrade_database
 from intelegent_data_catalog.persistence.models import AgentRow
 from intelegent_data_catalog.storage.object_store import MemoryObjectStore
-
-
-class _Stop(Exception):
-    """Stops a model call after it records the run arguments."""
-
-
-class _StubAgent:
-    """Records ``run`` arguments and then stops."""
-
-    def __init__(self) -> None:
-        self.model: object = object()
-        self.seen: dict[str, object] = {}
-
-    async def run(self, prompt: str, **kwargs: object) -> object:
-        self.seen = {"prompt": prompt, **kwargs}
-        raise _Stop()
+from tests.llm_fakes import AgentInfo, FunctionModel, ModelMessage, ModelResponse, ToolCallPart
 
 
 def test_memory_write_rejects_a_stale_etag() -> None:
@@ -151,29 +135,51 @@ def test_agent_overlay_attaches_memory_and_a_plain_call_does_not() -> None:
     assert attached.write_metadata == {"updated_by": "agent"}
     assert current_memory() is None
 
-    bare: _StubAgent = _StubAgent()
-    call: ModelCall[object, str] = ModelCall(
-        cast(Agent[object, str], bare),
+    seen: list[set[str]] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages
+        seen.append({tool.name for tool in info.function_tools})
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="memory_read", args={"path": "main/MEMORY.md"})]
+        )
+
+    call: GraphCall[object, str] = GraphCall(
+        AgentSpec(FunctionModel(respond), output_type=str),
         name="memory-test",
         max_requests=2,
         temperature=0.0,
         max_tokens=16,
         timeout_seconds=5.0,
     )
-    with describe_overlay(overlay), pytest.raises(_Stop):
+    with describe_overlay(overlay), pytest.raises(LlmError, match="tool step limit"):
         call.run("describe the agent", object())
-    capabilities: object = bare.seen["capabilities"]
-    assert isinstance(capabilities, list)
-    assert len(capabilities) == 1
-    assert capabilities[0].namespace == str(agent_id)
-    limits: object = bare.seen["usage_limits"]
-    assert getattr(limits, "request_limit", None) == 4
+    assert seen
+    assert "memory_read" in seen[0]
+    assert len(seen) == 4
 
-    with pytest.raises(_Stop):
-        call.run("describe the scope", object())
-    assert bare.seen["capabilities"] is None
-    limits = bare.seen["usage_limits"]
-    assert getattr(limits, "request_limit", None) == 2
+    bare: list[set[str]] = []
+
+    def bare_respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages
+        bare.append({tool.name for tool in info.function_tools})
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="memory_read", args={"path": "main/MEMORY.md"})]
+        )
+
+    plain: GraphCall[object, str] = GraphCall(
+        AgentSpec(FunctionModel(bare_respond), output_type=str),
+        name="memory-test",
+        max_requests=2,
+        temperature=0.0,
+        max_tokens=16,
+        timeout_seconds=5.0,
+    )
+    with pytest.raises(LlmError, match="tool step limit"):
+        plain.run("describe the scope", object())
+    assert bare
+    assert "memory_read" not in bare[0]
+    assert len(bare) == 2
 
 
 def test_api_lists_and_reads_a_note(tmp_path: Path) -> None:

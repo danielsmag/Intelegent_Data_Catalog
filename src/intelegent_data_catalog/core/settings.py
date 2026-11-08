@@ -210,7 +210,7 @@ class ModelEndpoint(BaseModel):
 
 
 class LlmSettings(BaseModel):
-    """Which Pydantic AI model a table agent calls.
+    """Which LangGraph chat model a table agent calls.
 
     ``provider`` is ``claude``, ``openai``, or ``ollama``. An empty ``model`` or
     ``base_url`` uses that provider's default. Claude and OpenAI need
@@ -233,6 +233,8 @@ class LlmSettings(BaseModel):
     temperature: float = Field(default=0.0, ge=0, le=2)
     max_tool_steps: int = Field(default=6, ge=1, le=20)
     effort: ReasoningEffort = "low"
+    durable: bool = False
+    require_approval: bool = False
     local: ModelEndpoint = Field(default_factory=ModelEndpoint)
     gpt: ModelEndpoint = Field(default_factory=ModelEndpoint)
 
@@ -313,6 +315,8 @@ class LlmSettings(BaseModel):
             temperature=self.temperature,
             max_tool_steps=self.max_tool_steps,
             effort=self.effort,
+            durable=self.durable,
+            require_approval=self.require_approval,
         )
 
 

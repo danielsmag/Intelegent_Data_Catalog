@@ -1,9 +1,7 @@
 """Structured model call that writes business context for one schema agent."""
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
-from pydantic_ai import Agent
-from pydantic_ai.models import Model
-from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.knowledge.models import (
     SchemaCatalogContext,
@@ -11,8 +9,9 @@ from intelegent_data_catalog.knowledge.models import (
     SchemaTableFact,
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
-from intelegent_data_catalog.llm.run import ModelCall
-from intelegent_data_catalog.llm.structured import structured_output
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 _INSTRUCTIONS: str = (
     "You write business context for one schema. "
@@ -60,7 +59,7 @@ class SchemaContextAgent(ProposalAgent[SchemaCatalogContext, SchemaContextPropos
 
     def __init__(
         self,
-        model: Model,
+        model: BaseChatModel,
         *,
         max_requests: int,
         temperature: float,
@@ -68,7 +67,7 @@ class SchemaContextAgent(ProposalAgent[SchemaCatalogContext, SchemaContextPropos
         timeout_seconds: float,
         thinking: ThinkingLevel = False,
     ) -> None:
-        self._call: ModelCall[SchemaCatalogContext, SchemaContextProposal] = ModelCall(
+        self._call: GraphCall[SchemaCatalogContext, SchemaContextProposal] = GraphCall(
             _schema_agent(model),
             name="schema-context",
             max_requests=max_requests,
@@ -83,17 +82,15 @@ class SchemaContextAgent(ProposalAgent[SchemaCatalogContext, SchemaContextPropos
         return self._call.run(_prompt(context).model_dump_json(exclude_none=True), context)
 
 
-def _schema_agent(model: Model) -> Agent[SchemaCatalogContext, SchemaContextProposal]:
+def _schema_agent(model: BaseChatModel) -> AgentSpec[SchemaCatalogContext, SchemaContextProposal]:
     """JSON schema. A tool call lets Qwen think until the answer is empty."""
-    agent: Agent[SchemaCatalogContext, SchemaContextProposal] = Agent(
+    return AgentSpec(
         model,
-        deps_type=SchemaCatalogContext,
-        output_type=structured_output(model, SchemaContextProposal),
-        name="schema-context",
+        output_type=SchemaContextProposal,
         instructions=_INSTRUCTIONS,
         retries=2,
+        approve_output=True,
     )
-    return agent
 
 
 def _prompt(context: SchemaCatalogContext) -> _SchemaPrompt:

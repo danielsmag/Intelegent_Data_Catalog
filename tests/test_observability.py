@@ -4,11 +4,10 @@ import logging
 
 import pytest
 from pydantic import SecretStr, ValidationError
-from pydantic_ai.models.instrumented import InstrumentationSettings
 
 from intelegent_data_catalog.core.logger import LOGGER_NAME
 from intelegent_data_catalog.core.settings import ObservabilitySettings, load_settings
-from intelegent_data_catalog.core.telemetry import CatalogTelemetry
+from intelegent_data_catalog.core.telemetry import CatalogTelemetry, OtelLlmCallback
 from intelegent_data_catalog.exceptions import SettingsError
 
 
@@ -92,7 +91,7 @@ def test_disabled_start_skips_export(monkeypatch: pytest.MonkeyPatch) -> None:
         _forbid,
     )
     monkeypatch.setattr(
-        "intelegent_data_catalog.core.telemetry.Agent.instrument_all",
+        "intelegent_data_catalog.core.telemetry.register_llm_callback",
         _forbid,
     )
     logger: logging.Logger = logging.getLogger(LOGGER_NAME)
@@ -104,11 +103,10 @@ def test_disabled_start_skips_export(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_enabled_start_exports_and_instruments(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enabled startup instruments agents with prompt text and ships one log handler."""
-    captured: list[InstrumentationSettings] = []
+    captured: list[OtelLlmCallback] = []
 
-    def _capture(instrument: InstrumentationSettings | bool = True) -> None:
-        assert isinstance(instrument, InstrumentationSettings)
-        captured.append(instrument)
+    def _capture(handler: OtelLlmCallback) -> None:
+        captured.append(handler)
 
     def _processor(exporter: _Exporter) -> _Exporter:
         return exporter
@@ -146,7 +144,7 @@ def test_enabled_start_exports_and_instruments(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr("intelegent_data_catalog.core.telemetry.LoggingHandler", _handler)
     monkeypatch.setattr(
-        "intelegent_data_catalog.core.telemetry.Agent.instrument_all",
+        "intelegent_data_catalog.core.telemetry.register_llm_callback",
         _capture,
     )
     logger: logging.Logger = logging.getLogger(LOGGER_NAME)

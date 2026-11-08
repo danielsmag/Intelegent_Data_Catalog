@@ -9,7 +9,8 @@ from collections.abc import Mapping
 
 import anyio
 from pydantic import BaseModel, ConfigDict, ValidationError
-from pydantic_ai_harness.memory._store import (
+
+from intelegent_data_catalog.agents.agent_pack.memory_types import (
     MemoryConflictError,
     MemoryFile,
     MemoryMutation,
@@ -24,7 +25,6 @@ from pydantic_ai_harness.memory._store import (
     validate_store_path,
     validate_store_prefix,
 )
-
 from intelegent_data_catalog.exceptions import EntityNotFoundError
 from intelegent_data_catalog.storage.object_store import (
     ObjectStore,

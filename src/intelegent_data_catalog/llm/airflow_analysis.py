@@ -2,10 +2,8 @@
 
 from uuid import UUID
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
-from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.models import Model
-from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.exceptions import ValidationAppError
 from intelegent_data_catalog.knowledge.context.airflow_graph import accept_airflow_findings
@@ -21,8 +19,10 @@ from intelegent_data_catalog.knowledge.models import (
     PreviousAirflowFindings,
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
-from intelegent_data_catalog.llm.run import ModelCall
-from intelegent_data_catalog.llm.structured import structured_output
+from intelegent_data_catalog.llm.errors import ToolRetry
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 _INSTRUCTIONS: str = (
     "You analyze one Airflow instance. "
@@ -141,7 +141,7 @@ class AirflowAnalysisAgent(ProposalAgent[AirflowCatalogContext, AirflowProposal]
 
     def __init__(
         self,
-        model: Model,
+        model: BaseChatModel,
         *,
         max_requests: int,
         temperature: float,
@@ -149,7 +149,7 @@ class AirflowAnalysisAgent(ProposalAgent[AirflowCatalogContext, AirflowProposal]
         timeout_seconds: float,
         thinking: ThinkingLevel = False,
     ) -> None:
-        self._call: ModelCall[AirflowCatalogContext, AirflowProposal] = ModelCall(
+        self._call: GraphCall[AirflowCatalogContext, AirflowProposal] = GraphCall(
             _airflow_agent(model),
             name="airflow-analysis",
             max_requests=max_requests,
@@ -164,28 +164,22 @@ class AirflowAnalysisAgent(ProposalAgent[AirflowCatalogContext, AirflowProposal]
         return self._call.run(_prompt(context), context)
 
 
-def _airflow_agent(model: Model) -> Agent[AirflowCatalogContext, AirflowProposal]:
+def _airflow_agent(model: BaseChatModel) -> AgentSpec[AirflowCatalogContext, AirflowProposal]:
     """JSON schema. A tool call lets Qwen think until the answer is empty."""
-    agent: Agent[AirflowCatalogContext, AirflowProposal] = Agent(
+    return AgentSpec(
         model,
-        deps_type=AirflowCatalogContext,
-        output_type=structured_output(model, AirflowProposal),
-        name="airflow-analysis",
+        output_type=AirflowProposal,
         instructions=_INSTRUCTIONS,
         retries=2,
+        validator=_accept_output,
     )
-    agent.output_validator(_accept_output)
-    return agent
 
 
-def _accept_output(
-    ctx: RunContext[AirflowCatalogContext],
-    proposed: AirflowProposal,
-) -> AirflowProposal:
+def _accept_output(deps: AirflowCatalogContext, proposed: AirflowProposal) -> AirflowProposal:
     try:
-        accept_airflow_findings(ctx.deps, proposed.dags)
+        accept_airflow_findings(deps, proposed.dags)
     except ValidationAppError as err:
-        raise ModelRetry(str(err)) from err
+        raise ToolRetry(str(err)) from err
     return proposed
 
 

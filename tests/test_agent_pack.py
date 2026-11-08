@@ -26,7 +26,6 @@ from intelegent_data_catalog.agents.agent_pack.document import (
 from intelegent_data_catalog.agents.agent_pack.models import PromptWrite, RuleWrite, SkillWrite
 from intelegent_data_catalog.agents.agent_pack.runtime import (
     _stage_layers,
-    operation_capabilities,
     render_skills,
 )
 from intelegent_data_catalog.agents.agent_pack.service import AgentPackService
@@ -168,9 +167,6 @@ def test_private_folder_round_trip_and_flat_file_is_not_writable(tmp_path: Path)
         rendered: str = render_skills(store, pack)
         assert "lineage-reader" in rendered
         assert "Name the upstream table." in rendered
-        capabilities: list[object] = operation_capabilities(Path("."), ["lineage-reader"])
-        assert any(type(item).__name__ == "Skills" for item in capabilities)
-        assert any(type(item).__name__ == "RepoContext" for item in capabilities)
     finally:
         session.close()
         database.dispose()

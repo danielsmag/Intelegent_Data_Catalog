@@ -1,62 +1,34 @@
-"""Stage an agent directory and ask the harness to render its skills."""
+"""Stage an agent directory and render its enabled skills into the prompt."""
 
-import asyncio
 import tempfile
 from pathlib import Path
 
-from pydantic_ai.capabilities import Capability, LocalWorkspace
-from pydantic_ai.workspaces import LocalWorkspaceBackend
-from pydantic_ai_harness import RepoContext, Skills
-
 from intelegent_data_catalog.agents.agent_pack.compose import LoadedPack, LoadedSkill
-from intelegent_data_catalog.agents.agent_pack.document import harness_skill
+from intelegent_data_catalog.agents.agent_pack.document import harness_skill, parse_markdown
 from intelegent_data_catalog.storage.object_store import ObjectStore, StoredObject
 
 
 def render_skills(store: ObjectStore, pack: LoadedPack) -> str:
-    """Host-invoke enabled skills. Describe stays one structured model call."""
+    """Render enabled skills. Describe stays one structured model call."""
     names: list[str] = pack.enabled_skill_names()
     if len(pack.layers) == 0 or len(names) == 0:
         return ""
     with tempfile.TemporaryDirectory() as directory:
         root: Path = Path(directory)
         _stage_layers(store, pack, root)
-        skills: Skills[object] = Skills(
-            ".agents/skills",
-            include=names,
-            missing_directories="skip",
-        )
-        catalog = asyncio.run(skills.load(LocalWorkspaceBackend(root)))
-        parts: list[str] = [item.render() for item in catalog.skills]
+        parts: list[str] = []
+        name: str
+        for name in names:
+            path: Path = root.joinpath(".agents", "skills", name, "SKILL.md")
+            if not path.is_file():
+                continue
+            parsed = parse_markdown(path.read_text(encoding="utf-8"))
+            title: str = parsed.text("name", name)
+            description: str = parsed.text("description")
+            body: str = parsed.body.strip()
+            block: str = f"# {title}\n\n{description}\n\n{body}".strip()
+            parts.append(block)
     return "\n\n".join(parts)
-
-
-def operation_capabilities(staged_dir: Path, skill_names: list[str]) -> list[object]:
-    """Capabilities for a tool-using run. Describe does not use this list."""
-    capabilities: list[object] = [
-        LocalWorkspace(staged_dir),
-        RepoContext(
-            filenames=("AGENTS.md",),
-            expose_inventory_tool=False,
-            nested_traversal=False,
-        ),
-    ]
-    if len(skill_names) > 0:
-        capabilities.append(
-            Skills(
-                ".agents/skills",
-                include=skill_names,
-                missing_directories="skip",
-            ),
-        )
-    return capabilities
-
-
-def rules_capability(text: str | None) -> Capability[object] | None:
-    """Always-on rules. The harness has no rules loader."""
-    if text is None or text.strip() == "":
-        return None
-    return Capability(id="agent-rules", instructions=text)
 
 
 def _stage_layers(store: ObjectStore, pack: LoadedPack, root: Path) -> None:

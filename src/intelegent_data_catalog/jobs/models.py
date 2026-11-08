@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from intelegent_data_catalog.knowledge.models import ContextSubjectKind
 
-KnowledgeBuildState = Literal["running", "succeeded", "failed"]
+KnowledgeBuildState = Literal["running", "succeeded", "failed", "waiting_approval"]
 
 
 class KnowledgeBuildJobRead(BaseModel):
@@ -44,6 +44,25 @@ class AirflowBuildJobRead(BaseModel):
     instance_name: str
     status: KnowledgeBuildState
     error: str | None = None
+
+
+class JobApprovalRead(BaseModel):
+    """The step a paused build is waiting on."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    status: KnowledgeBuildState
+    pending: dict[str, object] | None = None
+
+
+class JobApprovalWrite(BaseModel):
+    """Approve, reject, or replace the paused proposal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["approve", "reject"]
+    output: dict[str, object] | None = None
 
 
 class CatalogJobCancelRead(BaseModel):

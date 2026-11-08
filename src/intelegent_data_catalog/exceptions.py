@@ -110,6 +110,14 @@ class LlmUnavailableError(LlmError):
         super().__init__(message)
 
 
+class ApprovalRequired(LlmError):
+    """Raised when a run paused for a person to approve a tool or a proposal."""
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        super().__init__("language model is waiting for approval")
+        self.payload: dict[str, object] = payload
+
+
 class AirflowUnavailableError(CatalogError):
     """Raised when an Airflow REST call cannot complete. The message is sanitized."""
 

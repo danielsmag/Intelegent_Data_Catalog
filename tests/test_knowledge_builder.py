@@ -6,17 +6,6 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelResponse,
-    RetryFeedbackPart,
-    RetryPromptPart,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.exceptions import (
@@ -85,6 +74,18 @@ from intelegent_data_catalog.registry.schemas import (
     DataSourceCreate,
     RelationshipCreate,
     SourceRef,
+)
+from tests.llm_fakes import (
+    AgentInfo,
+    FunctionModel,
+    ModelMessage,
+    ModelResponse,
+    RetryFeedbackPart,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 

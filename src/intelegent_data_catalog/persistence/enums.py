@@ -196,6 +196,7 @@ class CatalogJobStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    WAITING_APPROVAL = "waiting_approval"
 
 
 class RefreshSubjectKind(StrEnum):

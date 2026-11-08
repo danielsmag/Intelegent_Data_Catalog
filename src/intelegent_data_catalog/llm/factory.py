@@ -1,13 +1,10 @@
-"""Build the Pydantic AI model selected in settings."""
+"""Build the LangChain chat model selected in settings."""
 
-from pydantic_ai.models import Model
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.ollama import OllamaModel
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.ollama import OllamaProvider
-from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.settings import ThinkingLevel
+from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from intelegent_data_catalog.core.settings import LlmSettings, ReasoningEffort
 from intelegent_data_catalog.exceptions import LlmUnavailableError
@@ -18,6 +15,8 @@ from intelegent_data_catalog.llm.column_graph import ColumnSubgraphAgent
 from intelegent_data_catalog.llm.dag_context import DagContextAgent
 from intelegent_data_catalog.llm.file_context import FileContextAgent
 from intelegent_data_catalog.llm.schema_context import SchemaContextAgent
+from intelegent_data_catalog.llm.session import bind_llm_runtime
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 
 def thinking_level(effort: ReasoningEffort) -> ThinkingLevel:
@@ -45,41 +44,51 @@ def build_table_operation_agent(
     )
 
 
-def build_model(settings: LlmSettings) -> Model:
+def build_model(settings: LlmSettings) -> BaseChatModel:
     """Return the provider model. Remote providers require ``CATALOG_LLM__API_KEY``."""
     match settings.provider:
         case "ollama":
-            return OllamaModel(
-                settings.model,
-                provider=OllamaProvider(
-                    base_url=_chat_base_url(settings.base_url),
-                    api_key=_optional_key(settings),
-                ),
+            return ChatOllama(
+                model=settings.model,
+                base_url=_ollama_base_url(settings.base_url),
+                client_kwargs=_ollama_client_kwargs(settings),
             )
         case "openai":
-            return OpenAIChatModel(
-                settings.model,
-                provider=OpenAIProvider(
-                    base_url=_chat_base_url(settings.base_url),
-                    api_key=_require_key(settings, "openai"),
-                ),
+            return ChatOpenAI(
+                model=settings.model,
+                base_url=_chat_base_url(settings.base_url),
+                api_key=_require_key(settings, "openai"),
             )
         case "claude":
-            return AnthropicModel(
-                settings.model,
-                provider=AnthropicProvider(
-                    api_key=_require_key(settings, "claude"),
-                    base_url=settings.base_url,
-                ),
+            client: ChatAnthropic = ChatAnthropic(  # type: ignore[call-arg]
+                model=settings.model,
+                api_key=_require_key(settings, "claude"),
             )
+            client.anthropic_api_url = settings.base_url
+            return client
 
 
 def _chat_base_url(base_url: str) -> str:
-    """Ollama and OpenAI speak the chat API under ``/v1``."""
+    """OpenAI speaks the chat API under ``/v1``."""
     trimmed: str = base_url.rstrip("/")
     if trimmed.endswith("/v1"):
         return trimmed
     return f"{trimmed}/v1"
+
+
+def _ollama_base_url(base_url: str) -> str:
+    """ChatOllama uses the native API, not the OpenAI ``/v1`` prefix."""
+    trimmed: str = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        return trimmed[: -len("/v1")]
+    return trimmed
+
+
+def _ollama_client_kwargs(settings: LlmSettings) -> dict[str, object]:
+    key: str | None = _optional_key(settings)
+    if key is None:
+        return {}
+    return {"headers": {"Authorization": f"Bearer {key}"}}
 
 
 def _optional_key(settings: LlmSettings) -> str | None:
@@ -89,11 +98,11 @@ def _optional_key(settings: LlmSettings) -> str | None:
     return key
 
 
-def _require_key(settings: LlmSettings, provider: str) -> str:
+def _require_key(settings: LlmSettings, provider: str) -> SecretStr:
     key: str | None = _optional_key(settings)
     if key is None:
         raise LlmUnavailableError(f"{provider} requires CATALOG_LLM__API_KEY")
-    return key
+    return SecretStr(key)
 
 
 class CatalogModels:
@@ -107,6 +116,8 @@ class CatalogModels:
         column_graph: bool,
         thinking: ThinkingLevel = False,
     ) -> None:
+        del text_chars
+        bind_llm_runtime(settings)
         timeout: float = max(settings.timeout_seconds, 600.0)
         self.settings: LlmSettings = settings
         self.thinking: ThinkingLevel = thinking

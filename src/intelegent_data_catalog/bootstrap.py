@@ -8,9 +8,11 @@ from fastapi import FastAPI
 import intelegent_data_catalog.jobs.celery_app as catalog_celery
 from intelegent_data_catalog.api.app import configure_app
 from intelegent_data_catalog.api.container import AppContainer
+from intelegent_data_catalog.core.settings import AppSettings
 from intelegent_data_catalog.jobs.catalog_jobs import CatalogJobs
 from intelegent_data_catalog.jobs.publisher import CeleryJobPublisher
 from intelegent_data_catalog.jobs.runtime import set_job_container
+from intelegent_data_catalog.llm.checkpoints import install_postgres_checkpointer
 
 
 def create_app(container: AppContainer | None = None) -> FastAPI:
@@ -35,6 +37,9 @@ def _lifespan(
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         container.logger()
         container.init_resources()
+        settings: AppSettings = container.settings()
+        if settings.llm.durable or settings.llm.require_approval:
+            install_postgres_checkpointer(settings.database.url)
         try:
             yield
         finally:

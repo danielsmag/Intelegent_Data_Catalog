@@ -1,11 +1,11 @@
-"""Catalog tools. Each one reads through the table agent passed as ``deps``."""
+"""Catalog tools. Each one reads through the table agent passed as deps."""
 
 from collections.abc import Callable
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, cast
 from uuid import UUID
 
+from langchain_core.tools import tool
 from pydantic import Field
-from pydantic_ai import ModelRetry, RunContext
 
 from intelegent_data_catalog.exceptions import GraphUnavailableError, ValidationAppError
 from intelegent_data_catalog.knowledge.models import (
@@ -19,6 +19,8 @@ from intelegent_data_catalog.knowledge.models import (
     TableCatalogContext,
     TableDataProfile,
 )
+from intelegent_data_catalog.llm.errors import ToolRetry
+from intelegent_data_catalog.llm.tool_deps import current_tool_deps
 
 SampleLimit = Annotated[int, Field(ge=0, le=20)]
 
@@ -64,13 +66,18 @@ class TableToolSource(Protocol):
         ...
 
 
-def get_metadata(ctx: RunContext[TableToolSource]) -> TableCatalogContext:
+def _source() -> TableToolSource:
+    return cast(TableToolSource, current_tool_deps())
+
+
+@tool
+def get_metadata() -> TableCatalogContext:
     """Load columns, keys, relationships, scope, and tags for this table."""
-    return ctx.deps.get_metadata()
+    return _source().get_metadata()
 
 
+@tool
 def get_data_profile(
-    ctx: RunContext[TableToolSource],
     access_mode: DataAccessMode | None = None,
     max_sample_values: SampleLimit | None = None,
 ) -> TableDataProfile:
@@ -80,11 +87,11 @@ def get_data_profile(
         access_mode: How much physical data to read.
         max_sample_values: Sample values allowed when access_mode is SAMPLED.
     """
-    return _read(lambda: ctx.deps.get_data_profile(_overrides(access_mode, max_sample_values)))
+    return _read(lambda: _source().get_data_profile(_overrides(access_mode, max_sample_values)))
 
 
+@tool
 def get_column_profile(
-    ctx: RunContext[TableToolSource],
     column_id: UUID,
     access_mode: DataAccessMode | None = None,
     max_sample_values: SampleLimit | None = None,
@@ -97,15 +104,15 @@ def get_column_profile(
         max_sample_values: Sample values allowed when access_mode is SAMPLED.
     """
     return _read(
-        lambda: ctx.deps.get_column_profile(
+        lambda: _source().get_column_profile(
             column_id,
             _overrides(access_mode, max_sample_values),
         )
     )
 
 
+@tool
 def compare_columns(
-    ctx: RunContext[TableToolSource],
     source_column_id: UUID,
     target_column_id: UUID,
     access_mode: DataAccessMode | None = None,
@@ -120,7 +127,7 @@ def compare_columns(
         max_sample_values: Sample values allowed when access_mode is SAMPLED.
     """
     return _read(
-        lambda: ctx.deps.compare_columns(
+        lambda: _source().compare_columns(
             source_column_id,
             target_column_id,
             _overrides(access_mode, max_sample_values),
@@ -128,25 +135,28 @@ def compare_columns(
     )
 
 
-def get_neighbors(ctx: RunContext[TableToolSource]) -> list[GraphNeighbor]:
+@tool
+def get_neighbors() -> list[GraphNeighbor]:
     """Load catalog tables connected to this table in the graph."""
-    return ctx.deps.get_neighbors()
+    return _source().get_neighbors()
 
 
-def get_lineage(ctx: RunContext[TableToolSource]) -> LineageContext:
+@tool
+def get_lineage() -> LineageContext:
     """Load upstream datasets, downstream datasets, and jobs for this table."""
-    return ctx.deps.get_lineage()
+    return _source().get_lineage()
 
 
-def publish_graph(ctx: RunContext[TableToolSource]) -> GraphPublishResult:
+@tool
+def publish_graph() -> GraphPublishResult:
     """Replace the Neo4j projection from PostgreSQL and Marquez.
 
     This rewrites the whole projection, not only this table.
     """
     try:
-        return ctx.deps.publish_graph()
+        return _source().publish_graph()
     except GraphUnavailableError as err:
-        raise ModelRetry(str(err)) from err
+        raise ToolRetry(str(err)) from err
 
 
 def _overrides(
@@ -163,4 +173,4 @@ def _read[T](load: Callable[[], T]) -> T:
     try:
         return load()
     except ValidationAppError as err:
-        raise ModelRetry(str(err)) from err
+        raise ToolRetry(str(err)) from err

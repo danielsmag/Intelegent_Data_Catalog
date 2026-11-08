@@ -31,6 +31,8 @@ from intelegent_data_catalog.jobs.models import (
     AirflowBuildJobRead,
     CatalogJobCancelRead,
     ContextGenerationJobRead,
+    JobApprovalRead,
+    JobApprovalWrite,
     KnowledgeBuildJobRead,
 )
 from intelegent_data_catalog.jobs.trace import (
@@ -312,6 +314,28 @@ def cancel_catalog_job(
     if cancelled is None:
         raise EntityNotFoundError("catalog job", str(job_id))
     return cancelled
+
+
+@router.get("/catalog-jobs/{job_id}/approval", response_model=JobApprovalRead)
+def read_catalog_job_approval(job_id: UUID, builds: CatalogJobsDep) -> JobApprovalRead:
+    """Return the step a paused build is waiting on."""
+    pending: JobApprovalRead | None = builds.approval(job_id)
+    if pending is None:
+        raise EntityNotFoundError("catalog job", str(job_id))
+    return pending
+
+
+@router.post("/catalog-jobs/{job_id}/approval", response_model=JobApprovalRead)
+def submit_catalog_job_approval(
+    job_id: UUID,
+    body: JobApprovalWrite,
+    builds: CatalogJobsDep,
+) -> JobApprovalRead:
+    """Approve or reject the paused step and resume the worker."""
+    decided: JobApprovalRead | None = builds.decide(job_id, body.decision, body.output)
+    if decided is None:
+        raise EntityNotFoundError("catalog job", str(job_id))
+    return decided
 
 
 

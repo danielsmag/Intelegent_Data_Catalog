@@ -5,15 +5,6 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelResponse,
-    RetryFeedbackPart,
-    RetryPromptPart,
-    TextPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.graph.document import GraphView
@@ -54,6 +45,16 @@ from intelegent_data_catalog.registry.schemas import (
     ColumnCreate,
     DataSourceCreate,
     SourceRef,
+)
+from tests.llm_fakes import (
+    AgentInfo,
+    FunctionModel,
+    ModelMessage,
+    ModelResponse,
+    RetryFeedbackPart,
+    RetryPromptPart,
+    TextPart,
+    UserPromptPart,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_knowledge_builder import _context

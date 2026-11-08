@@ -19,6 +19,7 @@ from intelegent_data_catalog.jobs.models import (
     AirflowBuildJobRead,
     CatalogJobCancelRead,
     ContextGenerationJobRead,
+    JobApprovalRead,
     KnowledgeBuildJobRead,
     KnowledgeBuildState,
 )
@@ -55,7 +56,12 @@ class CatalogJobStore:
                     CatalogJobRow.kind == kind.value,
                     CatalogJobRow.subject_id == subject_id,
                     CatalogJobRow.lane == lane,
-                    CatalogJobRow.status == CatalogJobStatus.RUNNING.value,
+                    CatalogJobRow.status.in_(
+                        (
+                            CatalogJobStatus.RUNNING.value,
+                            CatalogJobStatus.WAITING_APPROVAL.value,
+                        )
+                    ),
                 )
                 .limit(1)
             )
@@ -180,11 +186,62 @@ class CatalogJobStore:
         session: Session = self._database.session()
         try:
             row: CatalogJobRow | None = session.get(CatalogJobRow, job_id)
-            if row is None or row.status != CatalogJobStatus.RUNNING.value:
+            if row is None or row.status not in {
+                CatalogJobStatus.RUNNING.value,
+                CatalogJobStatus.WAITING_APPROVAL.value,
+            }:
                 return False
             row.status = status
             row.error = error
             row.finished_at = utc_now()
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+        return True
+
+    def mark_waiting(self, job_id: UUID, payload: dict[str, object]) -> bool:
+        """Pause a running job until a person approves the pending step."""
+        return self._merge_options(
+            job_id,
+            CatalogJobStatus.WAITING_APPROVAL.value,
+            {"_approval": payload},
+            drop=("_decision",),
+        )
+
+    def save_decision(self, job_id: UUID, decision: dict[str, object]) -> bool:
+        """Store an approval decision. The row stays paused until the worker resumes."""
+        return self._merge_options(
+            job_id,
+            CatalogJobStatus.WAITING_APPROVAL.value,
+            {"_decision": decision},
+            drop=(),
+        )
+
+    def _merge_options(
+        self,
+        job_id: UUID,
+        status: str,
+        extra: dict[str, object],
+        drop: tuple[str, ...],
+    ) -> bool:
+        session: Session = self._database.session()
+        try:
+            row: CatalogJobRow | None = session.get(CatalogJobRow, job_id)
+            if row is None or row.status not in {
+                CatalogJobStatus.RUNNING.value,
+                CatalogJobStatus.WAITING_APPROVAL.value,
+            }:
+                return False
+            options: dict[str, object] = dict(row.options)
+            key: str
+            for key in drop:
+                options.pop(key, None)
+            options.update(extra)
+            row.options = options
+            row.status = status
             session.commit()
         except Exception:
             session.rollback()
@@ -322,7 +379,10 @@ class CatalogJobs:
         row: CatalogJobRow | None = self._store.get(job_id)
         if row is None:
             return None
-        if row.status != CatalogJobStatus.RUNNING.value:
+        if row.status not in {
+            CatalogJobStatus.RUNNING.value,
+            CatalogJobStatus.WAITING_APPROVAL.value,
+        }:
             return _cancel_read(row)
         try:
             signal.request(job_id, signal_ttl_seconds)
@@ -335,6 +395,37 @@ class CatalogJobs:
         if updated is None:
             return None
         return _cancel_read(updated)
+
+    def approval(self, job_id: UUID) -> JobApprovalRead | None:
+        """Return the pending approval for one job."""
+        row: CatalogJobRow | None = self._store.get(job_id)
+        if row is None:
+            return None
+        return _approval_read(row)
+
+    def decide(
+        self,
+        job_id: UUID,
+        decision: str,
+        output: dict[str, object] | None,
+    ) -> JobApprovalRead | None:
+        """Store a decision and queue the worker that resumes the graph."""
+        row: CatalogJobRow | None = self._store.get(job_id)
+        if row is None:
+            return None
+        if row.status != CatalogJobStatus.WAITING_APPROVAL.value:
+            raise ValidationAppError("catalog job is not waiting for approval")
+        payload: dict[str, object] = {"decision": decision}
+        if output is not None:
+            payload["output"] = output
+        wrote: bool = self._store.save_decision(job_id, payload)
+        if not wrote:
+            return None
+        self._publisher.enqueue_build(job_id)
+        updated: CatalogJobRow | None = self._store.get(job_id)
+        if updated is None:
+            return None
+        return _approval_read(updated)
 
     def _start(
         self,
@@ -386,6 +477,16 @@ def _close_trace(sink: BuildTraceSink, row: CatalogJobRow, step: TraceStep, deta
         _LOGGER.exception("catalog job trace close failed job_id=%s", row.id)
 
 
+def _approval_read(row: CatalogJobRow) -> JobApprovalRead:
+    pending: object = row.options.get("_approval")
+    payload: dict[str, object] | None = pending if isinstance(pending, dict) else None
+    return JobApprovalRead(
+        id=row.id,
+        status=_job_status(row.status),
+        pending=payload,
+    )
+
+
 def _cancel_read(row: CatalogJobRow) -> CatalogJobCancelRead:
     return CatalogJobCancelRead(
         id=row.id,
@@ -403,7 +504,7 @@ def _dump_options(options: BaseModel) -> dict[str, object]:
 
 def _job_status(value: str) -> KnowledgeBuildState:
     match value:
-        case "running" | "succeeded" | "failed":
+        case "running" | "succeeded" | "failed" | "waiting_approval":
             return value
         case _:
             raise ValidationAppError(f"unknown catalog job status: {value}")

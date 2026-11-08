@@ -3,16 +3,14 @@
 A tool call lets Qwen think until the answer is empty.
 """
 
-from pydantic_ai import NativeOutput
-from pydantic_ai.models import Model
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from intelegent_data_catalog.llm.types import StructuredMethod
 
 
-def structured_output[OutputT](
-    model: Model,
-    output: type[OutputT],
-) -> NativeOutput[OutputT] | type[OutputT]:
-    """Prefer JSON schema. Fall back to a tool call when the model cannot emit a schema."""
-    if bool(model.profile.get("supports_json_schema_output", False)):
-        return NativeOutput(output)
-    return output
-
+def structured_method(model: BaseChatModel) -> StructuredMethod:
+    """Prefer JSON schema. Claude answers through a tool call instead."""
+    module: str = type(model).__module__
+    if "anthropic" in module:
+        return "function_calling"
+    return "json_schema"

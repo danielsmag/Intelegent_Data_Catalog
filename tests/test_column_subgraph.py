@@ -8,15 +8,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelResponse,
-    RetryFeedbackPart,
-    RetryPromptPart,
-    TextPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.orm import Session
 
 from intelegent_data_catalog.exceptions import (
@@ -60,6 +51,16 @@ from intelegent_data_catalog.registry.schemas import (
     ColumnCreate,
     DataSourceCreate,
     SourceRef,
+)
+from tests.llm_fakes import (
+    AgentInfo,
+    FunctionModel,
+    ModelMessage,
+    ModelResponse,
+    RetryFeedbackPart,
+    RetryPromptPart,
+    TextPart,
+    UserPromptPart,
 )
 from tests.registry_factory import OpenRegistry, open_registry
 from tests.test_knowledge_builder import _context, _factory

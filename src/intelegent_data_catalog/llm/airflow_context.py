@@ -2,10 +2,8 @@
 
 from uuid import UUID
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict
-from pydantic_ai import Agent
-from pydantic_ai.models import Model
-from pydantic_ai.settings import ThinkingLevel
 
 from intelegent_data_catalog.knowledge.models import (
     AirflowCatalogContext,
@@ -15,8 +13,9 @@ from intelegent_data_catalog.knowledge.models import (
     DagTaskSummary,
 )
 from intelegent_data_catalog.llm.agent import ProposalAgent
-from intelegent_data_catalog.llm.run import ModelCall
-from intelegent_data_catalog.llm.structured import structured_output
+from intelegent_data_catalog.llm.run import GraphCall
+from intelegent_data_catalog.llm.spec import AgentSpec
+from intelegent_data_catalog.llm.types import ThinkingLevel
 
 _INSTRUCTIONS: str = (
     "You write business context for one Airflow instance. "
@@ -77,7 +76,7 @@ class AirflowContextAgent(ProposalAgent[AirflowCatalogContext, AirflowContextPro
 
     def __init__(
         self,
-        model: Model,
+        model: BaseChatModel,
         *,
         max_requests: int,
         temperature: float,
@@ -85,7 +84,7 @@ class AirflowContextAgent(ProposalAgent[AirflowCatalogContext, AirflowContextPro
         timeout_seconds: float,
         thinking: ThinkingLevel = False,
     ) -> None:
-        self._call: ModelCall[AirflowCatalogContext, AirflowContextProposal] = ModelCall(
+        self._call: GraphCall[AirflowCatalogContext, AirflowContextProposal] = GraphCall(
             _airflow_agent(model),
             name="airflow-context",
             max_requests=max_requests,
@@ -100,17 +99,17 @@ class AirflowContextAgent(ProposalAgent[AirflowCatalogContext, AirflowContextPro
         return self._call.run(_prompt(context).model_dump_json(exclude_none=True), context)
 
 
-def _airflow_agent(model: Model) -> Agent[AirflowCatalogContext, AirflowContextProposal]:
+def _airflow_agent(
+    model: BaseChatModel,
+) -> AgentSpec[AirflowCatalogContext, AirflowContextProposal]:
     """JSON schema. A tool call lets Qwen think until the answer is empty."""
-    agent: Agent[AirflowCatalogContext, AirflowContextProposal] = Agent(
+    return AgentSpec(
         model,
-        deps_type=AirflowCatalogContext,
-        output_type=structured_output(model, AirflowContextProposal),
-        name="airflow-context",
+        output_type=AirflowContextProposal,
         instructions=_INSTRUCTIONS,
         retries=2,
+        approve_output=True,
     )
-    return agent
 
 
 def _prompt(context: AirflowCatalogContext) -> _AirflowPrompt:
