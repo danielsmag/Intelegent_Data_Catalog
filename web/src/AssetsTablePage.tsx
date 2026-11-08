@@ -22,6 +22,7 @@ const KINDS: readonly { id: "" | AssetKind; label: string }[] = [
   { id: "AIRFLOW_INSTANCE", label: "Airflow" },
   { id: "ICEBERG_TABLE", label: "Iceberg table" },
   { id: "ICEBERG_SCHEMA", label: "Iceberg schema" },
+  { id: "ICEBERG_CATALOG", label: "Iceberg catalog" },
   { id: "GITHUB_REPO", label: "GitHub" },
 ]
 
@@ -315,7 +316,13 @@ function sortParam(value: string | null): AssetSort {
 }
 
 function kindParam(value: string | null): AssetKind | null {
-  if (value === "AIRFLOW_INSTANCE" || value === "ICEBERG_TABLE" || value === "ICEBERG_SCHEMA" || value === "GITHUB_REPO") {
+  if (
+    value === "AIRFLOW_INSTANCE" ||
+    value === "ICEBERG_TABLE" ||
+    value === "ICEBERG_SCHEMA" ||
+    value === "ICEBERG_CATALOG" ||
+    value === "GITHUB_REPO"
+  ) {
     return value
   }
   return null

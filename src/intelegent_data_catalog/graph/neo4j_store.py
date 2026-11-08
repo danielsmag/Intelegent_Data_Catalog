@@ -13,6 +13,15 @@ from intelegent_data_catalog.graph.knowledge_subgraph import (
     knowledge_node_from_row,
     knowledge_statements,
 )
+from intelegent_data_catalog.graph.profile_subgraph import (
+    ProfileGraphLink,
+    ProfileGraphNode,
+    ProfileSubgraphWrite,
+    profile_graph_view,
+    profile_link_from_row,
+    profile_node_from_row,
+    profile_statements,
+)
 from intelegent_data_catalog.sources.trino.client import sanitize_engine_message
 
 
@@ -86,6 +95,66 @@ class Neo4jProjection:
         finally:
             driver.close()
 
+    def replace_profile(self, document: ProfileSubgraphWrite) -> None:
+        """Replace one asset's profile subgraph. Catalog and lineage nodes stay."""
+        try:
+            from neo4j import GraphDatabase
+        except ImportError as err:
+            raise GraphUnavailableError("Neo4j driver is not installed") from err
+        try:
+            driver = GraphDatabase.driver(self._uri, auth=(self._user, self._password))
+        except Exception as err:
+            raise GraphUnavailableError(sanitize_engine_message(str(err))) from err
+        try:
+            with driver.session(database=self._database) as session:
+                session.execute_write(_apply_profile, document)
+        except GraphUnavailableError:
+            raise
+        except Exception as err:
+            raise GraphUnavailableError(sanitize_engine_message(str(err))) from err
+        finally:
+            driver.close()
+
+    def read_profile(self, owner_asset_id: str) -> GraphView:
+        """Return the profile subgraph owned by one asset."""
+        try:
+            from neo4j import GraphDatabase
+        except ImportError as err:
+            raise GraphUnavailableError("Neo4j driver is not installed") from err
+        try:
+            driver = GraphDatabase.driver(self._uri, auth=(self._user, self._password))
+        except Exception as err:
+            raise GraphUnavailableError(sanitize_engine_message(str(err))) from err
+        try:
+            with driver.session(database=self._database) as session:
+                nodes: list[ProfileGraphNode] = []
+                for record in session.run(_PROFILE_NODES, owner=owner_asset_id):
+                    parsed: ProfileGraphNode | None = profile_node_from_row(
+                        record["node_id"],
+                        record["name"],
+                        record["labels"],
+                        record["props"],
+                    )
+                    if parsed is not None:
+                        nodes.append(parsed)
+                links: list[ProfileGraphLink] = []
+                for record in session.run(_PROFILE_EDGES, owner=owner_asset_id):
+                    link: ProfileGraphLink | None = profile_link_from_row(
+                        record["source"],
+                        record["target"],
+                        record["kind"],
+                        record["reason"],
+                    )
+                    if link is not None:
+                        links.append(link)
+            return profile_graph_view(nodes, links)
+        except GraphUnavailableError:
+            raise
+        except Exception as err:
+            raise GraphUnavailableError(sanitize_engine_message(str(err))) from err
+        finally:
+            driver.close()
+
     def read_knowledge(self, owner_table_id: str) -> GraphView:
         """Return the knowledge subgraph owned by one catalog table."""
         return self.read_owned("owner_table_id", owner_table_id)
@@ -143,6 +212,20 @@ class Neo4jProjection:
             driver.close()
 
 
+_PROFILE_NODES: LiteralString = (
+    "MATCH (n) "
+    "WHERE n.projection = 'profile' AND n.owner_asset_id = $owner "
+    "RETURN n.node_id AS node_id, n.name AS name, labels(n) AS labels, properties(n) AS props"
+)
+_PROFILE_EDGES: LiteralString = (
+    "MATCH (source)-[rel]->(target) "
+    "WHERE source.projection = 'profile' AND source.owner_asset_id = $owner "
+    "AND target.projection = 'profile' AND target.owner_asset_id = $owner "
+    "RETURN source.node_id AS source, target.node_id AS target, "
+    "type(rel) AS kind, rel.reason AS reason"
+)
+
+
 _KNOWLEDGE_NODES: LiteralString = (
     "MATCH (n) "
     "WHERE n.projection = 'knowledge' AND n.owner_table_id = $owner "
@@ -156,6 +239,19 @@ _KNOWLEDGE_EDGES: LiteralString = (
     "RETURN source.node_id AS source, target.node_id AS target, "
     "type(rel) AS kind, rel.reason AS reason"
 )
+
+
+class Neo4jProfileGraph:
+    """Writes the profile subgraph for one asset run."""
+
+    def __init__(self, projection: Neo4jProjection) -> None:
+        self._projection: Neo4jProjection = projection
+
+    def replace(self, document: ProfileSubgraphWrite) -> None:
+        """Replace the profile subgraph owned by ``document.owner_asset_id``."""
+        self._projection.replace_profile(document)
+
+
 class Neo4jColumnSubgraph:
     """Writes the column subgraph for one context build."""
 
@@ -178,6 +274,14 @@ class _CypherTransaction(Protocol):
     ) -> object:
         """Execute one statement."""
         ...
+
+
+def _apply_profile(tx: _CypherTransaction, document: ProfileSubgraphWrite) -> None:
+    """Run the profile subgraph statements inside one Neo4j transaction."""
+    query: LiteralString
+    parameters: dict[str, object]
+    for query, parameters in profile_statements(document):
+        tx.run(query, parameters)
 
 
 def _apply_knowledge(tx: _CypherTransaction, document: KnowledgeSubgraphWrite) -> None:

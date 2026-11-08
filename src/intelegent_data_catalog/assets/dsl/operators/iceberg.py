@@ -1,6 +1,5 @@
-"""Iceberg table and schema metadata, plus optional Spark profiles. No language model."""
+"""Iceberg table and schema metadata, plus Spark profiles. No language model."""
 
-import re
 from typing import ClassVar
 
 from pydantic import JsonValue, ValidationError
@@ -17,13 +16,24 @@ from intelegent_data_catalog.assets.dsl.operators.base import (
     _run_step,
 )
 from intelegent_data_catalog.assets.dsl.operators.render import (
-    as_json,
     heading,
     join_sections,
     json_block,
     table,
 )
-from intelegent_data_catalog.catalog.models import QueryResult
+from intelegent_data_catalog.assets.profiling.links import ColumnLinkInferrer
+from intelegent_data_catalog.assets.profiling.models import (
+    ColumnLink,
+    ProfileDocument,
+    ProfileScope,
+    TableProfile,
+)
+from intelegent_data_catalog.assets.profiling.profiler import (
+    IcebergTableProfiler,
+    TableProfileResult,
+)
+from intelegent_data_catalog.assets.profiling.publish import ProfilePublisher
+from intelegent_data_catalog.assets.profiling.sql import is_identifier
 from intelegent_data_catalog.catalog.repositories.polaris import (
     IcebergField,
     IcebergSchema,
@@ -33,22 +43,6 @@ from intelegent_data_catalog.catalog.repositories.polaris import (
     IcebergTableMetadata as IcebergMetadata,
 )
 from intelegent_data_catalog.exceptions import CatalogError
-
-_IDENT: re.Pattern[str] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_PRIMITIVE: frozenset[str] = frozenset(
-    {
-        "boolean",
-        "int",
-        "long",
-        "float",
-        "double",
-        "string",
-        "date",
-        "timestamp",
-        "timestamptz",
-        "binary",
-    },
-)
 
 
 class IcebergTableMetadata(Operator):
@@ -78,24 +72,21 @@ class IcebergTableProfile(Operator):
     max_columns: int = 40
 
     def execute(self, context: OperatorContext, observer: OperatorObserver | None = None) -> None:
-        """Count rows and summarize primitive columns."""
+        """Count rows, summarize primitive columns, and write the profile graph."""
 
         def collect() -> None:
             ref: IcebergTableSourceRef = _table_source(context)
-            raw: dict[str, JsonValue] = context.iceberg().load_table_raw(
-                ref.catalog,
-                ref.namespace,
-                ref.table,
+            result: TableProfileResult = IcebergTableProfiler(
+                context.iceberg(),
+                context.query(),
+            ).profile(ref, self.max_columns)
+            document: ProfileDocument = ProfileDocument(
+                scope=ProfileScope.TABLE,
+                scope_name=f"{ref.catalog}.{ref.namespace}.{ref.table}",
+                tables=[result.table],
+                columns_truncated=result.columns_truncated,
             )
-            columns: list[str] = _profile_columns(_metadata(raw))[: self.max_columns]
-            sql: str = _profile_sql(ref.catalog, ref.namespace, ref.table, columns)
-            result: QueryResult = context.query().query(sql)
-            data: dict[str, JsonValue] = {
-                "sql": sql,
-                "columns": [column.name for column in result.columns],
-                "rows": as_json(result.rows),
-            }
-            context.write_output("profile", _profile_markdown(ref, columns, result), data)
+            ProfilePublisher(context).publish(document)
 
         _run_step(observer, self.task_id, collect)
 
@@ -143,29 +134,46 @@ class IcebergSchemaProfile(Operator):
     task_id: ClassVar[str] = "iceberg_schema_profile"
     max_tables: int = 25
     max_columns: int = 20
+    infer_links: bool = True
 
     def execute(self, context: OperatorContext, observer: OperatorObserver | None = None) -> None:
-        """Run one profile query per table and store the combined markdown."""
+        """Run one profile query per table and store the combined profile."""
 
         def collect() -> None:
             ref: IcebergSchemaSourceRef = _schema_source(context)
-            names: list[str] = _selected(context, ref)[: self.max_tables]
-            sections: list[str] = [heading(1, f"Profile {ref.catalog}.{ref.namespace}")]
-            stored: dict[str, JsonValue] = {}
+            names: list[str] = _selected(context, ref)
+            shown: list[str] = names[: self.max_tables]
+            profiler: IcebergTableProfiler = IcebergTableProfiler(
+                context.iceberg(),
+                context.query(),
+            )
+            tables: list[TableProfile] = []
+            skipped: list[str] = []
+            columns_truncated: bool = False
             name: str
-            for name in names:
-                raw: dict[str, JsonValue] = context.iceberg().load_table_raw(
-                    ref.catalog,
-                    ref.namespace,
-                    name,
+            for name in shown:
+                if not _ident(ref.catalog, ref.namespace, name):
+                    skipped.append(name)
+                    continue
+                result: TableProfileResult = profiler.profile(
+                    _table_ref(ref, name),
+                    self.max_columns,
                 )
-                columns: list[str] = _profile_columns(_metadata(raw))[: self.max_columns]
-                sql: str = _profile_sql(ref.catalog, ref.namespace, name, columns)
-                result: QueryResult = context.query().query(sql)
-                table_ref: IcebergTableSourceRef = _table_ref(ref, name)
-                sections.append(_profile_markdown(table_ref, columns, result))
-                stored[name] = {"sql": sql, "rows": as_json(result.rows)}
-            context.write_output("profile", join_sections(sections), stored)
+                tables.append(result.table)
+                columns_truncated = columns_truncated or result.columns_truncated
+            links: list[ColumnLink] = []
+            if self.infer_links:
+                links = ColumnLinkInferrer().infer(tables)
+            document: ProfileDocument = ProfileDocument(
+                scope=ProfileScope.SCHEMA,
+                scope_name=f"{ref.catalog}.{ref.namespace}",
+                tables=tables,
+                links=links,
+                tables_truncated=len(names) > len(shown),
+                columns_truncated=columns_truncated,
+                skipped=skipped,
+            )
+            ProfilePublisher(context).publish(document)
 
         _run_step(observer, self.task_id, collect)
 
@@ -254,70 +262,8 @@ def _table_markdown(ref: IcebergTableSourceRef, raw: dict[str, JsonValue]) -> st
     )
 
 
-def _profile_columns(metadata: IcebergMetadata) -> list[str]:
-    schema: IcebergSchema | None = _current_schema(metadata)
-    if schema is None:
-        return []
-    found: list[str] = []
-    field: IcebergField
-    for field in schema.fields:
-        if not isinstance(field.field_type, str) or field.field_type not in _PRIMITIVE:
-            continue
-        if _IDENT.fullmatch(field.name) is None:
-            continue
-        found.append(field.name)
-    return found
-
-
-def _profile_sql(catalog: str, namespace: str, table: str, columns: list[str]) -> str:
-    _require_ident(catalog, "catalog")
-    _require_ident(namespace, "namespace")
-    _require_ident(table, "table")
-    pieces: list[str] = ["COUNT(*) AS row_count"]
-    column: str
-    for column in columns:
-        pieces.append(f"SUM(CASE WHEN {column} IS NULL THEN 1 ELSE 0 END) AS {column}__nulls")
-        pieces.append(f"approx_count_distinct({column}) AS {column}__distinct")
-        pieces.append(f"CAST(MIN({column}) AS STRING) AS {column}__min")
-        pieces.append(f"CAST(MAX({column}) AS STRING) AS {column}__max")
-    select_list: str = ", ".join(pieces)
-    return f"SELECT {select_list} FROM {catalog}.{namespace}.{table}"
-
-
-def _profile_markdown(
-    ref: IcebergTableSourceRef,
-    columns: list[str],
-    result: QueryResult,
-) -> str:
-    if len(result.rows) == 0:
-        return join_sections([heading(2, ref.table), "Profile returned no rows."])
-    values: dict[str, str] = {}
-    index: int
-    for index, column in enumerate(result.columns):
-        cell: JsonValue = result.rows[0][index] if index < len(result.rows[0]) else None
-        values[column.name] = "" if cell is None else str(cell)
-    rows: list[list[str]] = [
-        [
-            column,
-            values.get(f"{column}__nulls", ""),
-            values.get(f"{column}__distinct", ""),
-            values.get(f"{column}__min", ""),
-            values.get(f"{column}__max", ""),
-        ]
-        for column in columns
-    ]
-    return join_sections(
-        [
-            heading(2, f"Profile {ref.catalog}.{ref.namespace}.{ref.table}"),
-            f"Rows: {values.get('row_count', '')}",
-            table(["column", "nulls", "approx distinct", "min", "max"], rows),
-        ],
-    )
-
-
-def _require_ident(value: str, label: str) -> None:
-    if _IDENT.fullmatch(value) is None:
-        raise CatalogError(f"cannot profile {label} `{value}`: name must be a simple identifier")
+def _ident(catalog: str, namespace: str, table: str) -> bool:
+    return is_identifier(catalog) and is_identifier(namespace) and is_identifier(table)
 
 
 def _note(total: int, shown: int) -> str:

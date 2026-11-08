@@ -1,6 +1,7 @@
 """Asset reads and manual runs."""
 
 import json
+from typing import Protocol
 from uuid import UUID
 
 from pydantic import JsonValue, ValidationError
@@ -16,12 +17,19 @@ from intelegent_data_catalog.assets.execution.models import (
 )
 from intelegent_data_catalog.assets.execution.runs import AssetRunReader
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
+from intelegent_data_catalog.assets.profiling.models import (
+    PROFILE_TASK_IDS,
+    AssetProfileRead,
+    ProfileDocument,
+)
 from intelegent_data_catalog.assets.repository import AssetRepository
 from intelegent_data_catalog.exceptions import (
     ConflictError,
     EntityNotFoundError,
+    GraphUnavailableError,
     ValidationAppError,
 )
+from intelegent_data_catalog.graph.document import GraphView
 from intelegent_data_catalog.persistence.clock import utc_now
 from intelegent_data_catalog.persistence.enums import (
     AssetKind,
@@ -42,6 +50,13 @@ _BUSY: frozenset[str] = frozenset(
 )
 
 
+class ProfileGraphReader(Protocol):
+    """Reads the Neo4j profile subgraph for one asset."""
+
+    def read_profile(self, owner_asset_id: str) -> GraphView:
+        """Return the subgraph owned by ``owner_asset_id``."""
+
+
 class AssetService:
     """Lists assets, their runs and markdown, and queues a manual run."""
 
@@ -50,10 +65,12 @@ class AssetService:
         session: Session,
         store: ObjectStore,
         executor: OperatorExecutor,
+        graphs: ProfileGraphReader | None,
     ) -> None:
         self._session: Session = session
         self._store: ObjectStore = store
         self._executor: OperatorExecutor = executor
+        self._graphs: ProfileGraphReader | None = graphs
         self._assets: AssetRepository = AssetRepository(session)
         self._runs: AssetRunReader = AssetRunReader(session)
 
@@ -101,6 +118,34 @@ class AssetService:
         """Return stored markdown results, newest first."""
         self._require(asset_id)
         return [_output(row) for row in self._assets.outputs(asset_id)]
+
+    def profile(self, asset_id: UUID) -> AssetProfileRead:
+        """Return the newest profile document and its markdown."""
+        self._require(asset_id)
+        row: AssetOutputRow | None = self._assets.latest_output(asset_id, PROFILE_TASK_IDS)
+        if row is None or row.json_key is None:
+            raise EntityNotFoundError("asset profile", str(asset_id))
+        markdown: str = self._store.get(row.markdown_key).decode("utf-8", errors="replace")
+        raw: object = json.loads(self._store.get(row.json_key).decode("utf-8"))
+        try:
+            document: ProfileDocument = ProfileDocument.model_validate(raw)
+        except ValidationError as err:
+            raise ValidationAppError("asset profile document is invalid") from err
+        return AssetProfileRead(
+            output_id=row.id,
+            asset_id=row.asset_id,
+            run_id=row.run_id,
+            created_at=row.created_at,
+            document=document,
+            markdown=markdown,
+        )
+
+    def profile_graph(self, asset_id: UUID) -> GraphView:
+        """Return the Neo4j profile subgraph for one asset."""
+        self._require(asset_id)
+        if self._graphs is None:
+            raise GraphUnavailableError("graph projection is not configured")
+        return self._graphs.read_profile(str(asset_id))
 
     def output(self, asset_id: UUID, output_id: UUID) -> AssetOutputDetail:
         """Return one markdown document and its JSON sidecar."""

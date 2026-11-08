@@ -14,7 +14,9 @@ from intelegent_data_catalog.assets.execution.models import (
     AssetRunRead,
     AssetRunTaskDetail,
 )
+from intelegent_data_catalog.assets.profiling.models import AssetProfileRead
 from intelegent_data_catalog.assets.service import AssetService
+from intelegent_data_catalog.graph.document import GraphView
 from intelegent_data_catalog.persistence.enums import AssetKind
 
 router: APIRouter = APIRouter()
@@ -77,6 +79,18 @@ def read_asset_run_task(
     """Return one task log."""
     found: AssetService = service
     return found.run_task(asset_id, run_id, task_id)
+
+
+@router.get("/assets/{asset_id}/profile", response_model=AssetProfileRead)
+def read_asset_profile(asset_id: UUID, service: AssetServiceDep) -> AssetProfileRead:
+    """Return the newest data profile for one asset."""
+    return service.profile(asset_id)
+
+
+@router.get("/assets/{asset_id}/profile/graph", response_model=GraphView)
+def read_asset_profile_graph(asset_id: UUID, service: AssetServiceDep) -> GraphView:
+    """Return the Neo4j profile subgraph for one asset."""
+    return service.profile_graph(asset_id)
 
 
 @router.get("/assets/{asset_id}/outputs", response_model=list[AssetOutputRead])

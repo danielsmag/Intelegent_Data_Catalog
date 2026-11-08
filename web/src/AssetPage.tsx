@@ -6,24 +6,34 @@ import {
   fetchAsset,
   fetchAssetOutput,
   fetchAssetOutputs,
+  fetchAssetProfile,
+  fetchAssetProfileGraph,
   fetchAssetRuns,
   fetchAssetRunTask,
   runAsset,
   type AssetKind,
   type AssetOutput,
   type AssetOutputDetail,
+  type AssetProfile,
   type AssetRecord,
   type AssetRun,
   type AssetRunTaskDetail,
   type AssetRunTaskSummary,
+  type ColumnLink,
+  type ColumnProfile,
+  type ProfileDocument,
+  type TableProfile,
 } from "./assetsApi"
 import { useEditorTitle } from "./editorSlots"
+import type { GraphViewRecord } from "./registryApi"
+import { SubgraphView } from "./SubgraphView"
 import { useTabParam } from "./useTabParam"
 
-const TABS = ["overview", "outputs", "runs"] as const
+const TABS = ["overview", "profile", "outputs", "runs"] as const
 type AssetTab = (typeof TABS)[number]
 const TAB_LABEL: Record<AssetTab, string> = {
   overview: "Overview",
+  profile: "Profile",
   outputs: "Outputs",
   runs: "Runs",
 }
@@ -31,6 +41,7 @@ const KIND_LABEL: Record<AssetKind, string> = {
   AIRFLOW_INSTANCE: "Airflow instance",
   ICEBERG_TABLE: "Iceberg table",
   ICEBERG_SCHEMA: "Iceberg schema",
+  ICEBERG_CATALOG: "Iceberg catalog",
   GITHUB_REPO: "GitHub repository",
 }
 const POLL_MS: number = 2000
@@ -120,7 +131,7 @@ export function AssetPage(): ReactElement {
       </header>
       {error !== null ? <p className="error-text agent-alert">{error}</p> : null}
       <div className="tabs" role="tablist" aria-label="Asset sections">
-        {TABS.map((item: AssetTab) => (
+        {visibleTabs(asset).map((item: AssetTab) => (
           <button
             key={item}
             type="button"
@@ -136,6 +147,7 @@ export function AssetPage(): ReactElement {
         ))}
       </div>
       {tab === "overview" && asset !== null ? <Overview asset={asset} /> : null}
+      {tab === "profile" ? <Profile assetId={assetId} kind={asset?.kind ?? null} /> : null}
       {tab === "outputs" ? <Outputs assetId={assetId} /> : null}
       {tab === "runs" ? <Runs assetId={assetId} refreshKey={refreshKey} /> : null}
     </section>
@@ -211,6 +223,186 @@ function Overview(props: { asset: AssetRecord }): ReactElement {
           {sourceRows.length === 0 ? <p className="note">No source fields.</p> : <FactList rows={sourceRows} />}
         </aside>
       </div>
+    </div>
+  )
+}
+
+function Profile(props: { assetId: string; kind: AssetKind | null }): ReactElement {
+  const [profile, setProfile] = useState<AssetProfile | null>(null)
+  const [missing, setMissing] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
+  const [graph, setGraph] = useState<GraphViewRecord | null>(null)
+  const [graphNote, setGraphNote] = useState<string | null>(null)
+  const enabled: boolean = props.kind !== null && isIceberg(props.kind)
+  useEffect(() => {
+    if (!enabled) {
+      setProfile(null)
+      setGraph(null)
+      return
+    }
+    const controller: AbortController = new AbortController()
+    setMissing(false)
+    setError(null)
+    void fetchAssetProfile(props.assetId, controller.signal)
+      .then((found: AssetProfile) => {
+        setProfile(found)
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        const message: string = err instanceof Error ? err.message : "Could not load profile"
+        if (message.toLowerCase().includes("not found")) {
+          setMissing(true)
+          setProfile(null)
+          return
+        }
+        setError(message)
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [props.assetId, enabled])
+  useEffect(() => {
+    if (profile === null || !profile.document.graph.written) {
+      setGraph(null)
+      setGraphNote(profile?.document.graph.error ?? null)
+      return
+    }
+    const controller: AbortController = new AbortController()
+    setGraphNote(null)
+    void fetchAssetProfileGraph(props.assetId, controller.signal)
+      .then((found: GraphViewRecord) => {
+        setGraph(found)
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        const message: string = err instanceof Error ? err.message : "Could not load profile graph"
+        setGraph(null)
+        setGraphNote(message)
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [props.assetId, profile])
+  if (props.kind === null) {
+    return <p className="note">Loading profile…</p>
+  }
+  if (!enabled) {
+    return <p className="note">Profiling applies to Iceberg tables, schemas, and catalogs.</p>
+  }
+  if (error !== null) {
+    return <p className="error-text">{error}</p>
+  }
+  if (missing || profile === null) {
+    return <p className="note">{missing ? "No profile yet. Run the asset." : "Loading profile…"}</p>
+  }
+  const document: ProfileDocument = profile.document
+  return (
+    <div className="asset-profile">
+      <ul className="agent-stats">
+        <li>
+          <span>Tables</span>
+          <strong>{document.tables.length}</strong>
+        </li>
+        <li>
+          <span>Rows</span>
+          <strong>{document.tables.reduce((sum: number, item: TableProfile) => sum + (item.row_count ?? 0), 0)}</strong>
+        </li>
+        <li>
+          <span>Columns</span>
+          <strong>{document.tables.reduce((sum: number, item: TableProfile) => sum + item.columns.length, 0)}</strong>
+        </li>
+        <li>
+          <span>Candidate keys</span>
+          <strong>{candidateKeyCount(document)}</strong>
+        </li>
+        <li>
+          <span>Links</span>
+          <strong>{document.links.length}</strong>
+        </li>
+      </ul>
+      {profileNotes(document).map((note: string) => (
+        <p key={note} className="note">
+          {note}
+        </p>
+      ))}
+      {document.tables.map((item: TableProfile) => (
+        <section key={`${item.catalog}.${item.namespace}.${item.table}`} className="agent-card">
+          <h2>{`${item.catalog}.${item.namespace}.${item.table}`}</h2>
+          <p className="agent-prose">{`Rows: ${item.row_count ?? "—"}`}</p>
+          <div className="asset-profile-scroll">
+            <table className="columns">
+              <thead>
+                <tr>
+                  <th>Column</th>
+                  <th>Type</th>
+                  <th>Nulls</th>
+                  <th>Distinct</th>
+                  <th>Unique</th>
+                  <th>Min</th>
+                  <th>Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                {item.columns.map((column: ColumnProfile) => (
+                  <tr key={column.name}>
+                    <td>
+                      {column.name}
+                      {column.candidate_key ? <span className="asset-profile-key">key</span> : null}
+                    </td>
+                    <td>{column.iceberg_type}</td>
+                    <td>{percent(column.null_ratio)}</td>
+                    <td>{countText(column.distinct_count)}</td>
+                    <td>{percent(column.uniqueness_ratio)}</td>
+                    <td>{column.minimum ?? "—"}</td>
+                    <td>{column.maximum ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
+      <section className="agent-card">
+        <h2>Links</h2>
+        {document.links.length === 0 ? <p className="note">No inferred links.</p> : null}
+        {document.links.length > 0 ? (
+          <div className="asset-profile-scroll">
+            <table className="columns">
+              <thead>
+                <tr>
+                  <th>Kind</th>
+                  <th>Source</th>
+                  <th>Target</th>
+                  <th>Score</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {document.links.map((link: ColumnLink) => (
+                  <tr key={`${link.kind}-${link.source}-${link.target}`}>
+                    <td>{titleCase(link.kind)}</td>
+                    <td className="mono">{link.source}</td>
+                    <td className="mono">{link.target}</td>
+                    <td>{link.score.toFixed(2)}</td>
+                    <td>{link.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+      <section className="agent-card asset-profile-graph" aria-label="Profile graph">
+        <h2>Graph</h2>
+        {graphNote !== null ? <p className="note">{graphNote}</p> : null}
+        {document.graph.written && graphNote === null ? (
+          <SubgraphView graph={graph} error={null} emptyMessage="Profile graph has no nodes yet." />
+        ) : null}
+      </section>
     </div>
   )
 }
@@ -589,9 +781,61 @@ function executionNote(kind: AssetKind): string {
     return "Each run reads live Airflow metadata — version, health, DAGs, pools, providers, and import errors — and stores a markdown snapshot."
   }
   if (kind === "ICEBERG_TABLE") {
-    return "Each run reads Iceberg table metadata and stores a markdown snapshot. A profile operator, when configured, adds column statistics."
+    return "Each run reads Iceberg table metadata and stores a markdown snapshot. A profile operator adds column statistics, candidate keys, and a Neo4j subgraph."
   }
-  return "Each run reads Iceberg namespace metadata and stores a markdown snapshot of the schema and its tables."
+  if (kind === "ICEBERG_CATALOG") {
+    return "Each run reads every namespace in the Iceberg catalog. A profile operator samples tables, infers column links, and writes a Neo4j subgraph."
+  }
+  return "Each run reads Iceberg namespace metadata and stores a markdown snapshot. A profile operator adds per-table statistics and inferred column links."
+}
+
+function visibleTabs(asset: AssetRecord | null): readonly AssetTab[] {
+  if (asset !== null && isIceberg(asset.kind)) {
+    return TABS
+  }
+  return TABS.filter((item: AssetTab) => item !== "profile")
+}
+
+function isIceberg(kind: AssetKind): boolean {
+  return kind === "ICEBERG_TABLE" || kind === "ICEBERG_SCHEMA" || kind === "ICEBERG_CATALOG"
+}
+
+function candidateKeyCount(document: ProfileDocument): number {
+  return document.tables.reduce(
+    (sum: number, item: TableProfile) => sum + item.columns.filter((column: ColumnProfile) => column.candidate_key).length,
+    0,
+  )
+}
+
+function profileNotes(document: ProfileDocument): string[] {
+  const notes: string[] = []
+  if (document.namespaces_truncated) {
+    notes.push("Namespace list truncated.")
+  }
+  if (document.tables_truncated) {
+    notes.push("Table list truncated.")
+  }
+  if (document.columns_truncated) {
+    notes.push("Column list truncated.")
+  }
+  if (document.skipped.length > 0) {
+    notes.push(`Skipped: ${document.skipped.join(", ")}`)
+  }
+  return notes
+}
+
+function percent(value: number | null): string {
+  if (value === null) {
+    return "—"
+  }
+  return `${(value * 100).toFixed(1)}%`
+}
+
+function countText(value: number | null): string {
+  if (value === null) {
+    return "—"
+  }
+  return String(value)
 }
 
 function titleCase(value: string): string {

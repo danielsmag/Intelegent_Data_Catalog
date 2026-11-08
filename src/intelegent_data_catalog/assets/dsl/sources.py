@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from intelegent_data_catalog.assets.definitions.models import (
     AirflowInstanceSourceRef,
     GitHubRepoSourceRef,
+    IcebergCatalogSourceRef,
     IcebergSchemaSourceRef,
     IcebergTableSourceRef,
     SourceRef,
@@ -76,6 +77,22 @@ class IcebergSchema(Source):
         return IcebergSchemaSourceRef(
             catalog=self.catalog.strip(),
             namespace=self.namespace.strip(),
+            include=None if self.include is None else list(self.include),
+            exclude=list(self.exclude),
+        )
+
+
+class IcebergCatalog(Source):
+    """Every namespace in one Iceberg catalog."""
+
+    catalog: str = Field(min_length=1, max_length=512)
+    include: list[str] | None = None
+    exclude: list[str] = Field(default_factory=list)
+
+    def to_ref(self) -> IcebergCatalogSourceRef:
+        """Return the stored catalog reference."""
+        return IcebergCatalogSourceRef(
+            catalog=self.catalog.strip(),
             include=None if self.include is None else list(self.include),
             exclude=list(self.exclude),
         )

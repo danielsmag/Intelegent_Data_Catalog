@@ -197,6 +197,10 @@ class PolarisClient:
                 return names
         raise PolarisError(f"polaris namespace listing for {catalog} exceeded {_MAX_PAGES} pages")
 
+    def list_namespaces(self, catalog: str) -> list[str]:
+        """Return namespace names for one catalog."""
+        return self.list_namespace_names(catalog)
+
     def list_table_names(self, catalog: str, namespace: str) -> list[str]:
         """Return table names in one namespace, following Iceberg page tokens."""
         names: list[str] = []

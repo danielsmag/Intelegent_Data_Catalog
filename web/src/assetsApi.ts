@@ -1,6 +1,7 @@
 import { apiFetch, readDetail } from "./http"
+import type { GraphViewRecord } from "./registryApi"
 
-export type AssetKind = "AIRFLOW_INSTANCE" | "ICEBERG_TABLE" | "ICEBERG_SCHEMA" | "GITHUB_REPO"
+export type AssetKind = "AIRFLOW_INSTANCE" | "ICEBERG_TABLE" | "ICEBERG_SCHEMA" | "ICEBERG_CATALOG" | "GITHUB_REPO"
 export type AssetStatus = "ACTIVE" | "MISSING"
 export type AssetRunStatus = "queued" | "running" | "succeeded" | "failed"
 export type AssetRunTrigger = "apply" | "schedule" | "manual"
@@ -84,6 +85,68 @@ export type AssetOutputDetail = AssetOutput & {
   data: unknown
 }
 
+export type ColumnProfile = {
+  name: string
+  iceberg_type: string
+  null_count: number | null
+  null_ratio: number | null
+  distinct_count: number | null
+  uniqueness_ratio: number | null
+  minimum: string | null
+  maximum: string | null
+  mean: number | null
+  stddev: number | null
+  avg_length: number | null
+  max_length: number | null
+  true_count: number | null
+  candidate_key: boolean
+}
+
+export type TableProfile = {
+  catalog: string
+  namespace: string
+  table: string
+  row_count: number | null
+  columns: ColumnProfile[]
+  columns_truncated: boolean
+  sql: string
+  profiled_at: string
+}
+
+export type ColumnLinkKind = "CANDIDATE_REFERENCE" | "SAME_NAME"
+
+export type ColumnLink = {
+  source: string
+  target: string
+  kind: ColumnLinkKind
+  score: number
+  reason: string
+}
+
+export type ProfileDocument = {
+  scope: "table" | "schema" | "catalog"
+  scope_name: string
+  tables: TableProfile[]
+  links: ColumnLink[]
+  tables_truncated: boolean
+  columns_truncated: boolean
+  namespaces_truncated: boolean
+  skipped: string[]
+  graph: {
+    written: boolean
+    error: string | null
+  }
+}
+
+export type AssetProfile = {
+  output_id: string
+  asset_id: string
+  run_id: string
+  created_at: string
+  document: ProfileDocument
+  markdown: string
+}
+
 export type AssetSort = "name" | "kind" | "updated"
 
 export type AssetQuery = {
@@ -162,6 +225,22 @@ export async function fetchAssetOutputs(assetId: string, signal?: AbortSignal): 
     throw new Error(await readDetail(response))
   }
   return (await response.json()) as AssetOutput[]
+}
+
+export async function fetchAssetProfile(assetId: string, signal?: AbortSignal): Promise<AssetProfile> {
+  const response: Response = await apiFetch(`/api/v1/assets/${assetId}/profile`, { signal })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as AssetProfile
+}
+
+export async function fetchAssetProfileGraph(assetId: string, signal?: AbortSignal): Promise<GraphViewRecord> {
+  const response: Response = await apiFetch(`/api/v1/assets/${assetId}/profile/graph`, { signal })
+  if (!response.ok) {
+    throw new Error(await readDetail(response))
+  }
+  return (await response.json()) as GraphViewRecord
 }
 
 export async function fetchAssetOutput(

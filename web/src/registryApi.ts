@@ -68,6 +68,7 @@ export type GraphNodeRecord = {
   label: string
   catalog_id: string | null
   resolved: boolean
+  properties?: Record<string, unknown>
 }
 
 export type GraphEdgeRecord = {

@@ -15,6 +15,7 @@ from intelegent_data_catalog.assets.execution.outputs import AssetOutputStore
 from intelegent_data_catalog.assets.execution.runs import AssetRunRecorder, asset_run_log
 from intelegent_data_catalog.assets.execution.workload import OperatorWorkload
 from intelegent_data_catalog.exceptions import CatalogError
+from intelegent_data_catalog.graph.neo4j_store import Neo4jProfileGraph, Neo4jProjection
 from intelegent_data_catalog.jobs.trace import (
     BuildTraceSubject,
     RedisBuildTrace,
@@ -111,6 +112,7 @@ class AssetOperatorRunner:
             github=self._container.github_client(),
             http_client=self._container.http_client(),
             airflow_settings=self._container.settings().airflow,
+            profile_graph=_profile_graph(self._container.neo4j_projection()),
         )
         subject: BuildTraceSubject = BuildTraceSubject(run_id, "asset", asset.id, asset.name)
         broker_url: str = self._container.settings().celery.broker_url
@@ -165,6 +167,12 @@ class AssetOperatorRunner:
                 item.next_run_at = None
         item.updated_at = now
         session.commit()
+
+
+def _profile_graph(projection: Neo4jProjection | None) -> Neo4jProfileGraph | None:
+    if projection is None:
+        return None
+    return Neo4jProfileGraph(projection)
 
 
 def _clip(message: str | None) -> str | None:

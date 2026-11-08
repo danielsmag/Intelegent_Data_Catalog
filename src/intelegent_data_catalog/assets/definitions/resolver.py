@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from intelegent_data_catalog.assets.definitions.models import (
     AirflowInstanceSourceRef,
     GitHubRepoSourceRef,
+    IcebergCatalogSourceRef,
     IcebergSchemaSourceRef,
     IcebergTableSourceRef,
     SourceRef,
@@ -44,6 +45,8 @@ class SourceResolver:
                 return self._table(source)
             case IcebergSchemaSourceRef():
                 return self._schema(source)
+            case IcebergCatalogSourceRef():
+                return self._catalog(source)
             case GitHubRepoSourceRef():
                 return self._github_repo(source)
 
@@ -60,6 +63,13 @@ class SourceResolver:
             self._iceberg.load_table_raw(source.catalog, source.namespace, source.table)
         except TableNotFoundError as err:
             return UnresolvedSource(str(err))
+        except PolarisError as err:
+            return UnresolvedSource(str(err))
+        return None
+
+    def _catalog(self, source: IcebergCatalogSourceRef) -> UnresolvedSource | None:
+        try:
+            self._iceberg.list_namespaces(source.catalog)
         except PolarisError as err:
             return UnresolvedSource(str(err))
         return None

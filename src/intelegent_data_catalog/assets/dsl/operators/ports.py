@@ -5,6 +5,7 @@ from typing import Protocol
 from pydantic import JsonValue
 
 from intelegent_data_catalog.catalog.models import QueryResult
+from intelegent_data_catalog.graph.profile_subgraph import ProfileSubgraphWrite
 from intelegent_data_catalog.sources.airflow.models import (
     AirflowAsset,
     AirflowDag,
@@ -65,6 +66,9 @@ class AirflowReader(Protocol):
 class IcebergReader(Protocol):
     """Polaris reads used by the Iceberg operators."""
 
+    def list_namespaces(self, catalog: str) -> list[str]:
+        """Return namespace names in one catalog."""
+
     def list_table_names(self, catalog: str, namespace: str) -> list[str]:
         """Return table names in one namespace."""
 
@@ -77,6 +81,13 @@ class TableQuery(Protocol):
 
     def query(self, sql: str) -> QueryResult:
         """Run one read-only statement."""
+
+
+class ProfileGraphWriter(Protocol):
+    """Replaces the Neo4j profile subgraph owned by one asset."""
+
+    def replace(self, document: ProfileSubgraphWrite) -> None:
+        """Replace the subgraph. Catalog and lineage nodes stay."""
 
 
 class GitHubReader(Protocol):

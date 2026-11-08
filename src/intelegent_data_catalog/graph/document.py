@@ -1,6 +1,6 @@
 """In-memory graph document and bounded traversal. Neo4j stores the same shape."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 class GraphNode(BaseModel):
@@ -13,6 +13,7 @@ class GraphNode(BaseModel):
     label: str
     catalog_id: str | None = None
     resolved: bool = True
+    properties: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class GraphEdge(BaseModel):
@@ -46,9 +47,19 @@ class GraphView(BaseModel):
     truncated: bool
 
 
-_HIERARCHY: frozenset[str] = frozenset({"HAS_SCOPE", "HAS_TABLE", "HAS_COLUMN"})
+_HIERARCHY: frozenset[str] = frozenset(
+    {"HAS_SCOPE", "HAS_CATALOG", "HAS_SCHEMA", "HAS_TABLE", "HAS_COLUMN"},
+)
 _RELATIONSHIP: frozenset[str] = frozenset(
-    {"REFERENCES", "RELATED_TO", "JOINS_ON", "DERIVED_FROM", "SAME_MEANING"}
+    {
+        "REFERENCES",
+        "RELATED_TO",
+        "JOINS_ON",
+        "DERIVED_FROM",
+        "SAME_MEANING",
+        "CANDIDATE_REFERENCE",
+        "SAME_NAME",
+    },
 )
 _LINEAGE: frozenset[str] = frozenset({"INPUT_TO", "OUTPUTS", "READS", "WRITES", "MENTIONS"})
 

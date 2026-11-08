@@ -406,6 +406,7 @@ def get_asset_service(
         session,
         container.asset_definition_store(),
         build_asset_operator_executor(container.settings()),
+        container.neo4j_projection(),
     )
     try:
         yield service

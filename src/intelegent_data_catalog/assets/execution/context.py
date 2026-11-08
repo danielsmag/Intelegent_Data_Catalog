@@ -17,6 +17,7 @@ from intelegent_data_catalog.assets.dsl.operators.ports import (
     AirflowReader,
     GitHubReader,
     IcebergReader,
+    ProfileGraphWriter,
     TableQuery,
 )
 from intelegent_data_catalog.assets.execution.outputs import AssetOutputStore
@@ -44,6 +45,7 @@ class CatalogOperatorContext(OperatorContext):
         github: GitHubReader,
         http_client: httpx.Client,
         airflow_settings: AirflowSettings,
+        profile_graph: ProfileGraphWriter | None = None,
     ) -> None:
         super().__init__(asset.id, asset.key, logger, force=force)
         self._session: Session = session
@@ -52,6 +54,7 @@ class CatalogOperatorContext(OperatorContext):
         self._iceberg: IcebergReader = iceberg
         self._query: TableQuery = query
         self._github: GitHubReader = github
+        self._profile_graph: ProfileGraphWriter | None = profile_graph
         self._http: httpx.Client = http_client
         self._airflow_settings: AirflowSettings = airflow_settings
         self._airflow: AirflowClient | None = None
@@ -114,6 +117,10 @@ class CatalogOperatorContext(OperatorContext):
     def github(self) -> GitHubReader:
         """Return the GitHub reader."""
         return self._github
+
+    def profile_graph(self) -> ProfileGraphWriter | None:
+        """Return the profile-graph writer, or none when Neo4j is disabled."""
+        return self._profile_graph
 
     @property
     def asset_row_id(self) -> UUID:
